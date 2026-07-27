@@ -1,0 +1,27 @@
+{
+  "name": "ppt-generator-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server that transforms HTML templates into deliverable pages (PPT/bid/report) via LLM orchestration.",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "start": "npx tsx src/server.ts",
+    "dev": "npx tsx watch src/server.ts",
+    "demo": "npx tsx tests/demo.ts",
+    "typecheck": "npx tsc --noEmit"
+  },
+  "keywords": ["mcp", "ppt-generator", "template", "llm", "agent"],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "jsdom": "^29.1.1",
+    "openai": "^6.49.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^28.0.3",
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  }
+}

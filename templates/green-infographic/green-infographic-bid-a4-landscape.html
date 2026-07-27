@@ -1,0 +1,204 @@
+<!--
+  =============================================================================
+  @name        绿色信息图型标书页（A4横向）
+  @slug        green-infographic-bid-a4-landscape
+  @description
+               适用于标书技术方案、项目建议书、方案汇报等服务类文档的图文展示。
+               A4 横向单页，绿色商务配色，12 列网格系统。
+               核心布局：左侧正文卡片(span-8) + 右侧可视化组件(span-4) 配对展示，
+               将密集文字转化为信息图，一页一主题，适合多页连续生成。
+               正文卡片承载段落论述，可视化组件包括图标流程、图片卡片、时间线、
+               能力面板、组织架构图和总结条，可根据内容选择使用。
+               图标使用 Tabler Icons（MIT），图片可通过文生图 API 生成。
+  @usecase     标书技术方案 | 项目建议书 | 方案汇报 | 服务方案展示 | 商务提案
+  @format      A4横向 297×210mm 单页
+  @layout      12列网格 grid-template-columns: repeat(12, 1fr)
+               正文卡片 span-8（左） + 可视化组件 span-4（右）配对
+               页面底部 summary-band span-12 全宽总结条
+  @components  text-card 正文卡片 | icon-flow 图标流程(2-6步) | image-card 图片卡片
+               timeline 四阶段时间线 | capability-panel 能力面板(3列网格)
+               org-chart 纵向组织架构 | summary-band 总结条
+  @icons       calendar | scissors | search | clipboard-check | file-description
+               users-group | truck | shield-check | leaf | sun | droplet
+               snowflake | wind | bug | alert-triangle | user
+  @style       绿色商务主题（--green-900 #0B5A2A）| 圆角卡片 border-radius 2.5mm
+               渐变章节条 | 彩色时间线（春夏秋冬四季色） | 白色背景 #fff
+  @lang        zh-CN
+  @since       2026-07-24
+  =============================================================================
+
+  LLM 替换规则
+  ────────────
+  1. <xxx>示例文字</xxx>
+     → 去除外层 XML 标签，将内部文字替换为生成内容。
+     例：<component-title>卡片标题</component-title> → <h4 class="component-title">实际标题</h4>
+
+  2. <icon name="xxx">描述</icon>
+     → 替换为 <img src="./assets/icons/xxx.svg" alt="描述"> 。
+     也可根据"描述"文本调用文生图 API 生成新图标。
+
+  3. <figures>图片提示词</figures>
+     → 根据左侧正文内容提炼文生图提示词，替换为 <img src="图片路径" alt="图片描述">。
+
+  4. 属性中的占位符（如 data-page-number="N"、aria-label="流程名称"）
+     → 替换属性值为实际内容。
+
+  5. 输出不得残留任何 <xxx>...</xxx> 形式的 XML 标签。
+  =============================================================================
+-->
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="template-name" content="绿色信息图型标书页（A4横向）">
+  <meta name="template-slug" content="green-infographic-bid-a4-landscape">
+  <meta name="template-description" content="适用于标书技术方案、项目建议书等需要图文并茂展示的场景。A4横向单页，绿色商务主题，12列网格，正文卡片与可视化组件左右配对布局。">
+  <meta name="template-usecase" content="标书技术方案, 项目建议书, 方案汇报, 服务方案展示, 商务提案">
+  <meta name="template-format" content="A4横向 297×210mm">
+  <title><page-title>第N页｜页面主题标题</page-title></title>
+  <link rel="stylesheet" href="./green-infographic-theme.css">
+</head>
+<body>
+  <article class="bid-page" data-page-number="N" data-template="green-infographic">
+    <header class="page-header">
+      <h1 class="section-title"><section-title>第一分节：分节名称</section-title></h1>
+      <div class="part-block">
+        <div class="part-number"><part-number>PART.N</part-number></div>
+        <div class="part-label"><part-label>部分标签</part-label></div>
+        <div class="part-swatches" aria-hidden="true">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+      </div>
+    </header>
+
+    <div class="chapter-band">
+      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
+      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
+    </div>
+
+    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
+
+    <main class="body-grid">
+      <!-- Row 1: text-card(span-8) + icon-process(span-4) -->
+      <section class="component text-card span-8" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题一</component-title></h4>
+        <p data-source-paragraph="1"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component icon-process span-4" data-component="icon-process" aria-label="流程名称">
+        <div class="process-step">
+          <icon name="calendar">日历图标</icon>
+          <span><step-label>步骤一</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="scissors">剪刀图标</icon>
+          <span><step-label>步骤二</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="search">搜索图标</icon>
+          <span><step-label>步骤三</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="clipboard-check">剪贴板图标</icon>
+          <span><step-label>步骤四</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="file-description">文件图标</icon>
+          <span><step-label>步骤五</step-label></span>
+        </div>
+      </section>
+
+      <!-- Row 2: text-card(span-8) + image-card(span-4) -->
+      <section class="component text-card span-8" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题二</component-title></h4>
+        <p data-source-paragraph="2"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <figure class="component image-card span-4" data-component="image-card" data-asset-ref="img-xxxxxxxxxxxx">
+        <figures>根据左侧「<figure-ref>卡片标题二</figure-ref>」正文内容提炼图片提示词：提取段落中的关键场景、主体对象和典型动作，描述构图方式（如俯瞰/近景/特写）、光线氛围和画面风格（写实摄影/示意图/图表），确保图片与正文相互印证。</figures>
+        <figcaption class="image-caption"><image-caption>根据左侧卡片标题提炼的图片说明（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+
+      <!-- Row 3: text-card(span-8) + timeline(span-4) -->
+      <section class="component text-card span-8" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题三</component-title></h4>
+        <p data-source-paragraph="3"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component timeline span-4" data-component="timeline" aria-label="时间线名称">
+        <div class="timeline-stage season-spring"><strong><stage-number>01</stage-number></strong><span><stage-label>阶段一</stage-label></span></div>
+        <div class="timeline-stage season-summer"><strong><stage-number>02</stage-number></strong><span><stage-label>阶段二</stage-label></span></div>
+        <div class="timeline-stage season-autumn"><strong><stage-number>03</stage-number></strong><span><stage-label>阶段三</stage-label></span></div>
+        <div class="timeline-stage season-winter"><strong><stage-number>04</stage-number></strong><span><stage-label>阶段四</stage-label></span></div>
+      </section>
+
+      <!-- Row 4: text-card(span-8) + capability-panel(span-4) -->
+      <section class="component text-card span-8" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题四</component-title></h4>
+        <p data-source-paragraph="4"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component icon-process capability-panel span-4" data-component="icon-process" aria-label="能力面板名称">
+        <div class="capability-grid">
+          <div class="capability-item">
+            <icon name="users-group">用户组图标</icon>
+            <span><item-label>能力项一</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="truck">卡车图标</icon>
+            <span><item-label>能力项二</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="shield-check">盾牌图标</icon>
+            <span><item-label>能力项三</item-label></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Row 5: text-card(span-8) + org-chart(span-4) -->
+      <section class="component text-card span-8" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题五</component-title></h4>
+        <p data-source-paragraph="5"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component org-chart span-4" data-component="org-chart" aria-label="组织架构名称">
+        <div class="org-level">
+          <div class="org-node"><node-label>节点名称一</node-label></div>
+        </div>
+        <div class="org-connector" aria-hidden="true"></div>
+        <div class="org-level">
+          <div class="org-node"><node-label>节点名称二</node-label></div>
+        </div>
+        <div class="org-connector" aria-hidden="true"></div>
+        <div class="org-level">
+          <div class="org-node"><node-label>节点名称三</node-label></div>
+        </div>
+      </section>
+
+      <!-- Row 6: summary-band(span-12) -->
+      <section class="component summary-band span-12" data-component="summary-band">
+        <p data-source-paragraph="6"><summary-text>总结段落。用 1-2 句话概括本页要点，确保信息精炼、结论明确。</summary-text></p>
+        <ul class="summary-list">
+          <li><bullet>要点一：关键词或短句</bullet></li>
+          <li><bullet>要点二：关键词或短句</bullet></li>
+          <li><bullet>要点三：关键词或短句</bullet></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span class="page-number"><page-number>N</page-number></span>
+    </footer>
+  </article>
+</body>
+</html>

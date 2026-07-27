@@ -98,9 +98,11 @@ function parseMarkdown(text: string): ParsedSection[] {
       buffer.push(line);
     }
 
-    // Flush paragraph at sentence endings or after sufficient length
-    if (buffer.join("").length > 200 || (line.endsWith("。") && buffer.join("").length > 60)) {
-      current!.paragraphs.push(buffer.join(""));
+    // Flush paragraph only when buffer is long enough and hits a period
+    // (avoid splitting mid-thought)
+    const bufText = buffer.join("");
+    if (bufText.length > 250 || (line.endsWith("。") && bufText.length > 120)) {
+      current!.paragraphs.push(bufText);
       buffer = [];
     }
   }
@@ -202,21 +204,26 @@ function mapToTemplate(
   );
   direct["bullet"] = summaryPoints.slice(0, 4);
 
-  // Visual component content — pad to common template needs (min 4-5)
+  // Visual component content — derive short meaningful labels from section titles
+  const shortTitles = titles.map((t) => {
+    // Extract the core keyword: remove common suffixes
+    return t.replace(/配置方案|调配机制|审批流程|管理制度|管理体系/g, "").slice(0, 6);
+  });
+
   const padLabels = (arr: string[], min: number, prefix: string): string[] => {
-    const result = [...arr.map((s) => s.slice(0, 8))];
+    const result = [...arr];
     while (result.length < min) result.push(`${prefix}${result.length + 1}`);
     return result.slice(0, min);
   };
 
-  direct["step-label"] = padLabels(titles, 5, "步骤");   // need 4-5
-  direct["stage-label"] = padLabels(titles, 4, "阶段");  // need 4
+  direct["step-label"] = padLabels(shortTitles, 5, "步骤");
+  direct["stage-label"] = padLabels(shortTitles, 4, "阶段");
   direct["stage-number"] = ["01", "02", "03", "04"];
-  direct["item-label"] = padLabels(titles, 4, "能力项"); // need 3-4
+  direct["item-label"] = padLabels(shortTitles, 4, "能力项");
   direct["node-label"] = [
-    subs[0]?.title.slice(0, 6) || "对接人员",
-    subs[1]?.title.slice(0, 6) || "作业班组",
-    subs[2]?.title.slice(0, 6) || "管理体系",
+    shortTitles[0] || "对接人员",
+    shortTitles[1] || "作业班组",
+    shortTitles[2] || "管理体系",
   ];
 
   // Table content (for table templates)
@@ -266,18 +273,23 @@ function recommendTemplate(sections: ParsedSection[]): string {
 
 function truncateParagraph(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
-  // Cut at the best sentence/clause boundary within range
+  // Cut at best sentence boundary — always end with a complete sentence
   const range = text.slice(0, maxLen);
-  // Preferred: end of sentence (。)
+  // Find the last period within range
   const period = range.lastIndexOf("。");
-  if (period > maxLen * 0.65) return range.slice(0, period + 1);
-  // Next best: Chinese semicolon (；)
+  if (period > maxLen * 0.5) return range.slice(0, period + 1);
+  // If no period found, extend slightly to find the next one
+  const nextPeriod = text.indexOf("。", maxLen);
+  if (nextPeriod > 0 && nextPeriod < maxLen * 1.3) {
+    return text.slice(0, nextPeriod + 1);
+  }
+  // Last resort: find the last semicolon and complete the thought
   const semi = range.lastIndexOf("；");
-  if (semi > maxLen * 0.65) return range.slice(0, semi + 1) + "。";
-  // Last resort: comma at reasonable position
+  if (semi > maxLen * 0.5) return range.slice(0, semi + 1);
+  // Absolute fallback: cut at a comma
   const comma = range.lastIndexOf("，");
-  if (comma > maxLen * 0.7) return range.slice(0, comma) + "。";
-  return range + "…";
+  if (comma > maxLen * 0.5) return range.slice(0, comma + 1);
+  return range;
 }
 
 function generateIconPrompts(sections: ParsedSection[]): ParseSourceOutput["iconPrompts"] {

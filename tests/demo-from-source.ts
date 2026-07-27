@@ -55,7 +55,7 @@ const SOURCE_TEXT = `### 1.1.1 项目人员配备要求响应
 
 async function insertPromptCards(
   html: string,
-  iconPrompts: Array<{ position: string; prompt: string }>,
+  iconPrompts: Array<{ position: string; description: string; prompt: string }>,
   imagePrompts: Array<{ prompt: string }>,
 ): Promise<string> {
   const { JSDOM } = await import("jsdom");
@@ -69,7 +69,8 @@ async function insertPromptCards(
     const ip = iconPrompts[iconIdx % iconPrompts.length];
     const card = doc.createElement("div");
     card.setAttribute("class", "prompt-icon");
-    card.innerHTML = `<span class="prompt-label">🔷 图标</span><span class="prompt-text">${escapeHtml(ip?.prompt || "icon prompt")}</span>`;
+    const concept = ip?.position || "图标";
+    card.innerHTML = `<span class="prompt-label">🔷 ${escapeHtml(concept)}</span><span class="prompt-text">${escapeHtml(ip?.prompt || "icon prompt")}</span>`;
     el.replaceWith(card);
     iconIdx++;
   });

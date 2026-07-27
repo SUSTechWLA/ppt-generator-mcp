@@ -87,11 +87,10 @@ body {
 .body-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  grid-auto-rows: auto;
+  grid-auto-rows: 1fr;
   gap: 2.5mm 3mm;
   min-height: 0;
   padding: 1mm 2.5mm;
-  align-content: start;
 }
 .span-3 { grid-column: span 3; }
 .span-4 { grid-column: span 4; }
@@ -106,6 +105,7 @@ body {
 .text-card { display: flex; flex-direction: column; padding: 1.5mm 3mm 1.5mm; background: var(--green-100); font-size: var(--body-size); font-weight: 500; line-height: 1.48; text-align: justify; }
 .text-card p { flex: 1 1 auto; margin: 0 0 0.8mm; text-indent: 2em; overflow: hidden; text-overflow: ellipsis; }
 .text-card p:last-child { margin-bottom: 0; }
+.text-card .bullet-list { flex: 0 0 auto; margin-top: auto; }
 .component-title { flex: 0 0 auto; margin: 0 0 0.5mm; color: var(--green-900); font-size: 12.5pt; font-weight: 700; line-height: 1.25; }
 .compact { font-size: var(--body-dense-size); font-weight: 500; line-height: 1.42; }
 .text-card.compact p { font-size: var(--body-dense-size); }
@@ -120,34 +120,34 @@ body {
 .image-card .placeholder-card span { color: var(--muted); font-size: 7.5pt; margin-top: 1mm; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-caption { padding: 1.5mm 2mm; background: var(--green-900); color: #fff; font-size: var(--minimum-readable-size); font-weight: 500; line-height: 1.30; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.icon-process { display: flex; align-items: center; justify-content: space-evenly; padding: 2mm; overflow: hidden; }
+.icon-process { display: flex; align-items: center; justify-content: space-evenly; padding: 2mm; overflow: hidden; height: 100%; }
 .process-step { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--ink); font-size: 9pt; font-weight: 650; line-height: 1.25; text-align: center; }
 .process-step span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.process-step img { display: block; width: 12mm; height: 12mm; margin: 0 auto 1mm; filter: brightness(0) saturate(100%) invert(25%) sepia(83%) saturate(781%) hue-rotate(105deg) brightness(89%) contrast(96%); }
+.process-step img { display: block; width: 14mm; height: 14mm; margin: 0 auto 1.5mm; filter: brightness(0) saturate(100%) invert(25%) sepia(83%) saturate(781%) hue-rotate(105deg) brightness(89%) contrast(96%); }
 .process-arrow { flex: 0 0 auto; color: var(--muted); font-size: 18pt; font-weight: 800; text-align: center; }
-.capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2mm; padding: 2mm; }
+.capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2mm; padding: 2mm; height: 100%; }
 .capability-panel { display: grid; padding: 0; }
-.capability-item { display: grid; justify-items: center; align-content: center; gap: 1mm; min-width: 0; overflow: hidden; color: var(--green-900); font-size: 9.5pt; font-weight: 650; line-height: 1.25; text-align: center; }
+.capability-item { display: grid; justify-items: center; align-content: center; gap: 1.5mm; min-width: 0; overflow: hidden; color: var(--green-900); font-size: 9.5pt; font-weight: 650; line-height: 1.25; text-align: center; }
 .capability-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.capability-item img { width: 12mm; height: 12mm; filter: brightness(0) saturate(100%) invert(25%) sepia(83%) saturate(781%) hue-rotate(105deg) brightness(89%) contrast(96%); }
+.capability-item img { width: 16mm; height: 16mm; filter: brightness(0) saturate(100%) invert(25%) sepia(83%) saturate(781%) hue-rotate(105deg) brightness(89%) contrast(96%); }
 
-.timeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #fff; overflow: hidden; }
-.timeline-stage { display: grid; align-content: center; gap: 1mm; padding: 2mm; text-align: center; border-right: 0.35mm solid #fff; overflow: hidden; }
+.timeline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #fff; overflow: hidden; height: 100%; }
+.timeline-stage { display: grid; align-content: center; justify-items: center; gap: 2mm; padding: 2mm; text-align: center; border-right: 0.35mm solid #fff; overflow: hidden; }
 .timeline-stage:last-child { border-right: 0; }
-.timeline-stage strong { font-size: 16pt; line-height: 1; }
-.timeline-stage span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-stage strong { font-size: 18pt; line-height: 1; }
+.timeline-stage span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10pt; }
 .season-spring { color: var(--green-700); background: var(--green-100); }
 .season-summer { color: var(--cyan-600); background: #dff3f6; }
 .season-autumn { color: var(--orange-500); background: #f9edd8; }
 .season-winter { color: var(--blue-500); background: #e1effb; }
 
-.org-chart { display: grid; justify-items: center; align-content: center; gap: 0.4mm; padding: 0.5mm; }
-.org-level { display: flex; justify-content: center; gap: 1.8mm; width: 100%; }
-.org-node { display: grid; place-items: center; min-width: 28mm; padding: 0.3mm 2mm; border-radius: 1.5mm; background: var(--green-900); color: #fff; font-size: 9.5pt; font-weight: 650; line-height: 1.2; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.org-connector { width: 0.35mm; height: 1.5mm; background: var(--green-700); }
+.org-chart { display: grid; justify-items: center; align-content: center; gap: 0.6mm; padding: 0.5mm; height: 100%; }
+.org-level { display: flex; justify-content: center; gap: 2mm; width: 100%; }
+.org-node { display: grid; place-items: center; min-width: 30mm; padding: 1mm 2mm; border-radius: 1.5mm; background: var(--green-900); color: #fff; font-size: 10pt; font-weight: 650; line-height: 1.2; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-connector { width: 0.35mm; height: 2mm; background: var(--green-700); }
 
-.matrix-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; font-weight: 500; line-height: 1.35; }
-.matrix-table th, .matrix-table td { border: 0.25mm solid var(--line); padding: 1.4mm 2mm; }
+.matrix-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 9.5pt; font-weight: 500; line-height: 1.35; }
+.matrix-table th, .matrix-table td { border: 0.25mm solid var(--line); padding: 1.8mm 2mm; }
 .matrix-table th { background: var(--green-900); color: #fff; font-weight: 700; }
 .matrix-table tbody tr:nth-child(even) { background: var(--green-050); }
 
@@ -155,12 +155,13 @@ body {
 .photo-item { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; overflow: hidden; border-radius: 1.5mm; }
 .photo-item .image-caption { min-height: 0; }
 
-.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(45mm, 1fr); gap: 3mm; padding: 2mm 3mm; background: #fff; overflow: hidden; }
-.summary-band p { overflow: hidden; text-overflow: ellipsis; }
+.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(45mm, 1fr); gap: 3mm; padding: 2.5mm 3mm; background: #fff; overflow: hidden; align-items: center; }
+.summary-band p { overflow: hidden; text-overflow: ellipsis; margin: 0; }
 .summary-list { margin: 0; padding-left: 1.4em; font-size: var(--body-dense-size); font-weight: 600; line-height: 1.42; }
-.summary-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.summary-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.3mm 0; }
 .placeholder-card { display: grid; place-items: center; min-height: 0; padding: 3mm; border: 0.35mm dashed var(--line); background: var(--green-050); color: var(--muted); font-size: var(--minimum-readable-size); line-height: 1.3; text-align: center; }
-.placeholder-card strong { color: var(--green-900); font-size: 12.5pt; }
+.placeholder-card strong { color: var(--green-900); font-size: 13pt; font-weight: 700; }
+.placeholder-card span { font-size: 8pt; margin-top: 1.5mm; }
 
 .page-footer { position: relative; background: linear-gradient(90deg, var(--green-900), var(--cyan-600), var(--blue-500)); }
 .page-number { position: absolute; right: 7mm; top: 50%; padding: 0.7mm 2.4mm; border-radius: 2mm; background: #fff; color: var(--ink); font-size: 12pt; font-weight: 500; line-height: 1; transform: translateY(-50%); }

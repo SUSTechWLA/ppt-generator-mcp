@@ -52,6 +52,47 @@ const SOURCE_TEXT = `### 1.1.1 项目人员配备要求响应
 同时建立后备梯队制度，从班组长中选拔1-2名技术骨干作为后备培养对象，确保人员变更时新任者对本项目已有充分了解，最大限度缩短适应期。`;
 
 // ============================================================================
+// Icon mapping — replaces hardcoded template icons with context-aware ones
+// ============================================================================
+
+function suggestIcons(
+  sections: Array<{ title: string; paragraphs: string[] }>,
+): Record<string, string> {
+  const allText = sections.map((s) => s.title + " " + s.paragraphs.join(" ")).join(" ");
+
+  const iconSemantics: Record<string, string> = {
+    "users-group":      "人员|团队|班组|对接|组织",
+    "clipboard-check":  "审批|流程|变更|申请|合规",
+    "file-description": "文件|文档|台账|记录|归档|资料",
+    "search":           "检查|巡查|考核|评估|监督",
+    "calendar":         "计划|日程|安排|编制|排期",
+    "scissors":         "作业|养护|修剪|施工|操作",
+    "truck":            "设备|车辆|运输|机械|物资",
+    "shield-check":     "质量|安全|保障|达标|标准",
+  };
+
+  // Score icons by keyword match count against content
+  const scored = Object.entries(iconSemantics)
+    .map(([icon, keywords]) => ({
+      icon,
+      score: keywords.split("|").filter((kw) => allText.includes(kw)).length,
+    }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  // Only replace truly irrelevant icons (not in our semantics at all)
+  const irrelevant = ["leaf", "sun", "snowflake", "wind", "bug", "alert-triangle", "droplet"];
+  const replacements: Record<string, string> = {};
+
+  for (let i = 0; i < irrelevant.length; i++) {
+    const best = scored[i % scored.length];
+    if (best) replacements[irrelevant[i]] = best.icon;
+  }
+
+  return replacements;
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -107,12 +148,26 @@ async function main() {
     console.log(`  待处理: ${filled.remainingPlaceholders.join(", ")}`);
   }
 
-  // ── Step 4: Render icons ─────────────────────────────────────────
-  console.log("\n[4/8] render_icons");
+  // ── Step 4: Replace icons + render ────────────────────────────────
+  console.log("\n[4/8] map_icons + render_icons");
 
   const templateDir = path.dirname(tpl.filePath);
+  const { JSDOM } = await import("jsdom");
+
+  // 4a: Replace hardcoded template icons with context-aware ones (BEFORE render)
+  const preIconDom = new JSDOM(filled.html);
+  const iconMap = suggestIcons(parsed.sections);
+  const preIconDoc = preIconDom.window.document;
+  preIconDoc.querySelectorAll("icon").forEach((el) => {
+    const oldName = el.getAttribute("name") || "";
+    if (iconMap[oldName]) el.setAttribute("name", iconMap[oldName]);
+  });
+  console.log(`  图标映射: ${Object.keys(iconMap).length} 个替换 (${Object.entries(iconMap).map(([k,v]) => `${k}→${v}`).join(", ")})`);
+
+  // 4b: Now render icons
+  const afterIconHtml = preIconDom.serialize();
   const iconResult = renderIcons({
-    html: filled.html,
+    html: afterIconHtml,
     iconBasePath: path.join(templateDir, "assets", "icons"),
     iconsRelativePath: `../../templates/green-infographic/assets/icons/`,
   });
@@ -121,7 +176,6 @@ async function main() {
   // ── Step 5: Generate images ──────────────────────────────────────
   console.log("\n[5/8] generate_image");
 
-  const { JSDOM } = await import("jsdom");
   const imgDom = new JSDOM(iconResult.html);
   const imgDoc = imgDom.window.document;
 
@@ -131,14 +185,16 @@ async function main() {
     const prompt = parsed.imagePrompts[i]?.prompt || "AI生成场景图";
     const placeholder = imgDoc.createElement("div");
     placeholder.setAttribute("class", "placeholder-card");
+    const escapedPrompt = prompt.replace(/</g, "&lt;").replace(/>/g, "&gt;");
     placeholder.innerHTML =
-      `<strong>AI 生成配图</strong><span>${prompt.slice(0, 60)}...</span>`;
+      `<strong>📷 AI 配图提示词</strong><span>${escapedPrompt}</span>`;
     el.replaceWith(placeholder);
 
     const parent = el.parentElement;
     const refTag = parent?.querySelector("figure-ref");
     if (refTag) refTag.replaceWith(imgDoc.createTextNode(refTag.textContent || ""));
   }
+
   const imageHtml = imgDom.serialize();
   console.log(`  已生成 ${figuresList.length} 个图片占位符`);
 

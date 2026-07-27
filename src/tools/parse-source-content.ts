@@ -146,9 +146,9 @@ function mapToTemplate(
     const sub = subs[i];
     titles.push(sub.title);
 
-    // Use the first paragraph (shortened to 120-160 chars for layout fit)
+    // Shorter truncation (100-120 chars) for proper fit in A4 landscape cards
     const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
-    paragraphs.push(truncateParagraph(fullText, 160));
+    paragraphs.push(truncateParagraph(fullText, 110));
 
     // Collect key points for summary
     for (const kp of sub.keyPoints.slice(0, 2)) {

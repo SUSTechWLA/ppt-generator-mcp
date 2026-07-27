@@ -48,7 +48,12 @@ function makeContent(template: ReturnType<typeof loadTemplate>) {
   }
 
   if (hasTag("figure-ref")) {
-    direct["figure-ref"] = "季节性养护策略";
+    const n = count("figure-ref");
+    const titles = (direct["component-title"] as string[]) || [];
+    // Use matching card titles, or fall back to generic
+    direct["figure-ref"] = n <= 1
+      ? (titles[1] || titles[0] || "核心场景")
+      : titles.slice(0, n);
   }
 
   if (hasTag("paragraph")) {

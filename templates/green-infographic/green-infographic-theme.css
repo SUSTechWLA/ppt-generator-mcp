@@ -146,6 +146,7 @@ body {
 .org-node { display: grid; place-items: center; min-width: 30mm; padding: 1mm 2mm; border-radius: 1.5mm; background: var(--green-900); color: #fff; font-size: 10pt; font-weight: 650; line-height: 1.2; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-connector { width: 0.35mm; height: 2mm; background: var(--green-700); }
 
+.table-wrapper { overflow: auto; border: 0.35mm solid var(--line); border-radius: 2.5mm; background: #fff; }
 .matrix-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 9.5pt; font-weight: 500; line-height: 1.35; }
 .matrix-table th, .matrix-table td { border: 0.25mm solid var(--line); padding: 1.8mm 2mm; }
 .matrix-table th { background: var(--green-900); color: #fff; font-weight: 700; }
@@ -155,7 +156,7 @@ body {
 .photo-item { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; overflow: hidden; border-radius: 1.5mm; }
 .photo-item .image-caption { min-height: 0; }
 
-.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(45mm, 1fr); gap: 3mm; padding: 2.5mm 3mm; background: #fff; overflow: hidden; align-items: center; }
+.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(50mm, 1fr); gap: 4mm; padding: 2.5mm 3mm; background: #fff; overflow: hidden; align-items: center; }
 .summary-band p { overflow: hidden; text-overflow: ellipsis; margin: 0; }
 .summary-list { margin: 0; padding-left: 1.4em; font-size: var(--body-dense-size); font-weight: 600; line-height: 1.42; }
 .summary-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.3mm 0; }

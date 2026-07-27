@@ -160,11 +160,7 @@ body {
 .summary-band p { overflow: hidden; text-overflow: ellipsis; margin: 0; }
 .summary-list { margin: 0; padding-left: 1.4em; font-size: var(--body-dense-size); font-weight: 600; line-height: 1.42; }
 .summary-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.3mm 0; }
-.placeholder-card { display: grid; place-items: center; min-height: 0; padding: 2mm 2.5mm; border: 0.35mm dashed var(--line); background: var(--green-050); color: var(--muted); font-size: var(--minimum-readable-size); line-height: 1.35; text-align: center; overflow: auto; }
-.placeholder-card strong { color: var(--green-900); font-size: 12pt; font-weight: 700; margin-bottom: 1mm; }
-.placeholder-card span { font-size: 7pt; line-height: 1.3; max-width: 100%; word-break: break-all; display: block; }
-
-/* Prompt cards — replace icon/image slots with reviewable text prompts */
+/* Asset slots — ID'd placeholder boxes for images/icons to be generated later */
 /* Asset slots — placeholder boxes for images/icons to be generated later */
 .img-slot { display: grid; place-items: center; align-content: center; gap: 1mm; padding: 2mm; border: 0.5mm solid var(--line); border-radius: 2mm; background: #fff; height: 100%; overflow: hidden; }
 .img-slot .slot-id { color: var(--green-700); font-size: 9pt; font-weight: 700; }

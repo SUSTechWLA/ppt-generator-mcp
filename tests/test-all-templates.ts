@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listTemplates, loadTemplate } from "../src/lib/template-parser.js";
 import { fillPlaceholders } from "../src/tools/fill-placeholders.js";
-import { renderIcons } from "../src/tools/render-icons.js";
+import { insertAssetSlots, buildPromptsPage } from "../src/tools/insert-asset-slots.js";
 import { assemblePage } from "../src/tools/assemble-page.js";
 import { validatePage } from "../src/tools/validate-page.js";
 
@@ -130,7 +130,6 @@ async function main() {
   console.log("  QA Test — 全模板生成验证");
   console.log("=".repeat(60));
 
-  const { JSDOM } = await import("jsdom");
   const templates = listTemplates(TEMPLATES_DIR);
   const results: Array<{ slug: string; valid: boolean; issues: number; warnings: string[] }> = [];
 
@@ -149,39 +148,19 @@ async function main() {
       const filled = await fillPlaceholders({ html: parsed.html, content });
       console.log(`     填充: ${filled.filledCount} 处` + (filled.warnings.length ? ` ⚠️ ${filled.warnings.length} 警告` : ""));
 
-      // Step 3: Icons
+      // Step 3: Asset slots (replaces icons + images)
       const templateDir = path.dirname(parsed.filePath);
-      const iconBase = path.join(templateDir, "assets", "icons");
-      const iconsDone = renderIcons({
+      const { html: layoutHtml, assetMap } = insertAssetSlots({
         html: filled.html,
-        iconBasePath: iconBase,
-        iconsRelativePath: `../../templates/green-infographic/assets/icons/`,
+        iconPrompts: [],
+        imagePrompts: [],
       });
-      if (iconsDone.iconCount > 0) console.log(`     图标: ${iconsDone.iconCount} 个`);
 
-      // Step 4: Images
-      const imgDom = new JSDOM(iconsDone.html);
-      const imgDoc = imgDom.window.document;
-      const figuresList = imgDoc.querySelectorAll("figures");
-      for (let i = 0; i < figuresList.length; i++) {
-        const el = figuresList[i];
-        const prompt = el.textContent?.trim() || "AI生成场景图";
-        const placeholder = imgDoc.createElement("div");
-        placeholder.setAttribute("class", "placeholder-card");
-        placeholder.innerHTML = `<strong>AI 生成配图</strong><span>${prompt.slice(0, 60)}...</span>`;
-        el.replaceWith(placeholder);
-        // Clean figure-ref residuals
-        const parent = el.parentElement;
-        const ref = parent?.querySelector("figure-ref");
-        if (ref) ref.replaceWith(imgDoc.createTextNode(ref.textContent || ""));
-      }
-      const imageHtml = imgDom.serialize();
-      if (figuresList.length > 0) console.log(`     图片: ${figuresList.length} 个占位符`);
-
-      // Step 5: Assemble
+      // Step 4: Build Page 2 + assemble
+      const finalHtml = layoutHtml.replace("</body>", buildPromptsPage(assetMap) + "</body>");
       const outPath = path.join(OUTPUT_DIR, `${tpl.slug}.html`);
       const assembled = assemblePage({
-        html: imageHtml,
+        html: finalHtml,
         config: {
           removeXmlComment: true,
           outputPath: outPath,

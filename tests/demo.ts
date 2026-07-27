@@ -14,7 +14,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listTemplates, loadTemplate } from "../src/lib/template-parser.js";
 import { fillPlaceholders } from "../src/tools/fill-placeholders.js";
-import { renderIcons } from "../src/tools/render-icons.js";
+import { insertAssetSlots, buildPromptsPage } from "../src/tools/insert-asset-slots.js";
 import { assemblePage } from "../src/tools/assemble-page.js";
 import { validatePage } from "../src/tools/validate-page.js";
 
@@ -101,11 +101,11 @@ function hr(label = "") {
 async function main() {
   hr();
   console.log("  PPT Generator MCP — 端到端 Demo");
-  console.log("  模板 → 7 步 MCP 工具调度 → 可交付页面");
+  console.log("  模板 → 6 步 MCP 工具调度 → 可交付页面");
   hr();
 
   // ── Step 1: list_templates ──────────────────────────────────────
-  console.log("\n[1/7] list_templates — 扫描模板库");
+  console.log("\n[1/6] list_templates — 扫描模板库");
   const templates = listTemplates(TEMPLATES_DIR);
   for (const t of templates) {
     console.log(`  ${t.slug}`);
@@ -113,7 +113,7 @@ async function main() {
   }
 
   // ── Step 2: load_template ───────────────────────────────────────
-  console.log("\n[2/7] load_template — 加载模板并解析占位符");
+  console.log("\n[2/6] load_template — 加载模板并解析占位符");
   // Use the exact slug to target the original text-card-paired template
   const slug = "green-infographic-bid-a4-landscape";
   // Other available templates:
@@ -128,7 +128,7 @@ async function main() {
   console.log(`  图标: ${tpl.icons.map((i) => i.name).join(", ")}`);
 
   // ── Step 3: fill_placeholders ───────────────────────────────────
-  console.log("\n[3/7] fill_placeholders — 文生文填充（direct 模式）");
+  console.log("\n[3/6] fill_placeholders — 文生文填充（direct 模式）");
 
   const llmProvider = process.env.OPENAI_API_KEY
     ? "openai" as const
@@ -161,55 +161,24 @@ async function main() {
     console.log(`  待处理: ${fillResult.remainingPlaceholders.join(", ")}`);
   }
 
-  // ── Step 4: render_icons ────────────────────────────────────────
-  console.log("\n[4/7] render_icons — 替换图标占位符");
+  // ── Step 4: Asset slots + Page 2 ───────────────────────────────
+  console.log("\n[4/6] insert_asset_slots + build_prompts_page");
   const templateDir = path.dirname(tpl.filePath);
-  const iconResult = renderIcons({
+
+  const { html: layoutHtml, assetMap } = insertAssetSlots({
     html: fillResult.html,
-    iconBasePath: path.join(templateDir, "assets", "icons"),
-    iconsRelativePath: `../../templates/green-infographic/assets/icons/`,
+    iconPrompts: [],
+    imagePrompts: [],
   });
-  console.log(`  已渲染: ${iconResult.iconCount} 个 SVG 图标`);
-  if (iconResult.missingIcons.length > 0) {
-    console.log(`  ⚠️  缺失: ${iconResult.missingIcons.join(", ")}`);
-  }
+  const finalHtml = layoutHtml.replace("</body>", buildPromptsPage(assetMap) + "</body>");
+  console.log(`  槽位: ${assetMap.filter(a => a.type === "image").length} img + ${assetMap.filter(a => a.type === "icon").length} icon`);
 
-  // ── Step 5: generate_image ──────────────────────────────────────
-  console.log("\n[5/7] generate_image — 处理配图");
-
-  const { JSDOM } = await import("jsdom");
-  const imgDom = new JSDOM(iconResult.html);
-  const imgDoc = imgDom.window.document;
-
-  const figuresList = imgDoc.querySelectorAll("figures");
-  for (let i = 0; i < figuresList.length; i++) {
-    const el = figuresList[i];
-    const prompt = el.textContent?.trim() || "AI生成场景图";
-    const parent = el.parentElement;
-
-    // Professional placeholder matching theme
-    const placeholder = imgDoc.createElement("div");
-    placeholder.setAttribute("class", "placeholder-card");
-    placeholder.innerHTML =
-      `<strong>AI 生成配图</strong><span>${prompt.slice(0, 60)}...</span>`;
-    el.replaceWith(placeholder);
-
-    // Clean any residual figure-ref inside figures (should be gone after fill)
-    const refTag = parent?.querySelector("figure-ref");
-    if (refTag) refTag.replaceWith(imgDoc.createTextNode(refTag.textContent || ""));
-
-    console.log(`  图片 ${i + 1}: ${prompt.slice(0, 70)}...`);
-  }
-
-  const imageHtml = imgDom.serialize();
-  console.log(`  已生成 ${figuresList.length} 个图片占位符`);
-
-  // ── Step 6: assemble_page ───────────────────────────────────────
-  console.log("\n[6/7] assemble_page — 组装可交付页面");
+  // ── Step 5: assemble_page ───────────────────────────────────────
+  console.log("\n[5/6] assemble_page — 组装两页交付件");
   const outputPath = path.join(OUTPUT_DIR, "deliverable-page-1.html");
 
   const assembleResult = assemblePage({
-    html: imageHtml,
+    html: finalHtml,
     config: {
       removeXmlComment: true,
       minifyOutput: false,
@@ -224,7 +193,7 @@ async function main() {
   }
 
   // ── Step 7: validate_page ───────────────────────────────────────
-  console.log("\n[7/7] validate_page — 质量验证");
+  console.log("\n[6/6] validate_page — 质量验证");
   const validateResult = validatePage({
     html: assembleResult.html,
     htmlFilePath: assembleResult.outputPath,
@@ -242,14 +211,13 @@ async function main() {
 
   // ── Summary ─────────────────────────────────────────────────────
   hr();
-  console.log("  编排层标准调度流程（7 个 MCP 原子工具）:\n");
-  console.log("  1. list_templates     浏览模板库，按 usecase/format 选模板");
-  console.log("  2. load_template      加载 HTML + 解析占位符清单");
-  console.log("  3. fill_placeholders  文生文填充（direct 替换 / LLM 扩写）");
-  console.log("  4. render_icons       <icon> → SVG <img>");
-  console.log("  5. generate_image     <figures> → DALL-E 图片 / 占位符");
-  console.log("  6. assemble_page      移除注释、复制 CSS、写输出文件");
-  console.log("  7. validate_page      检查残留 XML、图标、HTML 合法性");
+  console.log("  编排层标准调度流程（6 个 MCP 原子工具）:\n");
+  console.log("  1. list_templates      浏览模板库，按 usecase/format 选模板");
+  console.log("  2. load_template       加载 HTML + 解析占位符清单");
+  console.log("  3. fill_placeholders   文生文填充（direct 替换 / LLM 扩写）");
+  console.log("  4. insert_asset_slots  <icon>/<figures> → 带ID占位框(Page1)");
+  console.log("  5. build_prompts_page  生成提示词参考表(Page2) + 组装");
+  console.log("  6. validate_page       检查残留 XML、HTML 合法性");
   hr(`\n  可交付页面: ${outputPath}`);
 }
 

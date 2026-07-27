@@ -55,65 +55,53 @@ export interface ParseSourceOutput {
 // ============================================================================
 
 function parseMarkdown(text: string): ParsedSection[] {
-  const lines = text.split("\n");
+  // Split on blank-line-separated blocks (standard markdown paragraph boundaries)
+  const blocks = text.split(/\n{2,}/);
   const sections: ParsedSection[] = [];
   let current: ParsedSection | null = null;
-  let buffer: string[] = [];
 
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
+  for (const block of blocks) {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+
+    const firstLine = lines[0];
 
     // Match headings: ### Title or ##### Title
-    const hMatch = line.match(/^(#{1,6})\s+(.+)/);
+    const hMatch = firstLine.match(/^(#{1,6})\s+(.+)/);
     if (hMatch) {
-      // Save previous section
-      if (current && buffer.length > 0) {
-        current.paragraphs.push(buffer.join(""));
-        buffer = [];
-      }
       if (current) sections.push(current);
-
       current = {
         level: hMatch[1].length,
         title: hMatch[2].replace(/^[\d.]+\s*/, "").trim(),
         paragraphs: [],
         keyPoints: [],
       };
+      // Remaining lines in this block are body text
+      const body = lines.slice(1).join("");
+      if (body.length > 10) current.paragraphs.push(body);
       continue;
     }
 
-    // Match list items: - xxx or * xxx or 1. xxx
-    const liMatch = line.match(/^[-*•]\s+(.+)|^\d+[\.\、\)]\s*(.+)/);
-    if (liMatch && current) {
-      const point = (liMatch[1] || liMatch[2] || "").trim();
-      if (point && point.length < 80) {
-        current.keyPoints.push(point);
+    // Match list blocks: lines starting with - or * or 1.
+    if (current && lines.every((l) => /^[-*•]\s|^\d+[\.\、\)]\s/.test(l))) {
+      for (const li of lines) {
+        const m = li.match(/^[-*•]\s+(.+)|^\d+[\.\、\)]\s*(.+)/);
+        if (m) {
+          const point = (m[1] || m[2] || "").trim();
+          if (point.length < 80) current.keyPoints.push(point);
+        }
       }
       continue;
     }
 
-    // Regular paragraph text
-    if (current && line.length > 10) {
-      buffer.push(line);
-    }
-
-    // Flush paragraph only when buffer is long enough and hits a period
-    // (avoid splitting mid-thought)
-    const bufText = buffer.join("");
-    if (bufText.length > 250 || (line.endsWith("。") && bufText.length > 120)) {
-      current!.paragraphs.push(bufText);
-      buffer = [];
+    // Regular paragraph block: join all lines
+    if (current && block.trim().length > 10) {
+      const paragraph = lines.join("");
+      current.paragraphs.push(paragraph);
     }
   }
 
-  // Flush remaining
-  if (current) {
-    if (buffer.length > 0) current.paragraphs.push(buffer.join(""));
-    sections.push(current);
-  }
-
-  // Post-process: merge very short sections
+  if (current) sections.push(current);
   return sections.filter((s) => s.paragraphs.length > 0 || s.keyPoints.length > 0);
 }
 
@@ -159,9 +147,9 @@ function mapToTemplate(
     // - Wide cards (span-6/span-8): 140-150 chars
     // - Narrow cards (span-4, last position in visual template): 70-80 chars
     const isLastNarrow = (totalCards === 3 && i === 2); // visual template span-4
-    const maxLen = isLastNarrow ? 80 : 145;
+    const maxLen = isLastNarrow ? 100 : 250;
     const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
-    paragraphs.push(truncateParagraph(fullText, maxLen));
+    paragraphs.push(extractSentences(fullText, maxLen));
 
     // Collect key points for summary
     for (const kp of sub.keyPoints.slice(0, 2)) {
@@ -198,7 +186,7 @@ function mapToTemplate(
     summaryPoints.push(...titles.map((t) => t.slice(0, 12)));
   }
 
-  direct["summary-text"] = truncateParagraph(
+  direct["summary-text"] = extractSentences(
     `本方案针对${root.title}，从${titles.slice(0, 3).join("、")}等${titles.length}个方面进行了全面响应和详细部署。`,
     100,
   );
@@ -271,25 +259,31 @@ function recommendTemplate(sections: ParsedSection[]): string {
 // Helpers
 // ============================================================================
 
-function truncateParagraph(text: string, maxLen: number): string {
+/**
+ * Extract complete sentences from text, targeting maxLen but willing
+ * to go slightly over to avoid fragments. Always returns coherent text.
+ */
+function extractSentences(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
-  // Cut at best sentence boundary — always end with a complete sentence
-  const range = text.slice(0, maxLen);
-  // Find the last period within range
-  const period = range.lastIndexOf("。");
-  if (period > maxLen * 0.5) return range.slice(0, period + 1);
-  // If no period found, extend slightly to find the next one
-  const nextPeriod = text.indexOf("。", maxLen);
-  if (nextPeriod > 0 && nextPeriod < maxLen * 1.3) {
-    return text.slice(0, nextPeriod + 1);
+
+  const sentences = text.split(/(?<=[。！？])/);
+  let result = "";
+
+  for (const s of sentences) {
+    const next = result + s;
+    // Include sentence if: (a) it fits within maxLen, OR (b) current result is too short
+    if (next.length <= maxLen || result.length < 60) {
+      result = next;
+    } else {
+      break;
+    }
   }
-  // Last resort: find the last semicolon and complete the thought
-  const semi = range.lastIndexOf("；");
-  if (semi > maxLen * 0.5) return range.slice(0, semi + 1);
-  // Absolute fallback: cut at a comma
-  const comma = range.lastIndexOf("，");
-  if (comma > maxLen * 0.5) return range.slice(0, comma + 1);
-  return range;
+
+  // If we have at least one sentence with reasonable length, return it
+  if (result.length >= 60) return result;
+  // Otherwise, take the first sentence even if short
+  if (sentences.length > 0) return sentences[0];
+  return text.slice(0, maxLen);
 }
 
 function generateIconPrompts(sections: ParsedSection[]): ParseSourceOutput["iconPrompts"] {
@@ -317,23 +311,25 @@ function generateIconPrompts(sections: ParsedSection[]): ParseSourceOutput["icon
   return prompts;
 }
 
-const SUMMARIZE_PROMPT = `你是一个专业的标书文档精简助手。请将以下段落精简为指定字数以内的版本，保留所有关键信息和数据，删除冗余修饰词，确保语句通顺专业。
+const SUMMARIZE_PROMPT = `你是一位标书技术方案撰写专家。请将以下段落改写为一段{targetLen}字以内的精炼正文，用于PPT卡片展示。
 
-要求：
-1. 保留所有具体数字、名称、关键术语
-2. 删减重复表述和修饰性语言
-3. 确保每句话都有实质性信息
-4. 直接输出精简后的文本，不要解释
+改写要求：
+1. 保留所有具体数字、项目名称、面积数据
+2. 保持原文的核心论证逻辑和关键结论
+3. 句子之间衔接自然流畅，读起来通顺
+4. 整段是一个完整的、自洽的论述
+5. 以句号结尾
+6. 直接输出改写后的段落，不要加任何标题或解释
 
-目标字数：{targetLen}字以内
-原文：{text}`;
+原文：
+{text}`;
 
 async function summarizeParagraph(
   text: string,
   targetLen: number,
   config?: LLMConfig,
 ): Promise<string> {
-  if (!config || text.length <= targetLen) return text;
+  if (!config || text.length <= targetLen) return extractSentences(text, targetLen);
 
   try {
     const prompt = SUMMARIZE_PROMPT
@@ -341,30 +337,71 @@ async function summarizeParagraph(
       .replace("{text}", text);
     const result = await generateText(config, "", prompt);
     const cleaned = result.trim();
-    return cleaned.length > 0 ? cleaned : text.slice(0, targetLen);
+    if (cleaned.length > 0) {
+      // Ensure it ends with a period
+      return cleaned.endsWith("。") ? cleaned : cleaned + "。";
+    }
+    return extractSentences(text, targetLen);
   } catch {
-    return truncateParagraph(text, targetLen);
+    return extractSentences(text, targetLen);
   }
 }
 
 function generateImagePrompt(section: ParsedSection): string {
   const title = section.title;
-  const text = (section.paragraphs[0] || "").slice(0, 150);
+  const fullText = section.paragraphs.join(" ");
+  const keywords = extractKeywords(fullText);
 
-  // Check section content traits (order matters — check specific before general)
-  if (title.includes("配置") || title.includes("对接")) {
-    return `项目对接人员工作场景：专职人员持通信设备与采购人现场沟通，办公环境整洁，文档资料齐全，绿色商务风格，写实摄影`;
+  // Build detailed, DALL-E/SD-ready prompt from section content
+  const sceneMap: Array<{ test: (t: string) => boolean; build: () => string }> = [
+    {
+      test: (t) => t.includes("对接") || t.includes("配置") || t.includes("人员配备"),
+      build: () => {
+        const details = keywords.filter((k) => k.length > 1).slice(0, 5).join("、");
+        return `专业商务场景摄影：一名园林养护项目对接人员正在现代化办公室内与业主代表进行工作沟通，桌面上摆放着养护计划文件、工作台账和通信设备。项目对接人员身穿整洁的商务便装，手持文件正在汇报工作进展。窗外可见绿色园林景观。构图采用中景平视角度，自然光线从窗户透入，画面色调以绿色和白色为主，写实摄影风格，高清画质，适合标书配图。关键元素：${details || "项目对接、文档管理、专业沟通"}`;
+      },
+    },
+    {
+      test: (t) => t.includes("调配") || t.includes("动态") || t.includes("班组"),
+      build: () => {
+        const projects = fullText.match(/[^\s，。；]+（[\d,.]+㎡）/g) || [];
+        const names = projects.slice(0, 3).join("、");
+        return `园林养护管理信息图：展示8个物业项目的作业人员动态调配体系。画面以绿色渐变背景为主，中央为项目分布地图，标注${names || "各项目区域"}。左侧为基础配置层（稳定班组图标），中间为季节性调配层（春夏秋冬四色箭头），右侧为任务驱动层（闪电响应图标）。整体采用信息图设计风格，配色以绿色(#0B5A2A)、青色(#1D9DB2)、橙色(#D98A12)、蓝色(#0B84E6)为主，简洁专业的商务风格，适合标书插图。`;
+      },
+    },
+    {
+      test: (t) => t.includes("变更") || t.includes("审批") || t.includes("流程"),
+      build: () => {
+        const steps = fullText.match(/第[一二三四五六七八]步[^。；]+/g) || [];
+        const stepNames = steps.slice(0, 5).map((s) => s.slice(0, 20)).join(" → ");
+        return `标准化审批流程图：展示项目对接人员变更申请的完整审批链路。${stepNames ? "流程步骤：" + stepNames : "从提交书面申请到最终批复执行"}。采用纵向信息图布局，每个步骤以圆角卡片展示，卡片内包含步骤编号、名称和关键说明。箭头连接各步骤表示流转方向。配色以绿色(#0B5A2A)为主色调，已完成步骤为实色填充，待处理步骤为虚线边框。背景为浅灰绿色(#F2F7EF)，整体简洁大气，适合标书插图。`;
+      },
+    },
+  ];
+
+  for (const { test, build } of sceneMap) {
+    if (test(title + fullText)) return build();
   }
-  if (title.includes("调配") || title.includes("动态") || text.includes("调配")) {
-    return `园林养护人员调配示意图：多班组按项目区域分布，机动班组巡回路线标注，季节性人员调整甘特图，信息图风格，绿色商务配色`;
+
+  return `园林绿化养护相关场景示意图：${title}。绿色植被背景，阳光充足，写实摄影风格，高清画质，适合标书配图。关键内容：${keywords.slice(0, 5).join("、")}`;
+}
+
+/** Extract meaningful keywords from text for prompt enrichment */
+function extractKeywords(text: string): string[] {
+  // Match named entities, numbers, and key terms
+  const patterns = [
+    /[一-鿿]{2,}(?:人员|班组|项目|方案|机制|流程|体系|管理|养护|绿化|园林)/g,
+    /[一-鿿]+（[\d,.]+㎡）/g,
+    /\d+个(?:一-鿿]+)/g,
+    /\d+分钟内/g,
+  ];
+  const keywords = new Set<string>();
+  for (const pattern of patterns) {
+    for (const m of text.match(pattern) || []) {
+      keywords.add(m);
+    }
   }
-  if (title.includes("变更") || title.includes("审批") || title.includes("流程")) {
-    return `标准化变更审批流程图：书面申请、审核评估、批复执行、岗位交接四步流程，信息图风格，绿色主题，简洁专业`;
-  }
-  if (title.includes("养护") || title.includes("作业")) {
-    return `园林绿化养护作业场景：工人修剪灌木、操作专业设备，绿色植被背景，阳光充足，写实摄影风格，高清画质`;
-  }
-  return `园林绿化养护相关场景示意图，${title.slice(0, 30)}，写实摄影风格，绿色植被背景，阳光充足`;
+  return Array.from(keywords);
 }
 
 // ============================================================================
@@ -430,9 +467,9 @@ export async function parseSourceContent(
     if (Array.isArray(paragraphs)) {
       const totalCards = (result.content.direct["component-title"] as string[])?.length || 0;
       for (let i = 0; i < paragraphs.length; i++) {
-        const isLastNarrow = (totalCards === 3 && i === 2); // visual template span-4
-        const targetLen = isLastNarrow ? 80 : 145;
-        if (paragraphs[i].length > targetLen + 10) {
+        const isLastNarrow = (totalCards === 3 && i === 2);
+        const targetLen = isLastNarrow ? 100 : 180;
+        if (paragraphs[i].length > targetLen + 20) {
           paragraphs[i] = await summarizeParagraph(paragraphs[i], targetLen, input.llmConfig);
         }
       }

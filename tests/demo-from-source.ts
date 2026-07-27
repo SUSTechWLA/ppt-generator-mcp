@@ -10,6 +10,7 @@
  */
 
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadTemplate } from "../src/lib/template-parser.js";
 import { parseSourceContent } from "../src/tools/parse-source-content.js";
@@ -27,27 +28,11 @@ const OUTPUT_DIR = path.join(PROJECT_ROOT, "output");
 // Source document
 // ============================================================================
 
-const SOURCE_TEXT = `### 1.1.1 项目人员配备要求响应
-
-招标文件明确要求："供应商中标后（包括服务期间），需明确1名固定的项目对接人员，其余作业人员根据现场实际情况增减。项目对接人员不得随意变更，若确需更换，须提交书面申请且经采购人审核同意。"针对此项要求，本方案从固定项目对接人员配置、作业人员动态调配机制和人员变更申请审批流程三个维度进行全面响应。
-
-##### 固定项目对接人员配置方案
-
-本方案将为本项目配备一名专职项目对接人员，该名人员将作为本方案与采购人之间的唯一信息对接窗口，全面负责日常养护工作的协调联络、任务传达、信息反馈和紧急事务处理。项目对接人员的日常工作职责包括：每日与采购人指定联系人进行工作沟通、接收养护指令和工作要求并传达至各班组；跟踪汇总各项目养护作业进度，形成工作日报定期汇报；处理业主反馈的问题和投诉，第一时间协调班组赴现场处理；负责养护工作台账的统一管理；负责月度考核迎检的统筹协调。
-
-在人员资质和履职保障方面，选派的项目对接人员具有园林绿化相关专业背景和不少于三年项目管理经验；配备专用通信工具和交通工具确保随时可到达现场；建立后备人员交接预案确保工作不出现断档；将工作表现纳入绩效考核体系与业主满意度挂钩。
-
-##### 作业人员动态调配机制
-
-充分考虑8个物业项目养护面积差异大、植物品种多样的特点，本方案建立科学灵活的作业人员动态调配机制。核心框架由三个层面构成：基础配置层针对各项目养护面积确定日常人员配置，锦棠华府和溪语雅苑配置稳定班组，四个小型项目由机动班组巡回养护；季节性调配层根据春夏秋冬不同季节重点，定向调整修剪、施肥、植保、防台等作业人员比例；任务驱动调配层针对突击性任务和迎检整改，30分钟内启动调配流程，1小时内人员到达现场。
-
-人员调配执行流程为：每日编制次日人员分配方案、每周召开班组协调会制定下周计划、每月根据考核结果优化配置方案，同时建立详细的人员调配台账记录。
-
-##### 人员变更申请与审批流程
-
-本方案严格遵守招标文件中关于项目对接人员不得随意变更的规定，制定规范透明的变更申请与审批流程。变更仅限三种情形：人员因重大疾病或意外伤害无法履职、个人原因离职或退休、采购人主动要求更换。变更流程包括：提交书面变更申请书说明原因和新任人选资质、采购人审核评估、书面批复同意、安排不少于五个工作日的岗位交接、新任人员上岗后三日内拜访采购人。
-
-同时建立后备梯队制度，从班组长中选拔1-2名技术骨干作为后备培养对象，确保人员变更时新任者对本项目已有充分了解，最大限度缩短适应期。`;
+// Read source from test.md (full bid document)
+const SOURCE_TEXT = fs.readFileSync(
+  path.join(PROJECT_ROOT, "test.md"),
+  "utf-8",
+);
 
 // ============================================================================
 // Insert prompt cards for visual slots
@@ -95,6 +80,37 @@ async function insertPromptCards(
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ============================================================================
+// Build prompts summary section for user review
+// ============================================================================
+
+function buildPromptsSummary(
+  imagePrompts: Array<{ sectionTitle: string; prompt: string }>,
+  iconPrompts: Array<{ position: string; prompt: string }>,
+): string {
+  const cards = imagePrompts.map((ip, i) =>
+    `<div style="margin-bottom:2mm;padding:2mm;background:#F2F7EF;border-left:1mm solid #0B5A2A;font-size:8pt;line-height:1.4;">
+      <strong style="color:#0B5A2A;">🖼️ 配图${i + 1}：${escapeHtml(ip.sectionTitle)}</strong>
+      <p style="margin:0.5mm 0 0;color:#6B746E;">${escapeHtml(ip.prompt)}</p>
+    </div>`,
+  ).join("");
+
+  const icons = iconPrompts.map((ip, i) =>
+    `<div style="display:inline-block;width:30%;margin:1mm;padding:1.5mm;background:#F2F7EF;border:0.3mm dashed #8FAE99;font-size:7pt;vertical-align:top;">
+      <strong style="color:#0B5A2A;">🔷 ${escapeHtml(ip.position)}</strong>
+      <p style="margin:0.3mm 0 0;color:#6B746E;font-size:6.5pt;">${escapeHtml(ip.prompt)}</p>
+    </div>`,
+  ).join("");
+
+  return `
+    <div style="width:297mm;padding:3mm 6.5mm;background:#fff;margin-top:2mm;page-break-before:always;">
+      <h3 style="color:#0B5A2A;font-size:14pt;margin:0 0 2mm;">📋 图片与图标生成提示词汇总（可审视优化后批量生成）</h3>
+      <div style="margin-bottom:3mm;">${cards}</div>
+      <h3 style="color:#0B5A2A;font-size:14pt;margin:2mm 0;">🔷 图标生成提示词</h3>
+      <div>${icons}</div>
+    </div>`;
 }
 
 // ============================================================================
@@ -148,11 +164,16 @@ async function main() {
   console.log(`  图标卡片: ${parsed.iconPrompts.length} 个`);
   console.log(`  配图卡片: ${parsed.imagePrompts.length} 个`);
 
-  // ── 5. Assemble ───────────────────────────────────────────────
-  console.log("\n[5/6] assemble_page");
+  // ── 5. Add image prompts summary + assemble ────────────────────
+  console.log("\n[5/6] add_prompts_summary + assemble_page");
+
+  // Append all image prompts as a reviewable section after the page
+  const promptsSection = buildPromptsSummary(parsed.imagePrompts, parsed.iconPrompts);
+  const finalHtml = promptHtml.replace("</body>", promptsSection + "</body>");
+
   const outputPath = path.join(OUTPUT_DIR, "page-personnel-response.html");
   const assembled = assemblePage({
-    html: promptHtml,
+    html: finalHtml,
     config: {
       removeXmlComment: true,
       outputPath,

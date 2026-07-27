@@ -70,11 +70,20 @@ export function insertAssetSlots(input: InsertAssetSlotsInput): InsertAssetSlots
     if (ref) ref.replaceWith(doc.createTextNode(ref.textContent || ""));
   });
 
-  // Add overflow image prompts to assetMap (no DOM slot, Page 2 only)
+  // Add overflow image slots to body-grid as extra rows (one per remaining prompt)
+  const bodyGrid = doc.querySelector(".body-grid");
   for (let i = figures.length; i < input.imagePrompts.length; i++) {
     const ip = input.imagePrompts[i];
     const id = `img-${String(i + 1).padStart(3, "0")}`;
-    assetMap.push({ id, type: "image", label: ip?.sectionTitle || "配图", prompt: ip?.prompt || "" });
+    const label = ip?.sectionTitle || "配图";
+
+    // Create a new row: image-card spanning full width
+    const section = doc.createElement("section");
+    section.setAttribute("class", "component img-slot span-12");
+    section.innerHTML = `<span class="slot-id">[${id}]</span><span class="slot-size">1792×1024</span><span class="slot-label">${esc(label)}</span>`;
+
+    if (bodyGrid) bodyGrid.appendChild(section);
+    assetMap.push({ id, type: "image", label, prompt: ip?.prompt || "" });
   }
 
   return { html: dom.serialize(), assetMap };

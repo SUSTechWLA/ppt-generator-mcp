@@ -139,32 +139,38 @@ function mapToTemplate(
   const paragraphs: string[] = [];
   const summaryPoints: string[] = [];
 
-  for (let i = 0; i < totalCards; i++) {
+  // Determine card width: visual template has mixed widths, others are uniform
+  const isVisualTemplate = _templateSlug.includes("visual");
+  const cardCount = totalCards >= 4 ? totalCards : Math.min(totalCards + 1, 4); // pad to fill template rows
+
+  for (let i = 0; i < cardCount; i++) {
     const sub = subs[i];
-    titles.push(sub.title);
-
-    // Position-aware truncation:
-    // - Wide cards (span-6/span-8): 140-150 chars
-    // - Narrow cards (span-4, last position in visual template): 70-80 chars
-    const isLastNarrow = (totalCards === 3 && i === 2); // visual template span-4
-    // Card widths: span-6 ≈ 145mm → ~26 chars/line → 5-6 lines → 130-150 chars
-    //             span-4 ≈  95mm → ~17 chars/line → 4-5 lines →  70-85 chars
-    const maxLen = isLastNarrow ? 80 : 140;
-    const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
-    paragraphs.push(extractSentences(fullText, maxLen));
-
-    // Collect key points for summary
-    for (const kp of sub.keyPoints.slice(0, 2)) {
-      summaryPoints.push(kp);
+    if (sub) {
+      titles.push(sub.title);
+      const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
+      const isNarrow = isVisualTemplate && i === 2; // span-4 in visual
+      paragraphs.push(extractSentences(fullText, isNarrow ? 80 : 140));
+    } else {
+      // Padding row: use root context for extra card
+      titles.push(`${root.title}总结`);
+      paragraphs.push(extractSentences(root.paragraphs[0] || "", 120));
     }
 
-    // Generate image prompt from section content
-    const imgPrompt = generateImagePrompt(sub);
-    if (imgPrompt) {
+    // Collect key points + generate image prompt
+    if (sub) {
+      for (const kp of sub.keyPoints.slice(0, 2)) {
+        summaryPoints.push(kp);
+      }
+      const imgPrompt = generateImagePrompt(sub);
+      if (imgPrompt) {
+        imagePrompts.push({ sectionIndex: i, sectionTitle: sub.title, prompt: imgPrompt });
+      }
+    } else {
+      // Padded row: derive prompt from root content
       imagePrompts.push({
         sectionIndex: i,
-        sectionTitle: sub.title,
-        prompt: imgPrompt,
+        sectionTitle: `${root.title}总结`,
+        prompt: generateImagePrompt(root),
       });
     }
   }
@@ -253,7 +259,8 @@ function recommendTemplate(sections: ParsedSection[]): string {
 
   if (subCount >= 5) return "green-infographic-bid-a4-landscape";
   if (subCount >= 4) return "green-infographic-bid-a4-landscape-text-image";
-  if (subCount >= 3) return "green-infographic-bid-a4-landscape-visual";
+  // For 3 sections with images, use text-image (1:1 pairs, each card gets its own image slot)
+  if (subCount >= 3) return "green-infographic-bid-a4-landscape-text-image";
   return "green-infographic-bid-a4-landscape-text-image";
 }
 

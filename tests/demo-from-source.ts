@@ -35,39 +35,43 @@ const SOURCE_TEXT = fs.readFileSync(
 );
 
 // ============================================================================
-// Insert prompt cards for visual slots
+// Insert asset slots (Page 1) — ID'd placeholder boxes for images/icons
 // ============================================================================
 
-async function insertPromptCards(
+async function insertAssetSlots(
   html: string,
   iconPrompts: Array<{ position: string; description: string; prompt: string }>,
-  imagePrompts: Array<{ prompt: string }>,
-): Promise<string> {
+  imagePrompts: Array<{ sectionTitle: string; prompt: string }>,
+): Promise<{ html: string; assetMap: Array<{ id: string; type: string; label: string; prompt: string }> }> {
   const { JSDOM } = await import("jsdom");
   const dom = new JSDOM(html);
   const doc = dom.window.document;
+  const assetMap: Array<{ id: string; type: string; label: string; prompt: string }> = [];
 
-  // Replace <icon> tags with prompt cards
+  // Replace <icon> tags with icon-slot placeholder boxes
   const icons = doc.querySelectorAll("icon");
-  let iconIdx = 0;
-  icons.forEach((el) => {
-    const ip = iconPrompts[iconIdx % iconPrompts.length];
-    const card = doc.createElement("div");
-    card.setAttribute("class", "prompt-icon");
-    const concept = ip?.position || "图标";
-    card.innerHTML = `<span class="prompt-label">🔷 ${escapeHtml(concept)}</span><span class="prompt-text">${escapeHtml(ip?.prompt || "icon prompt")}</span>`;
-    el.replaceWith(card);
-    iconIdx++;
+  icons.forEach((el, i) => {
+    const ip = iconPrompts[i % iconPrompts.length];
+    const id = `icon-${String(i + 1).padStart(3, "0")}`;
+    const label = ip?.position || "图标";
+    const slot = doc.createElement("div");
+    slot.setAttribute("class", "icon-slot");
+    slot.innerHTML = `<span class="slot-id">[${id}]</span><span class="slot-label">${escapeHtml(label)}</span>`;
+    el.replaceWith(slot);
+    assetMap.push({ id, type: "icon", label, prompt: ip?.prompt || "" });
   });
 
-  // Replace <figures> with image prompt cards
+  // Replace <figures> with img-slot placeholder boxes
   const figures = doc.querySelectorAll("figures");
   figures.forEach((el, i) => {
-    const imgPrompt = imagePrompts[i]?.prompt || "image prompt";
-    const card = doc.createElement("div");
-    card.setAttribute("class", "prompt-image");
-    card.innerHTML = `<span class="prompt-label">🖼️ 配图提示词（可对话优化后生成）</span><span class="prompt-text">${escapeHtml(imgPrompt)}</span>`;
-    el.replaceWith(card);
+    const ip = imagePrompts[i];
+    const id = `img-${String(i + 1).padStart(3, "0")}`;
+    const label = ip?.sectionTitle || "配图";
+    const slot = doc.createElement("div");
+    slot.setAttribute("class", "img-slot");
+    slot.innerHTML = `<span class="slot-id">[${id}]</span><span class="slot-size">1792×1024</span><span class="slot-label">${escapeHtml(label)}</span>`;
+    el.replaceWith(slot);
+    assetMap.push({ id, type: "image", label, prompt: ip?.prompt || "" });
 
     // Clean figure-ref inside parent
     const parent = el.parentElement;
@@ -75,7 +79,71 @@ async function insertPromptCards(
     if (ref) ref.replaceWith(doc.createTextNode(ref.textContent || ""));
   });
 
-  return dom.serialize();
+  // Add any remaining image prompts that didn't fit DOM slots
+  for (let i = figures.length; i < imagePrompts.length; i++) {
+    const ip = imagePrompts[i];
+    const id = `img-${String(i + 1).padStart(3, "0")}`;
+    assetMap.push({ id, type: "image", label: ip?.sectionTitle || "配图", prompt: ip?.prompt || "" });
+  }
+
+  return { html: dom.serialize(), assetMap };
+}
+
+// ============================================================================
+// Build prompts reference page (Page 2)
+// ============================================================================
+
+function buildPromptsPage(assetMap: Array<{ id: string; type: string; label: string; prompt: string }>): string {
+  const images = assetMap.filter((a) => a.type === "image");
+  const icons = assetMap.filter((a) => a.type === "icon");
+
+  const imgRows = images.map((a) =>
+    `<tr>
+      <td style="padding:1.5mm 2mm;border:0.2mm solid #8FAE99;font-size:8pt;font-weight:700;color:#0B5A2A;">${escapeHtml(a.id)}</td>
+      <td style="padding:1.5mm 2mm;border:0.2mm solid #8FAE99;font-size:8pt;">${escapeHtml(a.label)}</td>
+      <td style="padding:1.5mm 2mm;border:0.2mm solid #8FAE99;font-size:7.5pt;line-height:1.4;color:#171A18;">${escapeHtml(a.prompt)}</td>
+    </tr>`,
+  ).join("");
+
+  const iconRows = icons.map((a) =>
+    `<tr>
+      <td style="padding:1mm 2mm;border:0.2mm solid #8FAE99;font-size:7pt;font-weight:700;color:#0B5A2A;">${escapeHtml(a.id)}</td>
+      <td style="padding:1mm 2mm;border:0.2mm solid #8FAE99;font-size:7pt;">${escapeHtml(a.label)}</td>
+      <td style="padding:1mm 2mm;border:0.2mm solid #8FAE99;font-size:6.5pt;line-height:1.3;color:#6B746E;">${escapeHtml(a.prompt)}</td>
+    </tr>`,
+  ).join("");
+
+  return `
+    <div style="width:297mm;padding:4mm 6.5mm;background:#fff;page-break-before:always;font-family:Source Han Sans SC,Noto Sans CJK SC,sans-serif;">
+      <h2 style="color:#0B5A2A;font-size:16pt;margin:0 0 1mm;">📋 图片与图标生成参考</h2>
+      <p style="color:#6B746E;font-size:8pt;margin:0 0 3mm;">以下提示词可直接用于 DALL-E / Stable Diffusion 等文生图工具。生成后将图片命名为对应的 ID 并放入 assets 目录，即可自动替换交付件页面中的占位框。</p>
+
+      <h3 style="color:#0B5A2A;font-size:12pt;margin:2mm 0 1mm;">🖼️ 配图提示词</h3>
+      <table style="width:100%;border-collapse:collapse;border:0.3mm solid #8FAE99;">
+        <thead>
+          <tr style="background:#0B5A2A;color:#fff;">
+            <th style="padding:1.5mm 2mm;font-size:8pt;text-align:left;">ID</th>
+            <th style="padding:1.5mm 2mm;font-size:8pt;text-align:left;width:25%;">所属卡片</th>
+            <th style="padding:1.5mm 2mm;font-size:8pt;text-align:left;">生成提示词</th>
+          </tr>
+        </thead>
+        <tbody>${imgRows}</tbody>
+      </table>
+
+      <h3 style="color:#0B5A2A;font-size:12pt;margin:4mm 0 1mm;">🔷 图标提示词</h3>
+      <table style="width:100%;border-collapse:collapse;border:0.3mm solid #8FAE99;">
+        <thead>
+          <tr style="background:#0B5A2A;color:#fff;">
+            <th style="padding:1mm 2mm;font-size:7pt;text-align:left;">ID</th>
+            <th style="padding:1mm 2mm;font-size:7pt;text-align:left;width:20%;">概念</th>
+            <th style="padding:1mm 2mm;font-size:7pt;text-align:left;">生成提示词</th>
+          </tr>
+        </thead>
+        <tbody>${iconRows}</tbody>
+      </table>
+
+      <p style="color:#6B746E;font-size:7pt;margin:3mm 0 0;">生成后文件命名示例：img-001.png, icon-001.svg — 放置于 assets/images/ 和 assets/icons/ 目录后刷新交付件页面即可显示。</p>
+    </div>`;
 }
 
 function escapeHtml(text: string): string {
@@ -154,22 +222,20 @@ async function main() {
   console.log(`  已填充: ${filled.filledCount} 处`);
   if (filled.warnings.length) for (const w of filled.warnings) console.log(`  ⚠️  ${w}`);
 
-  // ── 4. Insert prompt cards (replaces render_icons + generate_image) ──
-  console.log("\n[4/6] insert_prompt_cards");
-  const promptHtml = await insertPromptCards(
+  // ── 4. Insert asset slots (Page 1: layout with ID'd placeholders) ──
+  console.log("\n[4/6] insert_asset_slots");
+  const { html: layoutHtml, assetMap } = await insertAssetSlots(
     filled.html,
     parsed.iconPrompts,
     parsed.imagePrompts,
   );
-  console.log(`  图标卡片: ${parsed.iconPrompts.length} 个`);
-  console.log(`  配图卡片: ${parsed.imagePrompts.length} 个`);
+  console.log(`  图片槽位: ${assetMap.filter(a => a.type === "image").length} 个`);
+  console.log(`  图标槽位: ${assetMap.filter(a => a.type === "icon").length} 个`);
 
-  // ── 5. Add image prompts summary + assemble ────────────────────
-  console.log("\n[5/6] add_prompts_summary + assemble_page");
-
-  // Append all image prompts as a reviewable section after the page
-  const promptsSection = buildPromptsSummary(parsed.imagePrompts, parsed.iconPrompts);
-  const finalHtml = promptHtml.replace("</body>", promptsSection + "</body>");
+  // ── 5. Build Page 2 + assemble ─────────────────────────────────
+  console.log("\n[5/6] build_prompts_page + assemble");
+  const promptsPage = buildPromptsPage(assetMap);
+  const finalHtml = layoutHtml.replace("</body>", promptsPage + "</body>");
 
   const outputPath = path.join(OUTPUT_DIR, "page-personnel-response.html");
   const assembled = assemblePage({

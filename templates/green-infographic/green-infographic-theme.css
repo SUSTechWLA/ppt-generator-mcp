@@ -165,12 +165,14 @@ body {
 .placeholder-card span { font-size: 7pt; line-height: 1.3; max-width: 100%; word-break: break-all; display: block; }
 
 /* Prompt cards — replace icon/image slots with reviewable text prompts */
-.prompt-icon { display: grid; place-items: center; padding: 1.5mm; gap: 0.8mm; background: var(--green-050); border: 0.25mm dotted var(--line); border-radius: 1.5mm; min-height: 0; overflow: hidden; }
-.prompt-icon .prompt-label { color: var(--green-700); font-size: 7pt; font-weight: 700; text-align: center; }
-.prompt-icon .prompt-text { color: var(--muted); font-size: 6.5pt; line-height: 1.25; text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-.prompt-image { display: grid; grid-template-rows: auto minmax(0, 1fr); padding: 1.5mm; gap: 0.8mm; background: var(--green-050); border: 0.25mm dotted var(--line); border-radius: 1.5mm; height: 100%; overflow: hidden; }
-.prompt-image .prompt-label { color: var(--green-700); font-size: 7pt; font-weight: 700; }
-.prompt-image .prompt-text { color: var(--muted); font-size: 6.5pt; line-height: 1.3; overflow: auto; }
+/* Asset slots — placeholder boxes for images/icons to be generated later */
+.img-slot { display: grid; place-items: center; align-content: center; gap: 1mm; padding: 2mm; border: 0.5mm solid var(--line); border-radius: 2mm; background: #fff; height: 100%; overflow: hidden; }
+.img-slot .slot-id { color: var(--green-700); font-size: 9pt; font-weight: 700; }
+.img-slot .slot-size { color: var(--muted); font-size: 7pt; }
+.img-slot .slot-label { color: var(--ink); font-size: 7pt; text-align: center; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icon-slot { display: grid; place-items: center; align-content: center; gap: 0.5mm; padding: 1mm; border: 0.3mm solid var(--line); border-radius: 1.5mm; background: var(--green-050); min-height: 0; overflow: hidden; }
+.icon-slot .slot-id { color: var(--green-700); font-size: 7pt; font-weight: 700; }
+.icon-slot .slot-label { color: var(--muted); font-size: 6pt; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 90%; }
 
 .page-footer { position: relative; background: linear-gradient(90deg, var(--green-900), var(--cyan-600), var(--blue-500)); }
 .page-number { position: absolute; right: 7mm; top: 50%; padding: 0.7mm 2.4mm; border-radius: 2mm; background: #fff; color: var(--ink); font-size: 12pt; font-weight: 500; line-height: 1; transform: translateY(-50%); }

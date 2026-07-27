@@ -138,17 +138,22 @@ function mapToTemplate(
 
   // Sub-sections (##### headings) → card titles
   const subs = sections.slice(1).filter((s) => s.level >= 4);
+  const totalCards = Math.min(subs.length, 5);
   const titles: string[] = [];
   const paragraphs: string[] = [];
   const summaryPoints: string[] = [];
 
-  for (let i = 0; i < Math.min(subs.length, 5); i++) {
+  for (let i = 0; i < totalCards; i++) {
     const sub = subs[i];
     titles.push(sub.title);
 
-    // Shorter truncation (100-120 chars) for proper fit in A4 landscape cards
+    // Position-aware truncation:
+    // - Wide cards (span-6/span-8): 140-150 chars
+    // - Narrow cards (span-4, last position in visual template): 70-80 chars
+    const isLastNarrow = (totalCards === 3 && i === 2); // visual template span-4
+    const maxLen = isLastNarrow ? 80 : 145;
     const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
-    paragraphs.push(truncateParagraph(fullText, 145));
+    paragraphs.push(truncateParagraph(fullText, maxLen));
 
     // Collect key points for summary
     for (const kp of sub.keyPoints.slice(0, 2)) {

@@ -8,11 +8,13 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { listTemplates, loadTemplate } from "./lib/template-parser.js";
+import { type LLMConfig } from "./lib/llm-client.js";
 import { fillPlaceholders } from "./tools/fill-placeholders.js";
 import { renderIcons } from "./tools/render-icons.js";
 import { assemblePage } from "./tools/assemble-page.js";
 import { validatePage } from "./tools/validate-page.js";
 import { generateImages, generateSingleImage } from "./tools/generate-image.js";
+import { parseSourceContent } from "./tools/parse-source-content.js";
 
 // ============================================================================
 // Paths
@@ -276,6 +278,41 @@ const TOOL_DEFINITIONS = [
       required: ["html", "checks"],
     },
   },
+  {
+    name: "parse_source_content",
+    description:
+      "将原始 Markdown/正文解析为模板填充所需的结构化 content 对象。支持 direct（纯正则）和 llm（调 LLM 提取）两种模式。编排层调用此工具后，直接将返回的 content 传给 fill_placeholders。同时返回图片提示词和推荐的模板 slug。",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sourceText: {
+          type: "string",
+          description: "原始 Markdown 或纯文本正文内容",
+        },
+        templateSlug: {
+          type: "string",
+          description: "强制指定模板 slug；留空则自动推荐最匹配的模板",
+        },
+        mode: {
+          type: "string",
+          enum: ["direct", "llm"],
+          description: "解析模式：direct=纯正则解析，llm=调 LLM 提取（需 llmConfig）",
+        },
+        llmConfig: {
+          type: "object",
+          description: "LLM API 配置，仅 llm 模式需要",
+          properties: {
+            provider: { type: "string", enum: ["openai", "anthropic"] },
+            apiKey: { type: "string" },
+            model: { type: "string" },
+            baseUrl: { type: "string" },
+          },
+          required: ["provider", "apiKey"],
+        },
+      },
+      required: ["sourceText"],
+    },
+  },
 ];
 
 // ============================================================================
@@ -479,6 +516,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify(result, null, 2),
             },
           ],
+        };
+      }
+
+      // === parse_source_content ===
+      case "parse_source_content": {
+        const result = await parseSourceContent({
+          sourceText: input.sourceText as string,
+          templateSlug: input.templateSlug as string | undefined,
+          mode: (input.mode as "direct" | "llm") || "direct",
+          llmConfig: input.llmConfig as LLMConfig | undefined,
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
       }
 

@@ -148,7 +148,7 @@ function mapToTemplate(
 
     // Shorter truncation (100-120 chars) for proper fit in A4 landscape cards
     const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
-    paragraphs.push(truncateParagraph(fullText, 110));
+    paragraphs.push(truncateParagraph(fullText, 145));
 
     // Collect key points for summary
     for (const kp of sub.keyPoints.slice(0, 2)) {
@@ -252,11 +252,18 @@ function recommendTemplate(sections: ParsedSection[]): string {
 
 function truncateParagraph(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
-  // Cut at last sentence boundary before maxLen
-  const truncated = text.slice(0, maxLen);
-  const lastPeriod = truncated.lastIndexOf("。");
-  if (lastPeriod > maxLen * 0.6) return truncated.slice(0, lastPeriod + 1);
-  return truncated + "…";
+  // Cut at the best sentence/clause boundary within range
+  const range = text.slice(0, maxLen);
+  // Preferred: end of sentence (。)
+  const period = range.lastIndexOf("。");
+  if (period > maxLen * 0.65) return range.slice(0, period + 1);
+  // Next best: Chinese semicolon (；)
+  const semi = range.lastIndexOf("；");
+  if (semi > maxLen * 0.65) return range.slice(0, semi + 1) + "。";
+  // Last resort: comma at reasonable position
+  const comma = range.lastIndexOf("，");
+  if (comma > maxLen * 0.7) return range.slice(0, comma) + "。";
+  return range + "…";
 }
 
 function generateImagePrompt(section: ParsedSection): string {

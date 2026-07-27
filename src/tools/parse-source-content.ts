@@ -147,7 +147,9 @@ function mapToTemplate(
     // - Wide cards (span-6/span-8): 140-150 chars
     // - Narrow cards (span-4, last position in visual template): 70-80 chars
     const isLastNarrow = (totalCards === 3 && i === 2); // visual template span-4
-    const maxLen = isLastNarrow ? 100 : 250;
+    // Card widths: span-6 ≈ 145mm → ~26 chars/line → 5-6 lines → 130-150 chars
+    //             span-4 ≈  95mm → ~17 chars/line → 4-5 lines →  70-85 chars
+    const maxLen = isLastNarrow ? 80 : 140;
     const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
     paragraphs.push(extractSentences(fullText, maxLen));
 
@@ -266,13 +268,13 @@ function recommendTemplate(sections: ParsedSection[]): string {
 function extractSentences(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
 
-  const sentences = text.split(/(?<=[。！？])/);
+  const sentences = text.split(/(?<=[。！？；])/);
   let result = "";
 
   for (const s of sentences) {
     const next = result + s;
-    // Include sentence if: (a) it fits within maxLen, OR (b) current result is too short
-    if (next.length <= maxLen || result.length < 60) {
+    // Include sentence if: (a) it fits, OR (b) current result is under half of maxLen
+    if (next.length <= maxLen || result.length < maxLen * 0.55) {
       result = next;
     } else {
       break;
@@ -468,7 +470,7 @@ export async function parseSourceContent(
       const totalCards = (result.content.direct["component-title"] as string[])?.length || 0;
       for (let i = 0; i < paragraphs.length; i++) {
         const isLastNarrow = (totalCards === 3 && i === 2);
-        const targetLen = isLastNarrow ? 100 : 180;
+        const targetLen = isLastNarrow ? 70 : 130;
         if (paragraphs[i].length > targetLen + 20) {
           paragraphs[i] = await summarizeParagraph(paragraphs[i], targetLen, input.llmConfig);
         }

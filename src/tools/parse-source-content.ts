@@ -38,6 +38,12 @@ export interface ParseSourceOutput {
     sectionTitle: string;
     prompt: string;
   }>;
+  // Icon prompts — text descriptions for icon generation
+  iconPrompts: Array<{
+    position: string;
+    description: string;
+    prompt: string;
+  }>;
   // Recommended template slug
   recommendedTemplate: string;
   // Parsed sections for inspection
@@ -119,11 +125,11 @@ function mapToTemplate(
 ): {
   content: { direct: Record<string, string | string[]> };
   imagePrompts: ParseSourceOutput["imagePrompts"];
+  iconPrompts: ParseSourceOutput["iconPrompts"];
 } {
   const direct: Record<string, string | string[]> = {};
   const imagePrompts: ParseSourceOutput["imagePrompts"] = [];
-
-  if (sections.length === 0) return { content: { direct }, imagePrompts };
+  const iconPrompts: ParseSourceOutput["iconPrompts"] = [];
 
   // Root section (### heading) → page metadata
   const root = sections[0];
@@ -229,7 +235,10 @@ function mapToTemplate(
   // Image caption
   direct["image-caption"] = `项目人员配备场景示意图（AI生成，非项目实景）`;
 
-  return { content: { direct }, imagePrompts };
+  // Generate icon prompts from content context
+  const generatedIconPrompts = generateIconPrompts(sections);
+
+  return { content: { direct }, imagePrompts, iconPrompts: generatedIconPrompts };
 }
 
 // ============================================================================
@@ -269,6 +278,61 @@ function truncateParagraph(text: string, maxLen: number): string {
   const comma = range.lastIndexOf("，");
   if (comma > maxLen * 0.7) return range.slice(0, comma) + "。";
   return range + "…";
+}
+
+function generateIconPrompts(sections: ParsedSection[]): ParseSourceOutput["iconPrompts"] {
+  const allText = sections.map((s) => s.title + " " + s.paragraphs.join(" ")).join(" ");
+  const prompts: ParseSourceOutput["iconPrompts"] = [];
+
+  // Map content keywords to icon concepts and generation prompts
+  const iconConcepts: Array<{ keyword: RegExp; concept: string; prompt: string }> = [
+    { keyword: /人员|团队|班组|对接|组织/, concept: "团队协作图标", prompt: "A simple line icon of two people or a team, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /审批|流程|变更|申请/, concept: "审批流程图标", prompt: "A simple line icon of a clipboard with checkmark, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /文件|文档|台账|记录|归档/, concept: "文档管理图标", prompt: "A simple line icon of a document or file, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /检查|巡查|考核|评估/, concept: "检查评估图标", prompt: "A simple line icon of a magnifying glass or checklist, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /计划|日程|安排|编制/, concept: "计划日历图标", prompt: "A simple line icon of a calendar, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /作业|养护|修剪|施工/, concept: "养护作业图标", prompt: "A simple line icon of garden shears or a plant, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /设备|车辆|运输|机械/, concept: "设备运输图标", prompt: "A simple line icon of a truck or equipment, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+    { keyword: /质量|安全|保障|达标/, concept: "质量安全图标", prompt: "A simple line icon of a shield with checkmark, professional style, green color (#0B5A2A), transparent background, suitable for bid document" },
+  ];
+
+  for (const { keyword, concept, prompt } of iconConcepts) {
+    if (keyword.test(allText)) {
+      prompts.push({ position: concept, description: concept, prompt });
+    }
+  }
+
+  return prompts;
+}
+
+const SUMMARIZE_PROMPT = `你是一个专业的标书文档精简助手。请将以下段落精简为指定字数以内的版本，保留所有关键信息和数据，删除冗余修饰词，确保语句通顺专业。
+
+要求：
+1. 保留所有具体数字、名称、关键术语
+2. 删减重复表述和修饰性语言
+3. 确保每句话都有实质性信息
+4. 直接输出精简后的文本，不要解释
+
+目标字数：{targetLen}字以内
+原文：{text}`;
+
+async function summarizeParagraph(
+  text: string,
+  targetLen: number,
+  config?: LLMConfig,
+): Promise<string> {
+  if (!config || text.length <= targetLen) return text;
+
+  try {
+    const prompt = SUMMARIZE_PROMPT
+      .replace("{targetLen}", String(targetLen))
+      .replace("{text}", text);
+    const result = await generateText(config, "", prompt);
+    const cleaned = result.trim();
+    return cleaned.length > 0 ? cleaned : text.slice(0, targetLen);
+  } catch {
+    return truncateParagraph(text, targetLen);
+  }
 }
 
 function generateImagePrompt(section: ParsedSection): string {
@@ -348,12 +412,26 @@ export async function parseSourceContent(
   // Phase 3: Map content
   let result = mapToTemplate(sections, recommended);
 
-  // Phase 4: LLM-assisted extraction (higher quality)
+  // Phase 3b: LLM summarization for paragraphs too long for their card width
+  if (input.llmConfig) {
+    const paragraphs = result.content.direct["paragraph"];
+    if (Array.isArray(paragraphs)) {
+      const totalCards = (result.content.direct["component-title"] as string[])?.length || 0;
+      for (let i = 0; i < paragraphs.length; i++) {
+        const isLastNarrow = (totalCards === 3 && i === 2); // visual template span-4
+        const targetLen = isLastNarrow ? 80 : 145;
+        if (paragraphs[i].length > targetLen + 10) {
+          paragraphs[i] = await summarizeParagraph(paragraphs[i], targetLen, input.llmConfig);
+        }
+      }
+    }
+  }
+
+  // Phase 4: LLM-assisted extraction (higher quality, overrides template mapping)
   if (input.mode === "llm" && input.llmConfig) {
     try {
       const extracted = await llmExtract(input.sourceText, input.llmConfig);
 
-      // Merge LLM results into content
       const direct: Record<string, string | string[]> = {};
       if (extracted.pageTitle) direct["page-title"] = extracted.pageTitle as string;
       if (extracted.sectionTitle) direct["section-title"] = extracted.sectionTitle as string;
@@ -365,7 +443,6 @@ export async function parseSourceContent(
       if (extracted.summaryBullets) direct["bullet"] = extracted.summaryBullets as string[];
       if (extracted.stepLabels) direct["step-label"] = extracted.stepLabels as string[];
 
-      // Override image prompts with LLM-generated ones
       if (extracted.imagePrompts) {
         result.imagePrompts = (extracted.imagePrompts as string[]).map((p, i) => ({
           sectionIndex: i,

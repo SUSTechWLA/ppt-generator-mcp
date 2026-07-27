@@ -1,13 +1,12 @@
 /**
- * Demo: 正文 → 可交付 PPT 页面（全流程）
+ * Demo: 正文 → 纯文本可交付页面（含可审视的图片/图标提示词）
  *
- * 输入: raw markdown source
- * 流程: parse_source_content → fill_placeholders → render_icons
- *       → generate_image → assemble_page → validate_page
+ * 图标和图片插槽替换为完整提示词卡片，用户可直接审视内容并就提示词对话优化。
+ * 后续接入 LLM API 即可将提示词一键转化为实际图片/图标。
  *
  * Usage:
  *   npx tsx tests/demo-from-source.ts
- *   OPENAI_API_KEY=sk-... npx tsx tests/demo-from-source.ts   # LLM mode
+ *   OPENAI_API_KEY=sk-... npx tsx tests/demo-from-source.ts   # LLM 智能摘要
  */
 
 import * as path from "node:path";
@@ -15,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import { loadTemplate } from "../src/lib/template-parser.js";
 import { parseSourceContent } from "../src/tools/parse-source-content.js";
 import { fillPlaceholders } from "../src/tools/fill-placeholders.js";
-import { renderIcons } from "../src/tools/render-icons.js";
 import { assemblePage } from "../src/tools/assemble-page.js";
 import { validatePage } from "../src/tools/validate-page.js";
 
@@ -26,7 +24,7 @@ const TEMPLATES_DIR = path.join(PROJECT_ROOT, "templates");
 const OUTPUT_DIR = path.join(PROJECT_ROOT, "output");
 
 // ============================================================================
-// Source document (from user's markdown)
+// Source document
 // ============================================================================
 
 const SOURCE_TEXT = `### 1.1.1 项目人员配备要求响应
@@ -52,44 +50,50 @@ const SOURCE_TEXT = `### 1.1.1 项目人员配备要求响应
 同时建立后备梯队制度，从班组长中选拔1-2名技术骨干作为后备培养对象，确保人员变更时新任者对本项目已有充分了解，最大限度缩短适应期。`;
 
 // ============================================================================
-// Icon mapping — replaces hardcoded template icons with context-aware ones
+// Insert prompt cards for visual slots
 // ============================================================================
 
-function suggestIcons(
-  sections: Array<{ title: string; paragraphs: string[] }>,
-): Record<string, string> {
-  const allText = sections.map((s) => s.title + " " + s.paragraphs.join(" ")).join(" ");
+async function insertPromptCards(
+  html: string,
+  iconPrompts: Array<{ position: string; prompt: string }>,
+  imagePrompts: Array<{ prompt: string }>,
+): Promise<string> {
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
 
-  const iconSemantics: Record<string, string> = {
-    "users-group":      "人员|团队|班组|对接|组织",
-    "clipboard-check":  "审批|流程|变更|申请|合规",
-    "file-description": "文件|文档|台账|记录|归档|资料",
-    "search":           "检查|巡查|考核|评估|监督",
-    "calendar":         "计划|日程|安排|编制|排期",
-    "scissors":         "作业|养护|修剪|施工|操作",
-    "truck":            "设备|车辆|运输|机械|物资",
-    "shield-check":     "质量|安全|保障|达标|标准",
-  };
+  // Replace <icon> tags with prompt cards
+  const icons = doc.querySelectorAll("icon");
+  let iconIdx = 0;
+  icons.forEach((el) => {
+    const ip = iconPrompts[iconIdx % iconPrompts.length];
+    const card = doc.createElement("div");
+    card.setAttribute("class", "prompt-icon");
+    card.innerHTML = `<span class="prompt-label">🔷 图标</span><span class="prompt-text">${escapeHtml(ip?.prompt || "icon prompt")}</span>`;
+    el.replaceWith(card);
+    iconIdx++;
+  });
 
-  // Score icons by keyword match count against content
-  const scored = Object.entries(iconSemantics)
-    .map(([icon, keywords]) => ({
-      icon,
-      score: keywords.split("|").filter((kw) => allText.includes(kw)).length,
-    }))
-    .filter((s) => s.score > 0)
-    .sort((a, b) => b.score - a.score);
+  // Replace <figures> with image prompt cards
+  const figures = doc.querySelectorAll("figures");
+  figures.forEach((el, i) => {
+    const imgPrompt = imagePrompts[i]?.prompt || "image prompt";
+    const card = doc.createElement("div");
+    card.setAttribute("class", "prompt-image");
+    card.innerHTML = `<span class="prompt-label">🖼️ 配图提示词（可对话优化后生成）</span><span class="prompt-text">${escapeHtml(imgPrompt)}</span>`;
+    el.replaceWith(card);
 
-  // Only replace truly irrelevant icons (not in our semantics at all)
-  const irrelevant = ["leaf", "sun", "snowflake", "wind", "bug", "alert-triangle", "droplet"];
-  const replacements: Record<string, string> = {};
+    // Clean figure-ref inside parent
+    const parent = el.parentElement;
+    const ref = parent?.querySelector("figure-ref");
+    if (ref) ref.replaceWith(doc.createTextNode(ref.textContent || ""));
+  });
 
-  for (let i = 0; i < irrelevant.length; i++) {
-    const best = scored[i % scored.length];
-    if (best) replacements[irrelevant[i]] = best.icon;
-  }
+  return dom.serialize();
+}
 
-  return replacements;
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ============================================================================
@@ -98,155 +102,84 @@ function suggestIcons(
 
 async function main() {
   console.log("=".repeat(60));
-  console.log("  正文 → PPT 全流程 Demo");
+  console.log("  正文 → 纯文本可交付页面（含审视提示词）");
   console.log("=".repeat(60));
 
-  // ── Step 1: Parse source content ─────────────────────────────────
-  console.log("\n[1/8] parse_source_content — 解析正文 → 结构化 content");
-
-  const mode = process.env.OPENAI_API_KEY ? "llm" : "direct";
-  const llmConfig = process.env.OPENAI_API_KEY
-    ? { provider: "openai" as const, apiKey: process.env.OPENAI_API_KEY }
+  const useLLM = !!process.env.OPENAI_API_KEY;
+  const llmConfig = useLLM
+    ? { provider: "openai" as const, apiKey: process.env.OPENAI_API_KEY! }
     : undefined;
 
+  // ── 1. Parse source ────────────────────────────────────────────
+  console.log("\n[1/6] parse_source_content");
   const parsed = await parseSourceContent({
     sourceText: SOURCE_TEXT,
-    mode: mode as "direct" | "llm",
+    mode: useLLM ? "llm" : "direct",
     llmConfig,
   });
 
-  console.log(`  模式: ${mode}`);
-  console.log(`  推荐模板: ${parsed.recommendedTemplate}`);
-  console.log(`  解析段落: ${parsed.sections.length} 节`);
-  console.log(`  卡片标题: ${(parsed.content.direct["component-title"] as string[])?.length || 0} 个`);
+  console.log(`  模板: ${parsed.recommendedTemplate}`);
+  console.log(`  卡片: ${(parsed.content.direct["component-title"] as string[])?.length || 0} 个`);
   console.log(`  图片提示词: ${parsed.imagePrompts.length} 个`);
-  for (const img of parsed.imagePrompts) {
-    console.log(`    📷 ${img.sectionTitle}: ${img.prompt.slice(0, 80)}...`);
-  }
+  console.log(`  图标提示词: ${parsed.iconPrompts.length} 个`);
 
-  // ── Step 2: Load template ────────────────────────────────────────
-  console.log("\n[2/8] load_template");
-
+  // ── 2. Load template ──────────────────────────────────────────
+  console.log("\n[2/6] load_template");
   const tpl = loadTemplate(TEMPLATES_DIR, parsed.recommendedTemplate);
-  console.log(`  模板: ${tpl.metadata.name}`);
 
-  // ── Step 3: Fill placeholders ────────────────────────────────────
-  console.log("\n[3/8] fill_placeholders");
-
+  // ── 3. Fill content ───────────────────────────────────────────
+  console.log("\n[3/6] fill_placeholders");
   const filled = await fillPlaceholders({
     html: tpl.html,
     content: parsed.content,
-    ...(llmConfig ? { llmConfig } : {}),
+    llmConfig,
   });
-
   console.log(`  已填充: ${filled.filledCount} 处`);
-  if (filled.warnings.length > 0) {
-    console.log(`  ⚠️  警告:`);
-    for (const w of filled.warnings) console.log(`     ${w}`);
-  }
-  if (filled.remainingPlaceholders.length > 0) {
-    console.log(`  待处理: ${filled.remainingPlaceholders.join(", ")}`);
-  }
+  if (filled.warnings.length) for (const w of filled.warnings) console.log(`  ⚠️  ${w}`);
 
-  // ── Step 4: Replace icons + render ────────────────────────────────
-  console.log("\n[4/8] map_icons + render_icons");
+  // ── 4. Insert prompt cards (replaces render_icons + generate_image) ──
+  console.log("\n[4/6] insert_prompt_cards");
+  const promptHtml = await insertPromptCards(
+    filled.html,
+    parsed.iconPrompts,
+    parsed.imagePrompts,
+  );
+  console.log(`  图标卡片: ${parsed.iconPrompts.length} 个`);
+  console.log(`  配图卡片: ${parsed.imagePrompts.length} 个`);
 
-  const templateDir = path.dirname(tpl.filePath);
-  const { JSDOM } = await import("jsdom");
-
-  // 4a: Replace hardcoded template icons with context-aware ones (BEFORE render)
-  const preIconDom = new JSDOM(filled.html);
-  const iconMap = suggestIcons(parsed.sections);
-  const preIconDoc = preIconDom.window.document;
-  preIconDoc.querySelectorAll("icon").forEach((el) => {
-    const oldName = el.getAttribute("name") || "";
-    if (iconMap[oldName]) el.setAttribute("name", iconMap[oldName]);
-  });
-  console.log(`  图标映射: ${Object.keys(iconMap).length} 个替换 (${Object.entries(iconMap).map(([k,v]) => `${k}→${v}`).join(", ")})`);
-
-  // 4b: Now render icons
-  const afterIconHtml = preIconDom.serialize();
-  const iconResult = renderIcons({
-    html: afterIconHtml,
-    iconBasePath: path.join(templateDir, "assets", "icons"),
-    iconsRelativePath: `../../templates/green-infographic/assets/icons/`,
-  });
-  console.log(`  已渲染: ${iconResult.iconCount} 个 SVG 图标`);
-
-  // ── Step 5: Generate images ──────────────────────────────────────
-  console.log("\n[5/8] generate_image");
-
-  const imgDom = new JSDOM(iconResult.html);
-  const imgDoc = imgDom.window.document;
-
-  const figuresList = imgDoc.querySelectorAll("figures");
-  for (let i = 0; i < figuresList.length; i++) {
-    const el = figuresList[i];
-    const prompt = parsed.imagePrompts[i]?.prompt || "AI生成场景图";
-    const placeholder = imgDoc.createElement("div");
-    placeholder.setAttribute("class", "placeholder-card");
-    const escapedPrompt = prompt.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    placeholder.innerHTML =
-      `<strong>📷 AI 配图提示词</strong><span>${escapedPrompt}</span>`;
-    el.replaceWith(placeholder);
-
-    const parent = el.parentElement;
-    const refTag = parent?.querySelector("figure-ref");
-    if (refTag) refTag.replaceWith(imgDoc.createTextNode(refTag.textContent || ""));
-  }
-
-  const imageHtml = imgDom.serialize();
-  console.log(`  已生成 ${figuresList.length} 个图片占位符`);
-
-  // ── Step 6: Assemble ─────────────────────────────────────────────
-  console.log("\n[6/8] assemble_page");
-
+  // ── 5. Assemble ───────────────────────────────────────────────
+  console.log("\n[5/6] assemble_page");
   const outputPath = path.join(OUTPUT_DIR, "page-personnel-response.html");
   const assembled = assemblePage({
-    html: imageHtml,
+    html: promptHtml,
     config: {
       removeXmlComment: true,
       outputPath,
-      templateDir,
+      templateDir: path.dirname(tpl.filePath),
     },
   });
   console.log(`  输出: ${assembled.outputPath}`);
-  if (assembled.warnings.length > 0) {
-    for (const w of assembled.warnings) console.log(`  ⚠️  ${w}`);
-  }
+  if (assembled.warnings.length) for (const w of assembled.warnings) console.log(`  ⚠️  ${w}`);
 
-  // ── Step 7: Validate ─────────────────────────────────────────────
-  console.log("\n[7/8] validate_page");
-
+  // ── 6. Validate ───────────────────────────────────────────────
+  console.log("\n[6/6] validate_page");
   const validated = validatePage({
     html: assembled.html,
     htmlFilePath: outputPath,
-    checks: ["no-xml-tags", "all-icons-rendered", "valid-html"],
+    checks: ["no-xml-tags", "valid-html"],
   });
 
   if (validated.valid) {
-    console.log("  验证通过 — 无残留占位符，HTML 合法");
+    console.log("  验证通过 ✅");
   } else {
-    console.log("  验证未通过:");
-    for (const issue of validated.issues) {
-      console.log(`  ❌ [${issue.type}] ${issue.message}`);
-    }
+    for (const issue of validated.issues) console.log(`  ❌ ${issue.message}`);
   }
 
-  // ── Summary ──────────────────────────────────────────────────────
+  // ── Summary ───────────────────────────────────────────────────
   console.log(`\n${"=".repeat(60)}`);
-  console.log(`  8 步全流程完成`);
-  console.log(`  输入: Markdown 正文 (${SOURCE_TEXT.length} 字)`);
-  console.log(`  输出: ${outputPath}`);
-  if (validated.valid && assembled.warnings.length === 0) {
-    console.log(`  结果: ✅ 可交付`);
-  } else {
-    console.log(`  结果: ⚠️ 需检查`);
-  }
+  console.log(`  可交付页面: ${outputPath}`);
+  console.log(`  结果: ${validated.valid ? "✅" : "⚠️"}`);
   console.log("=".repeat(60));
 }
 
-main().catch((err) => {
-  console.error("Demo failed:", err);
-  process.exit(1);
-});
+main().catch((err) => { console.error("Demo failed:", err); process.exit(1); });

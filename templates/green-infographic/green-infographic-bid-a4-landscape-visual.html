@@ -1,0 +1,135 @@
+<!--
+  =============================================================================
+  @name        绿色信息图型标书页 — 视觉为主（A4横向）
+  @slug        green-infographic-bid-a4-landscape-visual
+  @description
+               少文字、强视觉的信息图型标书页。A4横向单页，绿色商务配色。
+               核心布局：大幅配图占据视觉焦点，辅以简短文字卡片和图标流程，
+               适合需要在标书中展示场景图、效果图或实景照片的页面。
+  @usecase     标书技术方案 | 项目建议书 | 场景展示 | 效果图展示
+  @format      A4横向 297×210mm 单页
+  @layout      12列网格：顶部大图(span-12) + 双栏简述(span-6×2) + 能力面板(span-12)
+               图标流程(span-8) + 简介卡片(span-4) + 总结条(span-12)
+  @components  image-card | text-card | icon-process | capability-panel | summary-band
+  @icons       calendar | scissors | search | clipboard-check | shield-check | leaf | sun
+  @style       绿色商务 | 少文字 | 强视觉 | 信息图
+  @lang        zh-CN
+  @since       2026-07-27
+  =============================================================================
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="template-name" content="绿色信息图型标书页 — 视觉为主（A4横向）">
+  <meta name="template-slug" content="green-infographic-bid-a4-landscape-visual">
+  <meta name="template-description" content="少文字、强视觉的信息图型标书页。大幅配图占据视觉焦点，辅以简短文字和图标流程。">
+  <meta name="template-usecase" content="标书技术方案, 项目建议书, 场景展示, 效果图展示">
+  <meta name="template-format" content="A4横向 297×210mm">
+  <title><page-title>第N页｜页面主题标题</page-title></title>
+  <link rel="stylesheet" href="./green-infographic-theme.css">
+</head>
+<body>
+  <article class="bid-page" data-page-number="N" data-template="green-infographic">
+    <header class="page-header">
+      <h1 class="section-title"><section-title>第X分节：分节名称</section-title></h1>
+      <div class="part-block">
+        <div class="part-number"><part-number>PART.N</part-number></div>
+        <div class="part-label"><part-label>部分标签</part-label></div>
+        <div class="part-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </header>
+
+    <div class="chapter-band">
+      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
+      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
+    </div>
+
+    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
+
+    <main class="body-grid">
+      <!-- Row 1: Full-width hero image -->
+      <figure class="component image-card span-12" data-component="image-card" data-asset-ref="img-hero">
+        <figures>根据页面主题生成宽幅场景图：展示核心业务场景的实景或效果图，构图采用全景或广角视角，光线明亮自然，写实风格，适合标书配图。</figures>
+        <figcaption class="image-caption"><image-caption>核心场景展示（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+
+      <!-- Row 2: Two brief text cards side by side -->
+      <section class="component text-card compact span-6" data-component="text-card">
+        <h4 class="component-title"><component-title>左侧要点标题</component-title></h4>
+        <p data-source-paragraph="1"><paragraph>简短要点描述，60-100字。突出核心信息，语言精炼有力。</paragraph></p>
+      </section>
+
+      <section class="component text-card compact span-6" data-component="text-card">
+        <h4 class="component-title"><component-title>右侧要点标题</component-title></h4>
+        <p data-source-paragraph="2"><paragraph>简短要点描述，60-100字。突出核心信息，语言精炼有力。</paragraph></p>
+      </section>
+
+      <!-- Row 3: Icon process (span-8) + text card (span-4) -->
+      <section class="component icon-process span-8" data-component="icon-process" aria-label="核心流程">
+        <div class="process-step">
+          <icon name="calendar">日历图标</icon>
+          <span><step-label>步骤一</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="scissors">剪刀图标</icon>
+          <span><step-label>步骤二</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="search">搜索图标</icon>
+          <span><step-label>步骤三</step-label></span>
+        </div>
+        <span class="process-arrow" aria-hidden="true">→</span>
+        <div class="process-step">
+          <icon name="clipboard-check">剪贴板图标</icon>
+          <span><step-label>步骤四</step-label></span>
+        </div>
+      </section>
+
+      <section class="component text-card compact span-4" data-component="text-card">
+        <h4 class="component-title"><component-title>流程说明标题</component-title></h4>
+        <p data-source-paragraph="3"><paragraph>对左侧流程的简要说明，80-120字。解释各步骤的核心要点和衔接关系。</paragraph></p>
+      </section>
+
+      <!-- Row 4: Full-width capability panel -->
+      <section class="component icon-process capability-panel span-12" data-component="icon-process" aria-label="核心能力">
+        <div class="capability-grid">
+          <div class="capability-item">
+            <icon name="shield-check">盾牌图标</icon>
+            <span><item-label>能力项一</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="leaf">叶子图标</icon>
+            <span><item-label>能力项二</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="sun">太阳图标</icon>
+            <span><item-label>能力项三</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="users-group">用户组图标</icon>
+            <span><item-label>能力项四</item-label></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Row 5: Summary -->
+      <section class="component summary-band span-12" data-component="summary-band">
+        <p data-source-paragraph="4"><summary-text>总结段落。用1-2句话概括本页核心观点，信息精炼、结论明确。</summary-text></p>
+        <ul class="summary-list">
+          <li><bullet>要点一</bullet></li>
+          <li><bullet>要点二</bullet></li>
+          <li><bullet>要点三</bullet></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span class="page-number"><page-number>N</page-number></span>
+    </footer>
+  </article>
+</body>
+</html>

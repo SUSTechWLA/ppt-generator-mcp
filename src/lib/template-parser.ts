@@ -110,6 +110,8 @@ const PLACEHOLDER_TAGS = [
   "component-title",
   "figure-ref",
   "paragraph",
+  "table-header",
+  "table-cell",
   "step-label",
   "step-number",
   "stage-number",
@@ -240,9 +242,9 @@ export function loadTemplate(
 ): ParsedTemplate {
   // Find the template file
   const templates = listTemplates(templatesDir);
-  const tpl = templates.find(
-    (t) => t.slug === slug || t.filePath.includes(slug),
-  );
+  // Prioritize exact slug match, fall back to partial path match
+  const tpl = templates.find((t) => t.slug === slug)
+    || templates.find((t) => t.filePath.includes(slug));
 
   if (!tpl) {
     throw new Error(

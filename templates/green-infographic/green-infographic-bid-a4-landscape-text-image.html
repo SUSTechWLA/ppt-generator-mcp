@@ -1,0 +1,107 @@
+<!--
+  =============================================================================
+  @name        绿色信息图型标书页 — 图文并茂（A4横向）
+  @slug        green-infographic-bid-a4-landscape-text-image
+  @description
+               图文并茂型标书页，正文与配图各占一半。A4横向单页，绿色商务配色。
+               核心布局：4行左右对半分布，左列正文卡片(span-6)阐释要点，
+               右列配图(span-6)提供视觉佐证，图文相互印证。
+               适合需要图文对照展示的技术方案、案例分析或产品介绍页面。
+  @usecase     标书技术方案 | 案例分析 | 产品介绍 | 图文对照展示
+  @format      A4横向 297×210mm 单页
+  @layout      12列网格：4行 × (正文span-6 + 图片span-6) + 总结条(span-12)
+  @components  text-card | image-card | summary-band
+  @style       绿色商务 | 图文并茂 | 1:1图文比 | 圆角卡片
+  @lang        zh-CN
+  @since       2026-07-27
+  =============================================================================
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="template-name" content="绿色信息图型标书页 — 图文并茂（A4横向）">
+  <meta name="template-slug" content="green-infographic-bid-a4-landscape-text-image">
+  <meta name="template-description" content="图文并茂型标书页，正文与配图各占一半，4行左右对半分布，图文相互印证。">
+  <meta name="template-usecase" content="标书技术方案, 案例分析, 产品介绍, 图文对照展示">
+  <meta name="template-format" content="A4横向 297×210mm">
+  <title><page-title>第N页｜页面主题标题</page-title></title>
+  <link rel="stylesheet" href="./green-infographic-theme.css">
+</head>
+<body>
+  <article class="bid-page" data-page-number="N" data-template="green-infographic">
+    <header class="page-header">
+      <h1 class="section-title"><section-title>第X分节：分节名称</section-title></h1>
+      <div class="part-block">
+        <div class="part-number"><part-number>PART.N</part-number></div>
+        <div class="part-label"><part-label>部分标签</part-label></div>
+        <div class="part-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </header>
+
+    <div class="chapter-band">
+      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
+      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
+    </div>
+
+    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
+
+    <main class="body-grid">
+      <!-- Row 1: text(span-6) + image(span-6) -->
+      <section class="component text-card span-6" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题一</component-title></h4>
+        <p data-source-paragraph="1"><paragraph>正文段落，150-200字。详细阐述本行主题的核心内容，语言正式专业、逻辑清晰，为右侧配图提供文字说明。</paragraph></p>
+      </section>
+      <figure class="component image-card span-6" data-component="image-card" data-asset-ref="img-01">
+        <figures>根据左侧「<figure-ref>卡片标题一</figure-ref>」正文提炼图片提示词：提取关键场景和主体对象，描述构图和光线氛围，写实摄影风格。</figures>
+        <figcaption class="image-caption"><image-caption>图片说明（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+
+      <!-- Row 2: image(span-6) + text(span-6) — 交错布局 -->
+      <figure class="component image-card span-6" data-component="image-card" data-asset-ref="img-02">
+        <figures>根据右侧「<figure-ref>卡片标题二</figure-ref>」正文提炼图片提示词：提取关键场景和主体对象，描述构图和光线氛围，写实摄影风格。</figures>
+        <figcaption class="image-caption"><image-caption>图片说明（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+      <section class="component text-card span-6" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题二</component-title></h4>
+        <p data-source-paragraph="2"><paragraph>正文段落，150-200字。详细阐述本行主题的核心内容，语言正式专业、逻辑清晰，与左侧配图形成对照。</paragraph></p>
+      </section>
+
+      <!-- Row 3: text(span-6) + image(span-6) -->
+      <section class="component text-card span-6" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题三</component-title></h4>
+        <p data-source-paragraph="3"><paragraph>正文段落，150-200字。详细阐述本行主题的核心内容，语言正式专业、逻辑清晰，为右侧配图提供文字说明。</paragraph></p>
+      </section>
+      <figure class="component image-card span-6" data-component="image-card" data-asset-ref="img-03">
+        <figures>根据左侧「<figure-ref>卡片标题三</figure-ref>」正文提炼图片提示词：提取关键场景和主体对象，描述构图和光线氛围，写实摄影风格。</figures>
+        <figcaption class="image-caption"><image-caption>图片说明（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+
+      <!-- Row 4: image(span-6) + text(span-6) — 交错布局 -->
+      <figure class="component image-card span-6" data-component="image-card" data-asset-ref="img-04">
+        <figures>根据右侧「<figure-ref>卡片标题四</figure-ref>」正文提炼图片提示词：提取关键场景和主体对象，描述构图和光线氛围，写实摄影风格。</figures>
+        <figcaption class="image-caption"><image-caption>图片说明（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+      <section class="component text-card span-6" data-component="text-card">
+        <h4 class="component-title"><component-title>卡片标题四</component-title></h4>
+        <p data-source-paragraph="4"><paragraph>正文段落，150-200字。详细阐述本行主题的核心内容，语言正式专业、逻辑清晰，与左侧配图形成对照。</paragraph></p>
+      </section>
+
+      <!-- Row 5: Summary -->
+      <section class="component summary-band span-12" data-component="summary-band">
+        <p data-source-paragraph="5"><summary-text>总结段落。用1-2句话概括本页四个图文对的核心观点，信息精炼、结论明确。</summary-text></p>
+        <ul class="summary-list">
+          <li><bullet>要点一</bullet></li>
+          <li><bullet>要点二</bullet></li>
+          <li><bullet>要点三</bullet></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span class="page-number"><page-number>N</page-number></span>
+    </footer>
+  </article>
+</body>
+</html>

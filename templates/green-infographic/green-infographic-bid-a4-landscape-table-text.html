@@ -1,0 +1,139 @@
+<!--
+  =============================================================================
+  @name        绿色信息图型标书页 — 表格+文字（A4横向）
+  @slug        green-infographic-bid-a4-landscape-table-text
+  @description
+               数据表格与文字论述组合型标书页。A4横向单页，绿色商务配色。
+               核心布局：上部大表格(span-7)展示核心数据（评分矩阵、对比分析、
+               资源清单等），右侧文字卡片(span-5)逐项解读；
+               中部补充说明文字(span-12)；下部总结条(span-12)。
+               适合标书中需要"数据罗列 + 逐条分析"的论证型页面。
+  @usecase     标书技术方案 | 评分矩阵 | 对比分析 | 资源清单 | 论证分析
+  @format      A4横向 297×210mm 单页
+  @layout      12列网格：表格(span-7) + 文字解读(span-5)
+               补充说明文字(span-12)
+               总结条(span-12)
+  @components  matrix-table | text-card | summary-band
+  @style       绿色商务 | 数据论证 | 表文对照 | 圆角卡片
+  @lang        zh-CN
+  @since       2026-07-27
+  =============================================================================
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="template-name" content="绿色信息图型标书页 — 表格+文字（A4横向）">
+  <meta name="template-slug" content="green-infographic-bid-a4-landscape-table-text">
+  <meta name="template-description" content="数据表格与文字论述组合型标书页，表格罗列数据，文字逐项解读分析。">
+  <meta name="template-usecase" content="标书技术方案, 评分矩阵, 对比分析, 资源清单, 论证分析">
+  <meta name="template-format" content="A4横向 297×210mm">
+  <title><page-title>第N页｜页面主题标题</page-title></title>
+  <link rel="stylesheet" href="./green-infographic-theme.css">
+</head>
+<body>
+  <article class="bid-page" data-page-number="N" data-template="green-infographic">
+    <header class="page-header">
+      <h1 class="section-title"><section-title>第X分节：分节名称</section-title></h1>
+      <div class="part-block">
+        <div class="part-number"><part-number>PART.N</part-number></div>
+        <div class="part-label"><part-label>部分标签</part-label></div>
+        <div class="part-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </header>
+
+    <div class="chapter-band">
+      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
+      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
+    </div>
+
+    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
+
+    <main class="body-grid">
+      <!-- Row 1-2: Table (span-7, row-span-2) + Text analysis (span-5, row-span-2) -->
+      <section class="component span-7 row-span-2" data-component="matrix-table" style="overflow:auto;border:0.35mm solid var(--line);border-radius:2.5mm;background:#fff;">
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th><table-header>指标项</table-header></th>
+              <th><table-header>分值</table-header></th>
+              <th><table-header>评分标准</table-header></th>
+              <th><table-header>得分</table-header></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><table-cell>指标项一</table-cell></td>
+              <td><table-cell>25</table-cell></td>
+              <td><table-cell>评分标准描述一</table-cell></td>
+              <td><table-cell>—</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>指标项二</table-cell></td>
+              <td><table-cell>20</table-cell></td>
+              <td><table-cell>评分标准描述二</table-cell></td>
+              <td><table-cell>—</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>指标项三</table-cell></td>
+              <td><table-cell>15</table-cell></td>
+              <td><table-cell>评分标准描述三</table-cell></td>
+              <td><table-cell>—</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>指标项四</table-cell></td>
+              <td><table-cell>15</table-cell></td>
+              <td><table-cell>评分标准描述四</table-cell></td>
+              <td><table-cell>—</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>指标项五</table-cell></td>
+              <td><table-cell>15</table-cell></td>
+              <td><table-cell>评分标准描述五</table-cell></td>
+              <td><table-cell>—</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>指标项六</table-cell></td>
+              <td><table-cell>10</table-cell></td>
+              <td><table-cell>评分标准描述六</table-cell></td>
+              <td><table-cell>—</table-cell></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="component text-card span-5 row-span-2" data-component="text-card">
+        <h4 class="component-title"><component-title>评分体系解读</component-title></h4>
+        <p data-source-paragraph="1"><paragraph>对左侧评分指标体系的综合解读，200-300字。逐一分析各项指标的设置逻辑、分值权重分配依据，以及投标人应重点关注的评分要点。语言正式专业，论证充分，为评分表提供文字支撑。</paragraph></p>
+        <ul class="bullet-list">
+          <li><bullet>关键解读一</bullet></li>
+          <li><bullet>关键解读二</bullet></li>
+          <li><bullet>关键解读三</bullet></li>
+          <li><bullet>关键解读四</bullet></li>
+        </ul>
+      </section>
+
+      <!-- Row 3: Full-width supplementary text -->
+      <section class="component text-card span-12" data-component="text-card">
+        <h4 class="component-title"><component-title>补充说明标题</component-title></h4>
+        <p data-source-paragraph="2"><paragraph>补充说明段落，150-200字。对表格数据的来源、计算方法和适用范围进行说明，确保评审专家能够准确理解数据含义和评分依据。</paragraph></p>
+      </section>
+
+      <!-- Row 4: Summary -->
+      <section class="component summary-band span-12" data-component="summary-band">
+        <p data-source-paragraph="3"><summary-text>总结段落。用1-2句话提炼本页数据分析和文字论述的核心结论。</summary-text></p>
+        <ul class="summary-list">
+          <li><bullet>要点一</bullet></li>
+          <li><bullet>要点二</bullet></li>
+          <li><bullet>要点三</bullet></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span class="page-number"><page-number>N</page-number></span>
+    </footer>
+  </article>
+</body>
+</html>

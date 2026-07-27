@@ -114,7 +114,14 @@ async function main() {
 
   // ── Step 2: load_template ───────────────────────────────────────
   console.log("\n[2/7] load_template — 加载模板并解析占位符");
+  // Use the exact slug to target the original text-card-paired template
   const slug = "green-infographic-bid-a4-landscape";
+  // Other available templates:
+  //   green-infographic-bid-a4-landscape-visual         — 少文字视觉为主
+  //   green-infographic-bid-a4-landscape-text-image     — 图文并茂 1:1
+  //   green-infographic-bid-a4-landscape-table-image    — 表格+图片
+  //   green-infographic-bid-a4-landscape-table-text     — 表格+文字
+  //   green-infographic-bid-a4-landscape-table-text-image — 表格+文字+图片
   const tpl = loadTemplate(TEMPLATES_DIR, slug);
   console.log(`  名称: ${tpl.metadata.name}`);
   console.log(`  占位符: ${tpl.placeholders.map((p) => `${p.tag}x${p.count}`).join(", ")}`);

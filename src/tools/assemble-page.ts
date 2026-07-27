@@ -29,7 +29,8 @@ const PLACEHOLDER_TAGS = [
   "part-label", "chapter-label", "topic-title", "subsection-title",
   "component-title", "figure-ref", "paragraph", "step-label",
   "step-number", "stage-number", "stage-label", "item-label",
-  "node-label", "figures", "image-caption", "summary-text", "bullet", "icon",
+  "node-label", "figures", "image-caption", "summary-text", "bullet",
+  "table-header", "table-cell", "icon",
 ];
 
 // ============================================================================
@@ -88,6 +89,8 @@ export function assemblePage(input: AssemblePageInput): AssemblePageOutput {
           path.basename(relCss),
         );
         const cssContent = fs.readFileSync(absCss, "utf-8");
+        const destDir = path.dirname(destCss);
+        if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
         fs.writeFileSync(destCss, cssContent);
         html = html.replace(relCss, `./${path.basename(relCss)}`);
       } else {

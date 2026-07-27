@@ -64,6 +64,8 @@ const PLACEHOLDER_TAGS = [
   "image-caption",
   "summary-text",
   "bullet",
+  "table-header",
+  "table-cell",
 ];
 
 // Attribute patterns that contain placeholder values

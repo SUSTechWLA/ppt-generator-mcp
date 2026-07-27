@@ -145,7 +145,16 @@ result = mcp.call("validate_page", html=page.html, checks=["no-xml-tags", ...])
 assert result.valid
 ```
 
-## 模板系统
+## 6 个内置模板
+
+| # | Slug | 风格 | 布局 |
+|---|------|------|------|
+| 1 | `green-infographic-bid-a4-landscape` | 正文+组件配对 | 5组 text-card(span-8) + 可视化组件(span-4) |
+| 2 | `...-visual` | 少文字视觉为主 | 大图 + 双栏简述 + 图标流程 + 能力面板 |
+| 3 | `...-text-image` | 多文+图片 1:1 | 4行 text(span-6) ⇄ image(span-6) 交错 |
+| 4 | `...-table-image` | 表格+图片 | 大表格(span-8) + 图片(span-4) + 时间线 |
+| 5 | `...-table-text` | 表格+文字 | 评分矩阵(span-7) + 文字解读(span-5) |
+| 6 | `...-table-text-image` | 表格+文字+图片 | 文字(span-5) + 图片(span-3) + 表格(span-4) |
 
 ### 模板格式
 

@@ -1,0 +1,141 @@
+<!--
+  =============================================================================
+  @name        绿色信息图型标书页 — 表格+文字+图片（A4横向）
+  @slug        green-infographic-bid-a4-landscape-table-text-image
+  @description
+               全要素组合型标书页，同时包含数据表格、文字论述和场景配图。
+               A4横向单页，绿色商务配色。核心布局：上部三栏分布——
+               文字论述(span-5) + 场景配图(span-3) + 数据表格(span-4)；
+               中下部补充说明(span-8) + 能力面板(span-4)；底部总结条(span-12)。
+               适合标书中需要"数据 + 论述 + 视觉"三位一体论证的综合型页面。
+  @usecase     标书技术方案 | 综合分析 | 多维度论证 | 方案全景展示
+  @format      A4横向 297×210mm 单页
+  @layout      12列网格：文字(span-5) + 图片(span-3) + 表格(span-4)
+               补充文字(span-8) + 能力面板(span-4)
+               总结条(span-12)
+  @components  text-card | image-card | matrix-table | capability-panel | summary-band
+  @style       绿色商务 | 全要素 | 数据+论述+视觉 | 圆角卡片
+  @lang        zh-CN
+  @since       2026-07-27
+  =============================================================================
+-->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="template-name" content="绿色信息图型标书页 — 表格+文字+图片（A4横向）">
+  <meta name="template-slug" content="green-infographic-bid-a4-landscape-table-text-image">
+  <meta name="template-description" content="全要素组合型标书页，数据表格、文字论述、场景配图三位一体论证。">
+  <meta name="template-usecase" content="标书技术方案, 综合分析, 多维度论证, 方案全景展示">
+  <meta name="template-format" content="A4横向 297×210mm">
+  <title><page-title>第N页｜页面主题标题</page-title></title>
+  <link rel="stylesheet" href="./green-infographic-theme.css">
+</head>
+<body>
+  <article class="bid-page" data-page-number="N" data-template="green-infographic">
+    <header class="page-header">
+      <h1 class="section-title"><section-title>第X分节：分节名称</section-title></h1>
+      <div class="part-block">
+        <div class="part-number"><part-number>PART.N</part-number></div>
+        <div class="part-label"><part-label>部分标签</part-label></div>
+        <div class="part-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </header>
+
+    <div class="chapter-band">
+      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
+      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
+    </div>
+
+    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
+
+    <main class="body-grid">
+      <!-- Row 1-2: text(span-5) + image(span-3) + table(span-4), all row-span-2 -->
+      <section class="component text-card span-5 row-span-2" data-component="text-card">
+        <h4 class="component-title"><component-title>核心论述标题</component-title></h4>
+        <p data-source-paragraph="1"><paragraph>核心论述段落，200-280字。对页面的核心观点进行全面阐述，作为左侧论述列，为中间的配图和右侧的数据表格提供上下文和论证框架。语言正式专业，论证层层递进。</paragraph></p>
+      </section>
+
+      <figure class="component image-card span-3 row-span-2" data-component="image-card" data-asset-ref="img-core">
+        <figures>根据左侧「<figure-ref>核心论述标题</figure-ref>」和右侧表格数据提炼图片提示词：展示核心业务场景或效果图，竖幅构图，写实摄影风格。</figures>
+        <figcaption class="image-caption"><image-caption>场景示意图（AI生成，非项目实景）</image-caption></figcaption>
+      </figure>
+
+      <section class="component span-4 row-span-2" data-component="matrix-table" style="overflow:auto;border:0.35mm solid var(--line);border-radius:2.5mm;background:#fff;">
+        <table class="matrix-table">
+          <thead>
+            <tr>
+              <th><table-header>项目</table-header></th>
+              <th><table-header>参数</table-header></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><table-cell>数据项一</table-cell></td>
+              <td><table-cell>参数值一</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>数据项二</table-cell></td>
+              <td><table-cell>参数值二</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>数据项三</table-cell></td>
+              <td><table-cell>参数值三</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>数据项四</table-cell></td>
+              <td><table-cell>参数值四</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>数据项五</table-cell></td>
+              <td><table-cell>参数值五</table-cell></td>
+            </tr>
+            <tr>
+              <td><table-cell>数据项六</table-cell></td>
+              <td><table-cell>参数值六</table-cell></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Row 3: Supplementary text (span-8) + Capability panel (span-4) -->
+      <section class="component text-card span-8" data-component="text-card">
+        <h4 class="component-title"><component-title>补充分析标题</component-title></h4>
+        <p data-source-paragraph="2"><paragraph>对上方表格和论述的补充分析，120-180字。进一步说明数据之间的关系、对比结论和实践意义。</paragraph></p>
+      </section>
+
+      <section class="component icon-process capability-panel span-4" data-component="icon-process" aria-label="核心能力">
+        <div class="capability-grid">
+          <div class="capability-item">
+            <icon name="shield-check">盾牌图标</icon>
+            <span><item-label>能力项一</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="leaf">叶子图标</icon>
+            <span><item-label>能力项二</item-label></span>
+          </div>
+          <div class="capability-item">
+            <icon name="users-group">用户组图标</icon>
+            <span><item-label>能力项三</item-label></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Row 4: Summary -->
+      <section class="component summary-band span-12" data-component="summary-band">
+        <p data-source-paragraph="3"><summary-text>总结段落。综合提炼论述、图片和表格数据所指向的核心结论，信息精炼、逻辑闭环。</summary-text></p>
+        <ul class="summary-list">
+          <li><bullet>要点一</bullet></li>
+          <li><bullet>要点二</bullet></li>
+          <li><bullet>要点三</bullet></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span class="page-number"><page-number>N</page-number></span>
+    </footer>
+  </article>
+</body>
+</html>

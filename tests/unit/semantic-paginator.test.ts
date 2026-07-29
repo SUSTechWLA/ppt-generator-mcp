@@ -77,6 +77,63 @@ test("paginator subdivides a generic long paragraph at safe semantic boundaries"
   assert.match(pageBodies[dependencyPage], /设备完成初始化。该设备随后进入校验。/);
 });
 
+test("paginator aligns ASCII sentence facts and preserves the original inter-sentence gap", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "Incident response",
+      body: "Response complete. Arrive onsite.",
+    }],
+  });
+
+  assert.deepEqual(source.facts.map((fact) => fact.text), [
+    "Response complete.",
+    "Arrive onsite.",
+  ]);
+
+  const splitPages = paginateSource(source, [81, 82]);
+  assert.deepEqual(splitPages.map((page) => page.originalSourceFactIds), [
+    ["fact-1"],
+    ["fact-2"],
+  ]);
+
+  const [combinedPage] = paginateSource(source, [81]);
+  assert.equal(combinedPage.sourceSections[0].body, "Response complete. Arrive onsite.");
+});
+
+test("paginator aligns ASCII semicolon list clauses with source facts", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "Inspection checklist",
+      body: "1) Inspect power; 2) Inspect network; 3) Confirm ready.",
+    }],
+  });
+
+  assert.deepEqual(source.facts.map((fact) => fact.text), [
+    "1) Inspect power;",
+    "2) Inspect network;",
+    "3) Confirm ready.",
+  ]);
+
+  const pages = paginateSource(source, [91, 92, 93]);
+  assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
+  assert.deepEqual(
+    pages.flatMap((page) => page.originalSourceFactIds),
+    source.facts.map((fact) => fact.id),
+  );
+});
+
+test("paginator keeps adjacent Chinese sentences naturally unspaced", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "校验流程",
+      body: "设备完成初始化。该设备随后进入校验。",
+    }],
+  });
+
+  const [page] = paginateSource(source, [83]);
+  assert.equal(page.sourceSections[0].body, "设备完成初始化。该设备随后进入校验。");
+});
+
 test("paginator covers the repository acceptance source in four ordered pages", () => {
   const sourceMarkdown = readFileSync(new URL("../../test.md", import.meta.url), "utf8");
   const source = normalizeSource({ sourceText: sourceMarkdown });

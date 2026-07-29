@@ -1,6 +1,6 @@
 import type { SourceFact, SourceSection } from "../domain/source-document.js";
+import { segmentSemanticText } from "./semantic-text-segmenter.js";
 
-const FACT_SENTENCE = /[^。！？；\n]+[。！？；]?/g;
 const NUMBER = /\d[\d,.]*(?:%|万元|元|天|小时|分钟|㎡|个|名|项|次|年|月|日)?/;
 const REQUIREMENT = /必须|不得|应当|应在|应于|需在|要求|确保|不超过|至少|严禁/;
 const NAME = /《[^》]+》|“[^”]+”|「[^」]+」/;
@@ -11,8 +11,7 @@ export function extractFacts(sections: SourceSection[]): SourceFact[] {
 
   for (const section of sections) {
     const candidates = [section.body, ...section.keyPoints]
-      .join("\n")
-      .match(FACT_SENTENCE) ?? [];
+      .flatMap((value) => segmentSemanticText(value).map((segment) => segment.text));
 
     for (const candidate of candidates) {
       const text = candidate.trim();

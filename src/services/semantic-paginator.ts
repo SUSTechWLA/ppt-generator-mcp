@@ -1,5 +1,6 @@
 import type { SourceDocument, SourceSection, SourceSectionInput } from "../domain/source-document.js";
 import { WorkflowError } from "../domain/workflow-error.js";
+import { segmentSemanticText } from "./semantic-text-segmenter.js";
 
 export interface PagePartition {
   pageNumber: number;
@@ -24,16 +25,12 @@ interface SemanticUnit {
   text: string;
   start: number;
   end: number;
+  gapBefore: string;
   paragraphIndex: number;
   boundaryBefore: BoundaryKind;
   cost: number;
   factCount: number;
   lockedBefore: boolean;
-}
-
-interface TextSegment {
-  text: string;
-  start: number;
 }
 
 type Component = SemanticUnit[];
@@ -65,60 +62,6 @@ interface SplitCandidate {
 
 function paragraphs(body: string): string[] {
   return body.split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
-}
-
-function semanticSegments(value: string): TextSegment[] {
-  const segments: TextSegment[] = [];
-  const quoteStack: string[] = [];
-  const quotePairs: Record<string, string> = {
-    "“": "”",
-    "‘": "’",
-    "「": "」",
-    "『": "』",
-    "《": "》",
-  };
-  let segmentStart = 0;
-
-  const pushSegment = (end: number): void => {
-    let start = segmentStart;
-    let trimmedEnd = end;
-    while (start < trimmedEnd && /\s/.test(value[start])) start += 1;
-    while (trimmedEnd > start && /\s/.test(value[trimmedEnd - 1])) trimmedEnd -= 1;
-    if (trimmedEnd > start) segments.push({ text: value.slice(start, trimmedEnd), start });
-    segmentStart = end;
-  };
-
-  const isTerminal = (character: string | undefined): boolean => character !== undefined && /[。！？!?；;.]/.test(character);
-
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    const expectedClose = quoteStack[quoteStack.length - 1];
-
-    if (character === "\"") {
-      if (expectedClose === "\"") quoteStack.pop();
-      else quoteStack.push("\"");
-      if (quoteStack.length === 0 && isTerminal(value[index - 1])) pushSegment(index + 1);
-      continue;
-    }
-
-    if (quotePairs[character]) {
-      quoteStack.push(quotePairs[character]);
-      continue;
-    }
-
-    if (expectedClose === character) {
-      quoteStack.pop();
-      if (quoteStack.length === 0 && isTerminal(value[index - 1])) pushSegment(index + 1);
-      continue;
-    }
-
-    if (quoteStack.length > 0 || !isTerminal(character)) continue;
-    if (character === "." && /\d/.test(value[index - 1] ?? "") && /\d/.test(value[index + 1] ?? "")) continue;
-    pushSegment(index + 1);
-  }
-
-  pushSegment(value.length);
-  return segments;
 }
 
 function normalizeSentence(value: string): string {
@@ -176,6 +119,8 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
     kind: UnitKind,
     text: string,
     start: number,
+    end: number,
+    gapBefore: string,
     paragraphIndex: number,
     boundaryBefore: BoundaryKind,
   ): void => {
@@ -189,7 +134,8 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
       kind,
       text,
       start,
-      end: start + text.length,
+      end,
+      gapBefore,
       paragraphIndex,
       boundaryBefore,
       cost: unitCost(text, factCount),
@@ -204,11 +150,13 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
       const start = section.body.indexOf(paragraph, cursor);
       const safeStart = start >= 0 ? start : cursor;
       cursor = safeStart + paragraph.length;
-      for (const [segmentIndex, segment] of semanticSegments(paragraph).entries()) {
+      for (const [segmentIndex, segment] of segmentSemanticText(paragraph).entries()) {
         appendUnit(
           "paragraph",
           segment.text,
           safeStart + segment.start,
+          safeStart + segment.end,
+          segment.gapBefore,
           paragraphIndex,
           segmentIndex === 0 ? "paragraph" : "sentence",
         );
@@ -221,11 +169,13 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
     const startInBody = bodyIsKeyPointJoin ? section.body.indexOf(keyPoint, cursor) : -1;
     const start = startInBody >= 0 ? startInBody : section.body.length + index + 1;
     cursor = start + keyPoint.length;
-    for (const [segmentIndex, segment] of semanticSegments(keyPoint).entries()) {
+    for (const [segmentIndex, segment] of segmentSemanticText(keyPoint).entries()) {
       appendUnit(
         "keyPoint",
         segment.text,
         start + segment.start,
+        start + segment.end,
+        segment.gapBefore,
         bodyParagraphs.length + index,
         segmentIndex === 0 ? "keyPoint" : "sentence",
       );
@@ -395,8 +345,12 @@ function coalescedUnitTexts(units: SemanticUnit[]): string[] {
       && previous.sourceSectionId === unit.sourceSectionId
       && previous.paragraphIndex === unit.paragraphIndex
       && previous.kind === unit.kind;
-    if (continuesPrevious) values[values.length - 1] += unit.text;
-    else values.push(unit.text);
+    if (continuesPrevious) {
+      const sourceGap = previous !== undefined && unit.start > previous.end ? unit.gapBefore : "";
+      values[values.length - 1] += sourceGap + unit.text;
+    } else {
+      values.push(unit.text);
+    }
     previous = unit;
   }
 

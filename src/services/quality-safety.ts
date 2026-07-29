@@ -9,7 +9,10 @@ import {
 const CLOSED_EVIDENCE = "External review diagnostic removed by safety policy";
 const CLOSED_ACTION = "Re-run the closed quality checks without external diagnostic details";
 const MAX_DIAGNOSTIC_SCAN_LENGTH = 8_192;
-const MAX_PERCENT_DECODE_ROUNDS = 4;
+// Canonicalization transforms are linear and non-amplifying after the first NFKC pass.
+// A fixed round budget keeps adversarial nesting O(n); one final probe distinguishes
+// a stable boundary result from an unfinished value that must fail closed.
+const MAX_CANONICALIZATION_ROUNDS = 32;
 const HTML_ENTITIES: Record<string, string> = {
   amp: "&",
   apos: "'",
@@ -52,12 +55,23 @@ function decodeHtmlEntitiesOnce(value: string): string {
   });
 }
 
-function diagnosticViews(value: string): string[] {
+interface CanonicalDiagnosticViews {
+  views: string[];
+  exhausted: boolean;
+}
+
+function canonicalizeOnce(value: string): string {
+  return decodeHtmlEntitiesOnce(decodePercentOnce(value)).normalize("NFKC");
+}
+
+function diagnosticViews(value: string): CanonicalDiagnosticViews {
   const decoded: string[] = [value.normalize("NFKC")];
-  for (let round = 0; round < MAX_PERCENT_DECODE_ROUNDS; round += 1) {
-    const next = decodeHtmlEntitiesOnce(decodePercentOnce(decoded.at(-1)!)).normalize("NFKC");
+  let stable = false;
+  for (let round = 0; round < MAX_CANONICALIZATION_ROUNDS; round += 1) {
+    const next = canonicalizeOnce(decoded.at(-1)!);
     if (next === decoded.at(-1)) break;
     decoded.push(next);
+    if (round === MAX_CANONICALIZATION_ROUNDS - 1) stable = canonicalizeOnce(next) === next;
   }
   const views = new Set<string>();
   for (const candidate of decoded) {
@@ -65,7 +79,10 @@ function diagnosticViews(value: string): string[] {
     views.add(candidate.replace(/[\p{White_Space}\p{Cf}\p{Cc}]+/gu, " "));
     views.add(candidate.replace(/[\p{White_Space}\p{Cf}\p{Cc}]+/gu, ""));
   }
-  return [...views];
+  return {
+    views: [...views],
+    exhausted: decoded.length === MAX_CANONICALIZATION_ROUNDS + 1 && !stable,
+  };
 }
 
 function structurallyUnsafeCanonicalView(value: string): boolean {
@@ -89,11 +106,12 @@ function decodedSensitiveBase64(value: string): boolean {
     if (normalized.length % 4 === 1) continue;
     try {
       const decodedBytes = Buffer.from(normalized, "base64");
-      const canonical = decodedBytes.toString("base64").replace(/=+$/u, "");
-      if (canonical !== normalized) continue;
+      const canonicalBase64 = decodedBytes.toString("base64").replace(/=+$/u, "");
+      if (canonicalBase64 !== normalized) continue;
       const decoded = decodedBytes.toString("utf8");
       if (!Buffer.from(decoded, "utf8").equals(decodedBytes)) continue;
-      if (diagnosticViews(decoded).some(structurallyUnsafeCanonicalView)) return true;
+      const decodedViews = diagnosticViews(decoded);
+      if (decodedViews.exhausted || decodedViews.views.some(structurallyUnsafeCanonicalView)) return true;
     } catch {
       // Invalid base64 is ordinary text, not a decoded diagnostic channel.
     }
@@ -108,8 +126,8 @@ export interface DiagnosticSafetyOptions {
 
 export function hasUnsafeDiagnosticText(value: string, options: DiagnosticSafetyOptions = {}): boolean {
   if (!options.allowLong && value.length > MAX_DIAGNOSTIC_SCAN_LENGTH) return true;
-  const views = diagnosticViews(value);
-  if (views.some(structurallyUnsafeCanonicalView)) return true;
+  const canonical = diagnosticViews(value);
+  if (canonical.exhausted || canonical.views.some(structurallyUnsafeCanonicalView)) return true;
   if (decodedSensitiveBase64(value)) return true;
   return options.allowOpaqueBase64 === false
     ? false

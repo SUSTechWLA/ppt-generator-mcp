@@ -14,6 +14,12 @@ function page(number: number, title: string, body: string): string {
   return `<page ${number}>\n一级标题：数字产品方案\n二级标题：客户交付\n三级标题：运行保障\n四级标题：${title}\n正文：\n${body}`;
 }
 
+function percentEncode(value: string, rounds: number): string {
+  let encoded = value;
+  for (let round = 0; round < rounds; round += 1) encoded = encodeURIComponent(encoded);
+  return encoded;
+}
+
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1792" height="1024" viewBox="0 0 1792 1024"><rect width="1792" height="1024" fill="#e6efe8"/><path d="M220 740h1350M320 680l280-220 250 120 300-300 310 250" fill="none" stroke="#145c3d" stroke-width="50"/><circle cx="1150" cy="280" r="90" fill="#c7a34b"/></svg>`;
 const externalDataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 
@@ -367,7 +373,7 @@ test("get_deck rejects a page artifact replaced by an external symlink without l
   assert.doesNotMatch(JSON.stringify(result), /EXTERNAL_ARTIFACT_SECRET|EXTERNAL_TARGET_NAME|mcp-deck-outside-secret|\/Users\/|\/private\//i);
 });
 
-test("get_deck fails closed for encoded file locations injected into final HTML style", async (t) => {
+test("get_deck fails closed for a file location behind eight percent-decode rounds in final HTML", async (t) => {
   const { client, dependencies } = await fixture(t);
   const planned = await client.callTool({
     name: "plan_deck",
@@ -387,7 +393,7 @@ test("get_deck fails closed for encoded file locations injected into final HTML 
   const original = await readFile(finalPath, "utf8");
   await writeFile(
     finalPath,
-    `${original}\n<style>.unsafe{background:url(file&colon;&sol;&sol;&sol;Users&sol;alice&sol;UNSAFE_HTML_SECRET.png)}</style>`,
+    `${original}\n<style>.unsafe{background:url(${percentEncode("file:///Users/alice/UNSAFE_HTML_SECRET.png", 8)})}</style>`,
     "utf8",
   );
 
@@ -396,6 +402,6 @@ test("get_deck fails closed for encoded file locations injected into final HTML 
     arguments: { id: pageRunId, view: "artifact", artifact: "final.html" },
   });
   assert.equal(result.isError, true);
-  assert.doesNotMatch(JSON.stringify(result), /UNSAFE_HTML_SECRET|Users&sol;alice|file&colon;|\/Users\/alice/i);
+  assert.doesNotMatch(JSON.stringify(result), /UNSAFE_HTML_SECRET|\/Users\/alice|%2525/i);
   assert.match(JSON.stringify(result), /INTERNAL_ERROR/);
 });

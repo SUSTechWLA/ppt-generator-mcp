@@ -16,6 +16,12 @@ function page(number: number, title: string, body: string): string {
   return `<page ${number}>\n一级标题：数字产品方案\n二级标题：客户交付\n三级标题：运行保障\n四级标题：${title}\n正文：\n${body}`;
 }
 
+function percentEncode(value: string, rounds: number): string {
+  let encoded = value;
+  for (let round = 0; round < rounds; round += 1) encoded = encodeURIComponent(encoded);
+  return encoded;
+}
+
 const fourPageSource = [
   page(59, "服务责任", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
   page(60, "检查机制", "每日完成1次现场检查。每月形成1份汇总记录。"),
@@ -147,6 +153,22 @@ test("plan_deck fails closed when canonical source evidence contains a credentia
   });
   assert.equal(result.isError, true);
   assert.doesNotMatch(JSON.stringify(result), /mcp-plan-secret|api_key/i);
+  assert.match(JSON.stringify(result), /INTERNAL_ERROR|INPUT_INVALID/);
+});
+
+test("plan_deck fails closed for a credential behind eight percent-decode rounds", async (t) => {
+  const { client } = await productionClient(t);
+  const result = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText: page(93, "深层编码", `项目配置${percentEncode("api_key=deep", 8)}，并保留1份记录。`),
+      pageNumbers: [93],
+      documentType: "bid",
+      quality: { minScore: 85, maxAttempts: 1 },
+    },
+  });
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(JSON.stringify(result), /api_key|deep/i);
   assert.match(JSON.stringify(result), /INTERNAL_ERROR|INPUT_INVALID/);
 });
 

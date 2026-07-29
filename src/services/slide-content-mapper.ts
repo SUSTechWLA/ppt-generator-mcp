@@ -93,7 +93,7 @@ function pageContent(spec: SlideSpec, page: PageMetadata | undefined, profile: T
     [bindings.partLabel]: page?.partLabel ?? "方案响应",
     [bindings.chapterLabel]: page?.chapterLabel ?? spec.eyebrow ?? "项目服务方案",
     [bindings.topicTitle]: spec.title,
-    [bindings.subsectionTitle]: page?.subsectionTitle ?? spec.conclusion,
+    [bindings.subsectionTitle]: page?.subsectionTitle ?? spec.eyebrow ?? spec.title,
     [bindings.summaryText]: spec.conclusion,
   };
   const images = projectOptionalImages(spec);

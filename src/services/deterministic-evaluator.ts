@@ -26,12 +26,20 @@ export function evaluateDeterministic(render: RenderResult, policy: Deterministi
   if (!render.signals.screenshotCreated) issue({ severity: "error", category: "technical", evidence: "浏览器未生成预览图", suggestedAction: "重新渲染页面" }, true);
   if (render.pageCount !== 1) issue({ severity: "error", category: "structure", evidence: `页面标记数量为 ${render.pageCount}，要求恰好一页`, suggestedAction: "仅保留一个 data-slide-page 页面" }, true);
   if (render.signals.hasScripts) issue({ severity: "error", category: "technical", evidence: "最终 HTML 包含可执行脚本", suggestedAction: "移除全部脚本" }, true);
+  if (render.signals.hasExecutableDom && !render.signals.hasScripts) issue({ severity: "error", category: "technical", evidence: "最终 HTML 包含事件处理器、嵌入文档或其他可执行 DOM", suggestedAction: "移除全部可执行 DOM 入口" }, true);
   if (render.signals.networkRequests.length > 0) issue({ severity: "error", category: "technical", evidence: `页面尝试加载 ${render.signals.networkRequests.length} 个远程资源`, suggestedAction: "将资源内联为 data URL" }, true);
   if (render.signals.hasSecretLikeText) issue({ severity: "error", category: "technical", evidence: "页面疑似包含密钥或令牌", suggestedAction: "从交付件中移除敏感配置" }, true);
   if (render.signals.hasUnresolvedPlaceholders) issue({ severity: "error", category: "structure", evidence: "页面仍包含模板占位符", suggestedAction: "补齐内容和资产映射" });
 
   if (render.bodyScroll.width > render.viewport.width + 1 || render.bodyScroll.height > render.viewport.height + 1) {
     issue({ severity: "error", category: "layout", evidence: `页面滚动尺寸 ${render.bodyScroll.width}×${render.bodyScroll.height} 超过画布`, suggestedAction: "压缩内容或切换更高容量模板" });
+  }
+
+  for (const violation of render.layout.containmentViolations) {
+    issue({ severity: "error", category: "layout", targetId: violation.targetId, evidence: `可见内容超出或被祖先容器 ${violation.ancestorId} 裁切`, suggestedAction: "调整容器容量、字号或间距" });
+  }
+  for (const collision of render.layout.collisions) {
+    issue({ severity: "error", category: "layout", targetId: collision.firstId, evidence: `可见内容与 ${collision.secondId} 发生重叠碰撞`, suggestedAction: "调整布局轨道或缩短目标内容" });
   }
 
   const minimumBodyFontPt = policy.minimumBodyFontPt ?? 8.5;

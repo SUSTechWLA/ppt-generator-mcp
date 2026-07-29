@@ -10,6 +10,7 @@ import { solveTemplateSlots, type TemplateSlotSolution } from "./template-slot-s
 import { fillPlaceholders } from "../tools/fill-placeholders.js";
 import { mapSlideContent } from "./slide-content-mapper.js";
 import { projectOptionalImages } from "./optional-image-projection.js";
+import { executableDomViolations } from "../lib/html-security.js";
 
 export interface ComposeSlideInput {
   spec: SlideSpec;
@@ -55,6 +56,12 @@ function validateFinalResourceBoundary(doc: Document): void {
       continue;
     }
     throw new Error("Residual resource URL attribute is not allowed");
+  }
+}
+
+function validateFinalExecutableBoundary(doc: Document): void {
+  if (executableDomViolations(doc).length > 0) {
+    throw new Error("Executable, navigation-capable, or resource-bearing final DOM is not allowed");
   }
 }
 
@@ -222,12 +229,12 @@ export async function composeSlide(input: ComposeSlideInput): Promise<ComposeRes
   const filled = await fillPlaceholders({ html: prepareTemplateHtml(input.template, input.profile, solution), content: { direct: content } });
   const dom = new JSDOM(filled.html);
   const doc = dom.window.document;
-  doc.querySelectorAll("script, noscript").forEach((element) => element.remove());
   await inlineCss(doc, input.template.filePath);
   await inlineIcons(doc, input.template.filePath);
   injectAssets(doc, input.spec, input.profile, input.assets);
   applyMarkersAndTokens(doc, input);
   validateFinalStyles(doc);
+  validateFinalExecutableBoundary(doc);
   validateFinalResourceBoundary(doc);
   const html = dom.serialize().replace(/<!--([\s\S]*?)-->/g, "");
   return { html, warnings: [...filled.warnings, ...scanResiduals(html)] };

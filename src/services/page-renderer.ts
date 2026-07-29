@@ -1,6 +1,7 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { chromium } from "playwright";
+import { hasExecutableDom } from "../lib/html-security.js";
 
 export interface RenderElement {
   id: string;
@@ -39,25 +40,39 @@ export interface RenderResult {
   rasterAreaRatio: number;
   bodyScroll: { width: number; height: number };
   occupiedRatio: number;
+  layout: {
+    containmentViolations: Array<{ targetId: string; ancestorId: string; overflowPx?: number }>;
+    collisions: Array<{ firstId: string; secondId: string; overlapArea: number }>;
+  };
   signals: {
     networkRequests: string[];
     hasScripts: boolean;
+    hasExecutableDom: boolean;
     hasUnresolvedPlaceholders: boolean;
     hasSecretLikeText: boolean;
     screenshotCreated: boolean;
   };
 }
 
-export async function renderPage(input: { html: string; screenshotPath: string }): Promise<RenderResult> {
+export async function renderPage(input: { html: string; screenshotPath: string; validatedOverlapSelectors?: string[] }): Promise<RenderResult> {
   await mkdir(dirname(input.screenshotPath), { recursive: true });
+  const validatedOverlapSelectors = input.validatedOverlapSelectors ?? [];
+  for (const selector of validatedOverlapSelectors) {
+    if (!/^\.[a-z_][a-z0-9_-]*$/i.test(selector)) throw new Error("Validated overlap selectors must be a single explicit class selector");
+  }
+  const executableDom = hasExecutableDom(input.html);
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext({ viewport: { width: 1123, height: 794 }, deviceScaleFactor: 1 });
+    const context = await browser.newContext({ viewport: { width: 1123, height: 794 }, deviceScaleFactor: 1, javaScriptEnabled: false });
     const page = await context.newPage();
     const networkRequests: string[] = [];
     await page.route(/^https?:\/\//, async (route) => {
       networkRequests.push(route.request().url());
       await route.abort("blockedbyclient");
+    });
+    await page.routeWebSocket(/^(?:wss?):\/\//i, async (socket) => {
+      networkRequests.push(socket.url());
+      await socket.close({ code: 1008, reason: "blocked by deterministic renderer" });
     });
     await page.setContent(input.html, { waitUntil: "load", timeout: 30_000 });
     await page.evaluate(() => document.fonts.ready);
@@ -65,7 +80,7 @@ export async function renderPage(input: { html: string; screenshotPath: string }
     // The callback executes in Chromium, so expose the identity helper there too.
     await page.evaluate("globalThis.__name = (target) => target");
 
-    const measured = await page.evaluate(async () => {
+    const measured = await page.evaluate(async ({ overlapSelectors }) => {
       const parseColor = (value: string): [number, number, number, number] | null => {
         const match = value.match(/rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)(?:[, /]+([\d.]+))?\)/);
         return match ? [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])] : null;
@@ -94,13 +109,97 @@ export async function renderPage(input: { html: string; screenshotPath: string }
         return { color: [255, 255, 255], measurable: true };
       };
 
-      const elements = Array.from(document.body.querySelectorAll<HTMLElement>("*"))
+      const allVisibleElements = Array.from(document.body.querySelectorAll<HTMLElement>("*"))
         .filter((element) => {
           const rect = element.getBoundingClientRect();
           const style = getComputedStyle(element);
-          const directText = Array.from(element.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim()));
-          return rect.width > 0.5 && rect.height > 0.5 && style.visibility !== "hidden" && style.display !== "none" && directText;
-        })
+          return rect.width > 0.5 && rect.height > 0.5 && style.visibility !== "hidden" && style.display !== "none";
+        });
+      const directTextNodes = (element: Element) => Array.from(element.childNodes)
+        .filter((node): node is Text => node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim()));
+      const rectValue = (rect: DOMRect) => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+      const elementId = (element: HTMLElement, fallback: string) => element.dataset.blockId
+        || element.id
+        || element.classList.item(0)
+        || fallback;
+      const visualRect = (element: HTMLElement) => {
+        const textNodes = directTextNodes(element);
+        if (textNodes.length === 0) return rectValue(element.getBoundingClientRect());
+        const clientRects = textNodes.flatMap((node) => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return Array.from(range.getClientRects());
+        }).filter((rect) => rect.width > 0.5 && rect.height > 0.5);
+        if (clientRects.length === 0) return rectValue(element.getBoundingClientRect());
+        const left = Math.min(...clientRects.map((rect) => rect.left));
+        const top = Math.min(...clientRects.map((rect) => rect.top));
+        const right = Math.max(...clientRects.map((rect) => rect.right));
+        const bottom = Math.max(...clientRects.map((rect) => rect.bottom));
+        return { x: left, y: top, width: right - left, height: bottom - top };
+      };
+      const contentElements = allVisibleElements.filter((element) => directTextNodes(element).length > 0 || element.matches("img, canvas"));
+      const contentIds = new Map(contentElements.map((element, index) => [
+        element,
+        elementId(element, `${element.tagName.toLowerCase()}-${index + 1}`),
+      ]));
+      const candidates = contentElements.map((element) => ({
+        element,
+        id: contentIds.get(element)!,
+        visualRect: visualRect(element),
+      }));
+
+      const containmentViolations: Array<{ targetId: string; ancestorId: string; overflowPx: number }> = [];
+      for (const candidate of candidates) {
+        const pageRoot = candidate.element.closest<HTMLElement>("[data-slide-page]");
+        let ancestor = candidate.element.parentElement;
+        while (ancestor && ancestor !== document.body) {
+          const rect = ancestor.getBoundingClientRect();
+          const visual = candidate.visualRect;
+          const overflowPx = Math.max(
+            0,
+            rect.left - visual.x,
+            rect.top - visual.y,
+            visual.x + visual.width - rect.right,
+            visual.y + visual.height - rect.bottom,
+          );
+          const outside = overflowPx > 4;
+          if (outside) {
+            containmentViolations.push({
+              targetId: candidate.id,
+              ancestorId: elementId(ancestor, ancestor.tagName.toLowerCase()),
+              overflowPx,
+            });
+            break;
+          }
+          if (ancestor === pageRoot) break;
+          ancestor = ancestor.parentElement;
+        }
+      }
+
+      const collisions: Array<{ firstId: string; secondId: string; overlapArea: number }> = [];
+      for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+          const left = candidates[leftIndex];
+          const right = candidates[rightIndex];
+          if (directTextNodes(left.element).length === 0 || directTextNodes(right.element).length === 0) continue;
+          if (left.element.contains(right.element) || right.element.contains(left.element)) continue;
+          const explicitlyExempt = overlapSelectors.some((selector) => {
+            const leftOwner = left.element.closest(selector);
+            return leftOwner !== null && leftOwner === right.element.closest(selector);
+          });
+          if (explicitlyExempt) continue;
+          const leftRect = rectValue(left.element.getBoundingClientRect());
+          const rightRect = rectValue(right.element.getBoundingClientRect());
+          const overlapWidth = Math.min(leftRect.x + leftRect.width, rightRect.x + rightRect.width) - Math.max(leftRect.x, rightRect.x);
+          const overlapHeight = Math.min(leftRect.y + leftRect.height, rightRect.y + rightRect.height) - Math.max(leftRect.y, rightRect.y);
+          if (overlapWidth > 3 && overlapHeight > 3) {
+            collisions.push({ firstId: left.id, secondId: right.id, overlapArea: overlapWidth * overlapHeight });
+          }
+        }
+      }
+
+      const elements = allVisibleElements
+        .filter((element) => directTextNodes(element).length > 0)
         .map((element, index) => {
           const rect = element.getBoundingClientRect();
           const style = getComputedStyle(element);
@@ -109,7 +208,7 @@ export async function renderPage(input: { html: string; screenshotPath: string }
           const fontSize = Number.parseFloat(style.fontSize);
           const fontWeight = Number.parseInt(style.fontWeight, 10) || 400;
           return {
-            id: element.dataset.blockId || element.id || `${element.tagName.toLowerCase()}-${index + 1}`,
+            id: contentIds.get(element) || element.dataset.blockId || element.id || `${element.tagName.toLowerCase()}-${index + 1}`,
             tag: element.tagName.toLowerCase(),
             text: (element.textContent ?? "").trim().slice(0, 180),
             rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
@@ -176,8 +275,9 @@ export async function renderPage(input: { html: string; screenshotPath: string }
         rasterAreaRatio: Math.min(1, rasterArea / (1123 * 794)),
         bodyScroll: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight },
         occupiedRatio: Math.min(1, area / (1123 * 794)),
+        layout: { containmentViolations, collisions },
       };
-    });
+    }, { overlapSelectors: validatedOverlapSelectors });
 
     await page.screenshot({ path: input.screenshotPath, type: "png", fullPage: false, animations: "disabled" });
     await context.close();
@@ -190,6 +290,7 @@ export async function renderPage(input: { html: string; screenshotPath: string }
       signals: {
         networkRequests,
         hasScripts: /<script[\s>]/i.test(input.html),
+        hasExecutableDom: executableDom,
         hasUnresolvedPlaceholders: /<(?:figures|icon|page-title|component-title|paragraph|summary-text|bullet)[\s>]/i.test(input.html),
         hasSecretLikeText: /\b(?:sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*["']?[^\s"']{12,})/i.test(input.html),
         screenshotCreated: screenshot.length > 100,

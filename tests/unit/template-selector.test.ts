@@ -445,6 +445,34 @@ test("loader rejects a malformed image container selector", async () => {
   }
 });
 
+test("loader accepts only a narrowly owned image-caption overlap exemption", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile: { ...profile, overlapExemptionSelectors: [".image-card"] },
+    html,
+  }));
+  try {
+    const [loaded] = loadTemplateProfiles(fixture.directory);
+    assert.deepEqual(loaded.overlapExemptionSelectors, [".image-card"]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects an overlap exemption targeting semantic or landmark content", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile: { ...profile, overlapExemptionSelectors: [".summary-band"] },
+    html,
+  }));
+  try {
+    assert.throws(
+      () => loadTemplateProfiles(fixture.directory),
+      /overlap exemption.*(?:image-caption|semantic|landmark|owned|unsafe)/i,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("loader rejects an image selector that resolves all placeholders to one shared container", async () => {
   const fixture = await temporaryCatalog(
     (profile, html) => ({

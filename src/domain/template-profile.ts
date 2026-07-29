@@ -104,6 +104,7 @@ export const templateProfileSchema = z.object({
   auxiliaryBindings: slotBindingsSchema.optional(),
   auxiliaryCapacities: z.record(z.string(), auxiliaryCapacitySchema).optional(),
   auxiliaryGroups: z.array(auxiliaryGroupSchema).max(24).optional(),
+  overlapExemptionSelectors: z.array(z.string().regex(/^\.[A-Za-z_][A-Za-z0-9_-]*$/)).max(8).optional(),
   pageBindings: pageBindingsSchema,
   blockCapacity: z.number().int().min(1).max(12),
   supportedBlocks: z.array(slideBlockTypeSchema).min(1),

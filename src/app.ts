@@ -103,7 +103,11 @@ export function createProductionDependencies(
                 designTokens: state.designTokens,
               });
           await writeFile(htmlPath, composed.html);
-          const render = await renderPage({ html: composed.html, screenshotPath });
+          const render = await renderPage({
+            html: composed.html,
+            screenshotPath,
+            validatedOverlapSelectors: profile.overlapExemptionSelectors,
+          });
           renderByAttempt.set(attempt, render);
           return { html: composed.html, htmlPath, screenshotPath, qualityPath };
         },

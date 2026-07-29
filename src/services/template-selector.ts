@@ -284,6 +284,31 @@ function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, prof
   }
 }
 
+function validateOverlapExemptions(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
+  if (!profile.overlapExemptionSelectors?.length) return;
+  const doc = new JSDOM(template.html).window.document;
+  const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark])));
+  for (const selector of profile.overlapExemptionSelectors) {
+    if (!/^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption has an unsafe selector`);
+    }
+    const matches = Array.from(doc.querySelectorAll(selector));
+    if (matches.length !== 1) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption must own exactly one image-caption container`);
+    }
+    const owner = matches[0];
+    const ownsLandmark = protectedLandmarks.some((landmark) => owner === landmark || owner.contains(landmark));
+    const ownsSemanticContent = Boolean(owner.querySelector("[data-semantic-slot], [data-source-paragraph], h1, h2, h3, h4, h5, h6, table, form"));
+    const isImageCard = owner.matches('figure[data-component="image-card"]');
+    const imageCount = owner.querySelectorAll(profile.imageSlots.placeholderTag).length;
+    const captionTag = profile.pageBindings.imageCaption;
+    const captionCount = captionTag ? owner.querySelectorAll(`figcaption ${captionTag}`).length : 0;
+    if (ownsLandmark || ownsSemanticContent || !isImageCard || imageCount !== 1 || captionCount !== 1) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption is not a narrowly owned image-caption overlay`);
+    }
+  }
+}
+
 export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   const catalogs = findProfileCatalogs(templatesDir);
   if (catalogs.length === 0) {
@@ -352,6 +377,7 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
     }
     validateImageContainerSelector(template, profile);
     validateAuxiliaryGroups(template, profile);
+    validateOverlapExemptions(template, profile);
   }
   for (const slug of actual) {
     if (!slugs.includes(slug)) throw new Error(`HTML template has no approved profile: ${slug}`);

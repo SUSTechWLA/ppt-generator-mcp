@@ -15,7 +15,8 @@ export function makeEvaluationFixtures() {
     rasterAreaRatio: 0.02,
     bodyScroll: { width: 1123, height: 794 },
     occupiedRatio: 0.75,
-    signals: { networkRequests: [], hasScripts: false, hasUnresolvedPlaceholders: false, hasSecretLikeText: false, screenshotCreated: true },
+    layout: { containmentViolations: [], collisions: [] },
+    signals: { networkRequests: [], hasScripts: false, hasExecutableDom: false, hasUnresolvedPlaceholders: false, hasSecretLikeText: false, screenshotCreated: true },
   };
   const passingDeterministic: DeterministicReport = { safeToReturn: true, hardGatePassed: true, issues: [] };
   const failingDeterministic: DeterministicReport = {

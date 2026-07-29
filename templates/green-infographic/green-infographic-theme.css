@@ -45,7 +45,7 @@ body {
 
 .bid-page {
   display: grid;
-  grid-template-rows: 14mm 9mm 8mm 171mm 8mm;
+  grid-template-rows: 14mm 12mm 8mm 168mm 8mm;
   width: 297mm;
   height: 210mm;
   overflow: clip;
@@ -88,10 +88,11 @@ body {
   align-items: center;
   margin: 0 2mm;
   background: linear-gradient(90deg, var(--green-100), var(--green-900) 55%, var(--green-700));
+  overflow: hidden;
 }
-.chapter-label { padding-left: calc(5mm * var(--workflow-spacing-scale)); color: var(--green-900); font-size: max(8.5pt, calc(16pt * var(--workflow-font-scale))); font-weight: 700; line-height: 1; }
-.topic-title { margin: 0; color: #fff; font-size: max(8.5pt, calc(20pt * var(--workflow-font-scale))); font-weight: 800; line-height: 1; text-align: center; }
-.subsection-title { display: flex; align-items: center; margin: 0; padding: 0 calc(6.5mm * var(--workflow-spacing-scale)); color: var(--green-900); font-size: max(8.5pt, calc(16pt * var(--workflow-font-scale))); font-weight: 700; line-height: 1.15; }
+.chapter-label { min-width: 0; padding-left: calc(5mm * var(--workflow-spacing-scale)); color: var(--green-900); font-size: max(8.5pt, calc(13pt * var(--workflow-font-scale))); font-weight: 700; line-height: 1.1; overflow-wrap: anywhere; }
+.topic-title { min-width: 0; margin: 0; padding: 0 calc(2mm * var(--workflow-spacing-scale)); color: #fff; font-size: max(8.5pt, calc(14pt * var(--workflow-font-scale))); font-weight: 800; line-height: 1.12; text-align: center; overflow-wrap: anywhere; }
+.subsection-title { display: flex; align-items: center; min-width: 0; margin: 0; padding: 0 calc(6.5mm * var(--workflow-spacing-scale)); color: var(--green-900); font-size: max(8.5pt, calc(11pt * var(--workflow-font-scale))); font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
 
 .body-grid {
   display: grid;
@@ -101,9 +102,9 @@ body {
   min-height: 0;
   padding: calc(1mm * var(--workflow-spacing-scale)) calc(2.5mm * var(--workflow-spacing-scale));
 }
-.bid-page[data-capacity-filled="true"] .layout-rows-6 { grid-template-rows: repeat(5, minmax(0, 1fr)) 10mm; }
-.bid-page[data-capacity-filled="true"] .layout-rows-5 { grid-template-rows: repeat(4, minmax(0, 1fr)) 10mm; }
-.bid-page[data-capacity-filled="true"] .layout-rows-4 { grid-template-rows: repeat(3, minmax(0, 1fr)) 10mm; }
+.bid-page[data-capacity-filled="true"] .layout-rows-6 { grid-template-rows: repeat(5, minmax(0, 1fr)) 12mm; }
+.bid-page[data-capacity-filled="true"] .layout-rows-5 { grid-template-rows: repeat(4, minmax(0, 1fr)) 12mm; }
+.bid-page[data-capacity-filled="true"] .layout-rows-4 { grid-template-rows: repeat(3, minmax(0, 1fr)) 12mm; }
 .bid-page[data-semantic-item-count="1"] .body-grid { grid-template-columns: minmax(0, 1fr); }
 .bid-page[data-semantic-item-count="1"] .body-grid > * { grid-column: 1 / -1; }
 .span-3 { grid-column: span 3; }
@@ -123,6 +124,7 @@ body {
 .component-title { flex: 0 0 auto; margin: 0 0 calc(0.5mm * var(--workflow-spacing-scale)); color: var(--green-900); font-size: max(8.5pt, calc(12.5pt * var(--workflow-font-scale))); font-weight: 700; line-height: 1.25; }
 .compact { font-size: var(--body-dense-size); font-weight: 500; line-height: 1.42; }
 .text-card.compact p { font-size: var(--body-dense-size); }
+.text-card.compact.span-4 p { font-size: max(8.5pt, calc(9pt * var(--workflow-font-scale))); line-height: 1.4; }
 .caption { color: var(--muted); font-size: var(--minimum-readable-size); font-weight: 500; line-height: 1.3; }
 .bullet-list { margin: 0; padding-left: 1.4em; font-size: var(--body-dense-size); line-height: 1.42; }
 .bullet-list li::marker, .summary-list li::marker { color: var(--green-900); }

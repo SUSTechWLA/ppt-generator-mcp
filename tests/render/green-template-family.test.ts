@@ -92,6 +92,23 @@ function profileBoundarySpec(profile: (typeof profiles)[number], bodyChars: numb
   return spec;
 }
 
+function pageBoundarySpec(profile: (typeof profiles)[number]): { spec: SlideSpec; page: NonNullable<Parameters<typeof composeSlide>[0]["page"]> } {
+  const spec = profileBoundarySpec(profile, Math.min(24, profile.semanticSlots[0].maxCharsPerItem));
+  spec.title = "页".repeat(profile.maxCharsBySlot[profile.pageBindings.pageTitle]);
+  spec.conclusion = "总".repeat(profile.maxCharsBySlot[profile.pageBindings.summaryText]);
+  return {
+    spec,
+    page: {
+      number: 59,
+      sectionTitle: "项目服务方案",
+      partNumber: "PART.02",
+      partLabel: "履约响应",
+      chapterLabel: "2.3 交付机制",
+      subsectionTitle: "子".repeat(profile.maxCharsBySlot[profile.pageBindings.subsectionTitle]),
+    },
+  };
+}
+
 for (const profile of profiles) {
   test(`${profile.slug} renders its declared fact boundary at default tokens`, async () => {
     const slot = profile.semanticSlots[0];
@@ -157,6 +174,67 @@ for (const profile of profiles) {
     const solution = solveTemplateSlots(profileBoundarySpec(profile, cap + 1), profile);
     assert.equal(solution.feasible, false);
     assert.ok(solution.unmatched.some((item) => /字符上限/.test(item.reason)));
+  });
+
+  for (const [mode, designTokens] of [
+    ["default", { fontScale: 1, spacingScale: 1, contrastMode: "normal" as const }],
+    ["repair", { fontScale: 0.86, spacingScale: 0.88, contrastMode: "high" as const }],
+  ] as const) {
+    test(`${profile.slug} renders simultaneous page title, subsection, and summary boundaries at ${mode} tokens`, async () => {
+      const { spec, page } = pageBoundarySpec(profile);
+      const solution = solveTemplateSlots(spec, profile);
+      assert.equal(solution.feasible, true, JSON.stringify(solution.unmatched));
+      const composed = await composeSlide({
+        spec,
+        page,
+        profile,
+        template: loadTemplate(templatesDir, profile.slug),
+        assets: generatedAssets(spec),
+        slotSolution: solution,
+        designTokens,
+      });
+      const output = await mkdtemp(join(tmpdir(), `green-page-boundary-${mode}-`));
+      const render = await renderPage({ html: composed.html, screenshotPath: join(output, `${profile.slug}.png`) });
+      const report = evaluateDeterministic(render, {
+        maxRasterAreaRatio: profile.maxRasterAreaRatio,
+        maximumRasterAssets: profile.imageSlots.maxAssets,
+        minimumBodyFontPt: profile.minimumBodyFontPt,
+      });
+      for (const text of [spec.title, spec.conclusion, page.subsectionTitle]) {
+        assert.ok(render.elements.some((element) => element.text === text), `page metadata boundary must remain fully visible: ${text.slice(0, 8)}`);
+      }
+      assert.deepEqual(render.layout.containmentViolations, []);
+      assert.deepEqual(render.layout.collisions, []);
+      assert.equal(report.hardGatePassed, true, JSON.stringify(report.issues, null, 2));
+    });
+  }
+
+  test(`${profile.slug} rejects page title and summary cap plus one`, async () => {
+    const titleBoundary = pageBoundarySpec(profile);
+    titleBoundary.spec.title += "页";
+    await assert.rejects(
+      () => composeSlide({
+        spec: titleBoundary.spec,
+        page: titleBoundary.page,
+        profile,
+        template: loadTemplate(templatesDir, profile.slug),
+        assets: generatedAssets(titleBoundary.spec),
+      }),
+      /capacity|字符|too_big|上限/i,
+    );
+
+    const summaryBoundary = pageBoundarySpec(profile);
+    summaryBoundary.spec.conclusion += "总";
+    await assert.rejects(
+      () => composeSlide({
+        spec: summaryBoundary.spec,
+        page: summaryBoundary.page,
+        profile,
+        template: loadTemplate(templatesDir, profile.slug),
+        assets: generatedAssets(summaryBoundary.spec),
+      }),
+      /capacity|字符|too_big|上限/i,
+    );
   });
 }
 

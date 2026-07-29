@@ -58,3 +58,57 @@ test("measures displayed raster area and enforces the selected document threshol
   assert.equal(report.hardGatePassed, false);
   assert.ok(report.issues.some((issue) => issue.category === "asset" && /位图面积/.test(issue.evidence)));
 });
+
+test("keeps event fetch and WebSocket payloads inert and marks executable DOM unsafe", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-executable-event-"));
+  const html = `<html><body onload="document.querySelector('[data-sentinel]').textContent='EXECUTED';fetch('https://example.invalid/private');new WebSocket('wss://example.invalid/socket')"><article data-slide-page="1"><p data-sentinel>SAFE</p></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  const report = evaluateDeterministic(render);
+  assert.ok(render.elements.some((element) => element.text === "SAFE"), "page-authored JavaScript must not execute");
+  assert.deepEqual(render.signals.networkRequests, [], "inert executable markup must make no HTTP or WebSocket requests");
+  assert.equal(render.signals.hasExecutableDom, true);
+  assert.equal(report.safeToReturn, false);
+  assert.ok(report.issues.some((issue) => issue.category === "technical" && issue.severity === "error"));
+});
+
+test("detects declarative shadow templates and nested srcdoc before Chromium can activate them", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-executable-template-"));
+  const html = `<html><body><article data-slide-page="1"><p data-sentinel>SAFE</p><div><template shadowrootmode="open"><iframe srcdoc="<script>document.querySelector('[data-sentinel]').textContent='EXECUTED'</script>"></iframe></template></div></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  const report = evaluateDeterministic(render);
+  assert.ok(render.elements.some((element) => element.text === "SAFE"));
+  assert.equal(render.signals.hasExecutableDom, true);
+  assert.equal(report.safeToReturn, false);
+});
+
+test("detects visible content escaping a clipping ancestor", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-containment-"));
+  const html = `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}.frame{position:relative;width:180px;height:36px;overflow:hidden}.escaped{position:absolute;left:0;top:24px;width:170px;height:30px;font:16px/30px Arial}</style></head><body><article data-slide-page="1"><div class="frame"><p class="escaped">超出父容器的可见正文</p></div></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  const report = evaluateDeterministic(render);
+  assert.ok(render.layout.containmentViolations.length > 0);
+  assert.equal(report.hardGatePassed, false);
+  assert.ok(report.issues.some((issue) => issue.category === "layout" && /容器|裁切/.test(issue.evidence)));
+});
+
+test("detects sibling content collisions", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-collision-"));
+  const html = `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}.stage{position:relative;height:100px}.stage p{position:absolute;top:30px;width:240px;height:36px;margin:0;font:16px/36px Arial}.left{left:20px}.right{left:120px}</style></head><body><article data-slide-page="1"><div class="stage"><p class="left">第一段必须完整显示</p><p class="right">第二段不得与其相撞</p></div></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  const report = evaluateDeterministic(render);
+  assert.ok(render.layout.collisions.length > 0);
+  assert.equal(report.hardGatePassed, false);
+  assert.ok(report.issues.some((issue) => issue.category === "layout" && /重叠|碰撞/.test(issue.evidence)));
+});
+
+test("accepts only renderer-validated overlap selectors and ignores forged template exemptions", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-overlap-policy-"));
+  const page = (attribute = "") => `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}.overlay{position:relative;height:100px}.overlay p{position:absolute;top:30px;left:30px;width:220px;height:36px;margin:0;font:16px/36px Arial}</style></head><body><article data-slide-page="1"><div class="overlay" ${attribute}><p>受控底层标注</p><p>受控上层标注</p></div></article></body></html>`;
+
+  const forged = await renderPage({ html: page('data-allow-overlap="true"'), screenshotPath: join(output, "forged.png") });
+  assert.ok(forged.layout.collisions.length > 0, "template-authored exemption attributes must not bypass collision QA");
+
+  const validated = await renderPage({ html: page(), screenshotPath: join(output, "validated.png"), validatedOverlapSelectors: [".overlay"] });
+  assert.deepEqual(validated.layout.collisions, []);
+  assert.equal(evaluateDeterministic(validated).hardGatePassed, true);
+});

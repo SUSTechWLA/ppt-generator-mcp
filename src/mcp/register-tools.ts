@@ -3,8 +3,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 
 import { generateSlideOutputSchema } from "../domain/quality-report.js";
+import {
+  generateDeckInputSchema,
+  planDeckOutputSchema,
+} from "../domain/deck-plan.js";
 import { generateSlideInputSchema } from "../domain/source-document.js";
 import { slideSpecSchema } from "../domain/slide-spec.js";
+import { WorkflowError } from "../domain/workflow-error.js";
 import { validateFactReferences } from "../services/slide-spec-builder.js";
 import type { WorkflowDependencies } from "../workflow/generate-slide.js";
 import { generateSlideWorkflow } from "../workflow/generate-slide.js";
@@ -17,9 +22,26 @@ import { generateImages, generateSingleImage } from "../tools/generate-image.js"
 import { parseSourceContent } from "../tools/parse-source-content.js";
 import { insertAssetSlots } from "../tools/insert-asset-slots.js";
 import { safeTool, toJsonToolResult, toToolResult } from "./tool-result.js";
+import {
+  getDeckInputSchema,
+  getDeckOutputSchema,
+  mcpPlanDeckInputSchema,
+  mcpGenerateDeckOutputSchema,
+  publicGenerateDeckOutput,
+  sanitizeConsistencyText,
+  sanitizeDeckManifest,
+  sanitizeHtmlText,
+  sanitizePageManifestText,
+  sanitizePlan,
+  sanitizeQualityText,
+} from "./deck-tools.js";
+import type { DeckStoreApi } from "../workflow/deck-store.js";
 
 export interface PptMcpDependencies extends WorkflowDependencies {
   templatesDir?: string;
+  deckStore?: Pick<DeckStoreApi, "getPlan" | "getRun" | "getArtifact">;
+  planDeck?(rawInput: unknown): Promise<unknown>;
+  generateDeck?(rawInput: unknown): Promise<unknown>;
 }
 
 const planSlideOutputSchema = z.object({
@@ -42,6 +64,74 @@ const llmConfigSchema = z.object({
 export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer {
   const server = new McpServer({ name: "ppt-generator-mcp", version: "2.0.0" });
   const templatesDir = resolve(dependencies.templatesDir ?? "templates");
+
+  const requireDeckWorkflow = (): Required<Pick<PptMcpDependencies, "deckStore" | "planDeck" | "generateDeck">> => {
+    if (!dependencies.deckStore || !dependencies.planDeck || !dependencies.generateDeck) {
+      throw new WorkflowError({
+        code: "CONFIG_MISSING",
+        stage: "mcp_tool",
+        retryable: false,
+        message: "High-level deck workflow dependencies are unavailable",
+        recovery: "Start the MCP server with createProductionDependencies before calling deck tools.",
+      });
+    }
+    return {
+      deckStore: dependencies.deckStore,
+      planDeck: dependencies.planDeck,
+      generateDeck: dependencies.generateDeck,
+    };
+  };
+
+  server.registerTool("plan_deck", {
+    title: "Plan an explicit multi-page deck",
+    description: "Plan a formal HTML deck from a source string that uses full-line <page N> markers, labeled heading lines, and 正文： before each page body. The asserted pageNumbers must exactly match the markers; this high-level route never auto-repaginates. It accepts no API key. Use the returned stable page-scoped prompts with an external image agent, then call generate_deck.",
+    inputSchema: mcpPlanDeckInputSchema,
+    outputSchema: planDeckOutputSchema,
+  }, async (input) => safeTool(async () => {
+    const result = planDeckOutputSchema.parse(await requireDeckWorkflow().planDeck(input));
+    return toToolResult(result, `Planned immutable pages ${result.plannedDeck.pageNumbers.join(", ")} with ${result.assets.length} external asset request(s).`);
+  }));
+
+  server.registerTool("generate_deck", {
+    title: "Generate and QA an explicit multi-page deck",
+    description: "Generate independently QA-gated HTML pages from an immutable plan_deck deckPlanId. Supply only page-scoped external image data URLs returned by plan_deck; no image provider or API key is accepted. A needs_assets response is resumable with the same requestId, and already delivered pages are not rerun.",
+    inputSchema: generateDeckInputSchema,
+    outputSchema: mcpGenerateDeckOutputSchema,
+  }, async (input) => safeTool(async () => {
+    const result = publicGenerateDeckOutput(await requireDeckWorkflow().generateDeck(input));
+    return toToolResult(result, `${result.status}: ${result.pages.length} page result(s); ${result.assets.missingAssetIds.length} asset(s) still required.`);
+  }));
+
+  server.registerTool("get_deck", {
+    title: "Get a sanitized deck view or closed artifact",
+    description: "Read an immutable plan, sanitized deck manifest, or a closed artifact by UUID. Only the declared view and artifact enums are accepted; arbitrary paths and filenames are never read or returned.",
+    inputSchema: getDeckInputSchema,
+    outputSchema: getDeckOutputSchema,
+  }, async (input) => safeTool(async () => {
+    const { deckStore } = requireDeckWorkflow();
+    if (input.view === "plan") {
+      const output = getDeckOutputSchema.parse({ result: { kind: "plan", id: input.id, view: input.view, data: sanitizePlan(await deckStore.getPlan(input.id)) } });
+      return toToolResult(output, `Retrieved immutable deck plan ${input.id}.`);
+    }
+    if (input.view === "manifest") {
+      const output = getDeckOutputSchema.parse({ result: { kind: "deck_manifest", id: input.id, view: input.view, data: sanitizeDeckManifest(await deckStore.getRun(input.id)) } });
+      return toToolResult(output, `Retrieved sanitized deck manifest ${input.id}.`);
+    }
+    const artifactName = input.artifact!;
+    const artifact = artifactName === "consistency.json"
+      ? await deckStore.getArtifact(input.id, artifactName)
+      : await dependencies.runStore.getArtifact(input.id, artifactName);
+    if (artifact.text === undefined) throw new Error(`Text artifact unavailable: ${artifactName}`);
+    const result = artifactName === "final.html"
+      ? { kind: "html", id: input.id, view: input.view, artifact: artifactName, size: artifact.size, data: sanitizeHtmlText(artifact.text) }
+      : artifactName === "manifest.json"
+        ? { kind: "page_manifest", id: input.id, view: input.view, artifact: artifactName, size: artifact.size, data: sanitizePageManifestText(artifact.text) }
+        : artifactName === "quality.json"
+          ? { kind: "quality", id: input.id, view: input.view, artifact: artifactName, size: artifact.size, data: sanitizeQualityText(artifact.text) }
+          : { kind: "consistency", id: input.id, view: input.view, artifact: artifactName, size: artifact.size, data: sanitizeConsistencyText(artifact.text) };
+    const output = getDeckOutputSchema.parse({ result });
+    return toToolResult(output, `Retrieved sanitized ${artifactName} metadata for ${input.id}.`);
+  }));
 
   server.registerTool("plan_slide", {
     title: "Plan one quality-gated slide",
@@ -146,7 +236,7 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
   }, async (input) => safeTool(() => toJsonToolResult(validatePage(input))));
 
   server.registerTool("parse_source_content", {
-    description: "兼容原子工具：将 Markdown 解析为旧版模板 direct content。新 workflow 请使用 plan_slide。",
+    description: "Compatibility-only 原子工具：将 Markdown 解析为旧版模板 direct content。高层 deck workflow 不调用本工具。",
     inputSchema: { sourceText: z.string(), templateSlug: z.string().optional(), mode: z.enum(["direct", "llm"]).default("direct"), llmConfig: llmConfigSchema.optional() },
   }, async (input) => safeTool(async () => toJsonToolResult(await parseSourceContent(input))));
 

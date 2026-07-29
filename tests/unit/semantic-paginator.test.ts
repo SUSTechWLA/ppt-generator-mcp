@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { WorkflowError } from "../../src/domain/workflow-error.js";
@@ -48,6 +49,46 @@ test("paginator keeps approval and its time limits on the same page", () => {
   assert.match(body, /书面申请/);
   assert.match(body, /五个工作日/);
   assert.match(body, /三个工作日/);
+});
+
+test("paginator subdivides a generic long paragraph at safe semantic boundaries", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "智能仓储运行规则",
+      body: "仓储系统每日生成1次库存快照，并保留30天。1）入库机器人按12条通道依次巡检；2）分拣线每小时核对240件货物；3）冷链区域持续记录温度和湿度。系统执行规则规定：“温控报警必须在5分钟内确认，且不得跳过复核。”值班人员先检查传感器、电源模块和网络链路，并将检查结果写入运行日志。设备完成初始化。该设备随后进入校验。校验阶段依次比对库存编码、货位编号和批次信息，任何差异都必须生成异常记录。主仓面积为12,500.50㎡，自动设备覆盖其中9,800㎡，剩余区域由人工班组巡回检查。早班在8时前完成交接，中班在16时前复核库存，晚班在24时前封存当日记录。每次交接均需核对未完成任务、告警状态、维护工单和备用设备数量。若发生独立故障，现场人员立即启动应急预案并通知值班主管。维护人员完成故障定位后更换损坏部件，恢复运行前再次执行安全检查。系统恢复后生成1份事件报告，报告保存不少于3年。周度复盘汇总响应时长、故障类型和恢复结果，用于持续优化仓储运行流程。",
+    }],
+  });
+
+  const pages = paginateSource(source, [101, 102, 103]);
+  const pageBodies = pages.map((page) => page.sourceSections.map((section) => section.body).join("\n"));
+  const combinedBody = pageBodies.join("\n");
+  const dependencyPage = pageBodies.findIndex((body) => body.includes("设备完成初始化。"));
+
+  assert.deepEqual(pages.map((page) => page.pageNumber), [101, 102, 103]);
+  assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
+  assert.deepEqual(
+    pages.flatMap((page) => page.originalSourceFactIds),
+    source.facts.map((fact) => fact.id),
+  );
+  assert.match(combinedBody, /1）入库机器人按12条通道依次巡检；/);
+  assert.match(combinedBody, /12,500\.50㎡/);
+  assert.match(combinedBody, /“温控报警必须在5分钟内确认，且不得跳过复核。”/);
+  assert.notEqual(dependencyPage, -1);
+  assert.match(pageBodies[dependencyPage], /设备完成初始化。该设备随后进入校验。/);
+});
+
+test("paginator covers the repository acceptance source in four ordered pages", () => {
+  const sourceMarkdown = readFileSync(new URL("../../test.md", import.meta.url), "utf8");
+  const source = normalizeSource({ sourceText: sourceMarkdown });
+
+  const pages = paginateSource(source, [59, 60, 61, 62]);
+
+  assert.deepEqual(pages.map((page) => page.pageNumber), [59, 60, 61, 62]);
+  assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
+  assert.deepEqual(
+    pages.flatMap((page) => page.originalSourceFactIds),
+    source.facts.map((fact) => fact.id),
+  );
 });
 
 test("paginator uses bullet-only content as non-overlapping source units", () => {

@@ -16,6 +16,7 @@ const FACT_COST = 120;
 const NUMERIC_DENSITY_COST = 30;
 
 type UnitKind = "paragraph" | "keyPoint";
+type BoundaryKind = "paragraph" | "sentence" | "keyPoint";
 
 interface SemanticUnit {
   sourceSectionId: string;
@@ -23,9 +24,16 @@ interface SemanticUnit {
   text: string;
   start: number;
   end: number;
+  paragraphIndex: number;
+  boundaryBefore: BoundaryKind;
   cost: number;
   factCount: number;
   lockedBefore: boolean;
+}
+
+interface TextSegment {
+  text: string;
+  start: number;
 }
 
 type Component = SemanticUnit[];
@@ -57,6 +65,60 @@ interface SplitCandidate {
 
 function paragraphs(body: string): string[] {
   return body.split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
+}
+
+function semanticSegments(value: string): TextSegment[] {
+  const segments: TextSegment[] = [];
+  const quoteStack: string[] = [];
+  const quotePairs: Record<string, string> = {
+    "“": "”",
+    "‘": "’",
+    "「": "」",
+    "『": "』",
+    "《": "》",
+  };
+  let segmentStart = 0;
+
+  const pushSegment = (end: number): void => {
+    let start = segmentStart;
+    let trimmedEnd = end;
+    while (start < trimmedEnd && /\s/.test(value[start])) start += 1;
+    while (trimmedEnd > start && /\s/.test(value[trimmedEnd - 1])) trimmedEnd -= 1;
+    if (trimmedEnd > start) segments.push({ text: value.slice(start, trimmedEnd), start });
+    segmentStart = end;
+  };
+
+  const isTerminal = (character: string | undefined): boolean => character !== undefined && /[。！？!?；;.]/.test(character);
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    const expectedClose = quoteStack[quoteStack.length - 1];
+
+    if (character === "\"") {
+      if (expectedClose === "\"") quoteStack.pop();
+      else quoteStack.push("\"");
+      if (quoteStack.length === 0 && isTerminal(value[index - 1])) pushSegment(index + 1);
+      continue;
+    }
+
+    if (quotePairs[character]) {
+      quoteStack.push(quotePairs[character]);
+      continue;
+    }
+
+    if (expectedClose === character) {
+      quoteStack.pop();
+      if (quoteStack.length === 0 && isTerminal(value[index - 1])) pushSegment(index + 1);
+      continue;
+    }
+
+    if (quoteStack.length > 0 || !isTerminal(character)) continue;
+    if (character === "." && /\d/.test(value[index - 1] ?? "") && /\d/.test(value[index + 1] ?? "")) continue;
+    pushSegment(index + 1);
+  }
+
+  pushSegment(value.length);
+  return segments;
 }
 
 function normalizeSentence(value: string): string {
@@ -106,10 +168,17 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
   const result: SemanticUnit[] = [];
   const seen = new Set<string>();
   let cursor = 0;
+  const bodyParagraphs = paragraphs(section.body);
   const bodyIsKeyPointJoin = section.keyPoints.length > 0
     && normalizeSentence(section.body) === normalizeSentence(section.keyPoints.join("；"));
 
-  const appendUnit = (kind: UnitKind, text: string, start: number): void => {
+  const appendUnit = (
+    kind: UnitKind,
+    text: string,
+    start: number,
+    paragraphIndex: number,
+    boundaryBefore: BoundaryKind,
+  ): void => {
     const normalized = normalizeSentence(text);
     if (seen.has(normalized)) return;
     seen.add(normalized);
@@ -121,6 +190,8 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
       text,
       start,
       end: start + text.length,
+      paragraphIndex,
+      boundaryBefore,
       cost: unitCost(text, factCount),
       factCount,
       lockedBefore: false,
@@ -128,11 +199,20 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
   };
 
   if (!bodyIsKeyPointJoin) {
-    for (const paragraph of paragraphs(section.body)) {
+    for (let paragraphIndex = 0; paragraphIndex < bodyParagraphs.length; paragraphIndex += 1) {
+      const paragraph = bodyParagraphs[paragraphIndex];
       const start = section.body.indexOf(paragraph, cursor);
       const safeStart = start >= 0 ? start : cursor;
       cursor = safeStart + paragraph.length;
-      appendUnit("paragraph", paragraph, safeStart);
+      for (const [segmentIndex, segment] of semanticSegments(paragraph).entries()) {
+        appendUnit(
+          "paragraph",
+          segment.text,
+          safeStart + segment.start,
+          paragraphIndex,
+          segmentIndex === 0 ? "paragraph" : "sentence",
+        );
+      }
     }
   }
 
@@ -141,7 +221,15 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
     const startInBody = bodyIsKeyPointJoin ? section.body.indexOf(keyPoint, cursor) : -1;
     const start = startInBody >= 0 ? startInBody : section.body.length + index + 1;
     cursor = start + keyPoint.length;
-    appendUnit("keyPoint", keyPoint, start);
+    for (const [segmentIndex, segment] of semanticSegments(keyPoint).entries()) {
+      appendUnit(
+        "keyPoint",
+        segment.text,
+        start + segment.start,
+        bodyParagraphs.length + index,
+        segmentIndex === 0 ? "keyPoint" : "sentence",
+      );
+    }
   }
 
   return result;
@@ -197,8 +285,8 @@ function buildGroups(source: SourceDocument): SectionGroup[] {
     for (const unit of units) {
       if (unit.cost > PAGE_BUDGET * 2) {
         paginationError(
-          `Indivisible paragraph in ${section.id} exceeds twice the page budget`,
-          "Shorten the paragraph or request a source revision before planning pages.",
+          `Indivisible sentence or quoted requirement in ${section.id} exceeds twice the page budget`,
+          "Shorten the indivisible sentence or request a source revision before planning pages.",
         );
       }
     }
@@ -240,6 +328,7 @@ function splitCandidates(groups: SectionGroup[]): SplitCandidate[] {
         const balanceImprovement = totalCost - Math.max(leftCost, rightCost);
         const informationDensity = (partFactCount(left) + partFactCount(right)) / Math.max(1, totalCost);
         const dependencyPenalty = continuationPenalty(flattened(right)[0]?.text ?? "");
+        const hierarchyPenalty = flattened(right)[0]?.boundaryBefore === "sentence" ? PAGE_BUDGET : 0;
         const readabilityBenefit = Math.min(leftCost, rightCost);
 
         candidates.push({
@@ -248,7 +337,7 @@ function splitCandidates(groups: SectionGroup[]): SplitCandidate[] {
           left,
           right,
           overBudget: totalCost > PAGE_BUDGET,
-          score: (balanceImprovement * 10) + readabilityBenefit + (informationDensity * 1_000) - dependencyPenalty,
+          score: (balanceImprovement * 10) + readabilityBenefit + (informationDensity * 1_000) - dependencyPenalty - hierarchyPenalty,
           cutIndex,
         });
       }
@@ -297,10 +386,27 @@ function titleFor(group: SectionGroup, partIndex: number): string {
   return partIndex === 0 ? group.heading : `${group.heading}（续）`;
 }
 
+function coalescedUnitTexts(units: SemanticUnit[]): string[] {
+  const values: string[] = [];
+  let previous: SemanticUnit | undefined;
+
+  for (const unit of units) {
+    const continuesPrevious = previous !== undefined
+      && previous.sourceSectionId === unit.sourceSectionId
+      && previous.paragraphIndex === unit.paragraphIndex
+      && previous.kind === unit.kind;
+    if (continuesPrevious) values[values.length - 1] += unit.text;
+    else values.push(unit.text);
+    previous = unit;
+  }
+
+  return values;
+}
+
 function draftForPart(group: SectionGroup, part: PagePart, partIndex: number): PageDraft {
   const units = flattened(part);
-  const paragraphsInPart = units.filter((unit) => unit.kind === "paragraph").map((unit) => unit.text);
-  const keyPoints = units.filter((unit) => unit.kind === "keyPoint").map((unit) => unit.text);
+  const paragraphsInPart = coalescedUnitTexts(units.filter((unit) => unit.kind === "paragraph"));
+  const keyPoints = coalescedUnitTexts(units.filter((unit) => unit.kind === "keyPoint"));
   const body = (paragraphsInPart.length > 0 ? paragraphsInPart : keyPoints).join("\n\n");
   const retainedKeyPoints = paragraphsInPart.length > 0
     ? keyPoints.filter((keyPoint) => !paragraphsInPart.some((paragraph) => normalizeSentence(paragraph) === normalizeSentence(keyPoint)))

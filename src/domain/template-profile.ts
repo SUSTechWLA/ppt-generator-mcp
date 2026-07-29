@@ -44,6 +44,7 @@ export const semanticSlotSchema = z.object({
   acceptedRoles: z.array(semanticRoleSchema).min(1),
   bindings: slotBindingsSchema,
   factBearingBinding: z.enum(["body", "narrativeBody", "tableCell"]),
+  factBearingValueIndex: z.number().int().min(0).max(7),
   bindingExpansion: z.record(z.string(), z.number().int().min(1).max(8)),
 }).strict();
 
@@ -130,6 +131,14 @@ export const templateProfileSchema = z.object({
     }
     if (!(slot.factBearingBinding in slot.bindings)) {
       context.addIssue({ code: "custom", message: "factBearingBinding must reference a declared lossless binding", path: ["semanticSlots", index, "factBearingBinding"] });
+    }
+    const factExpansion = slot.bindingExpansion[slot.factBearingBinding];
+    if (factExpansion !== undefined && slot.factBearingValueIndex >= factExpansion) {
+      context.addIssue({ code: "custom", message: "factBearingValueIndex must be within the fact-bearing binding expansion", path: ["semanticSlots", index, "factBearingValueIndex"] });
+    }
+    const expectedFactIndex = slot.factBearingBinding === "tableCell" ? 1 : 0;
+    if (slot.factBearingValueIndex !== expectedFactIndex) {
+      context.addIssue({ code: "custom", message: `${slot.factBearingBinding} emits its complete fact body at value index ${expectedFactIndex}`, path: ["semanticSlots", index, "factBearingValueIndex"] });
     }
   }
   const auxiliaryFields = Object.keys(profile.auxiliaryBindings ?? {}).sort();

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { JSDOM } from "jsdom";
 
 import type { DocumentType } from "../domain/document-context.js";
 import type { PageBlueprint, SemanticRole } from "../domain/page-blueprint.js";
@@ -67,12 +68,29 @@ function findProfileCatalogs(root: string): string[] {
   return catalogs;
 }
 
-function declaredPlaceholderTags(profile: TemplateProfile): string[] {
-  return [
-    ...Object.values(profile.pageBindings),
-    ...profile.semanticSlots.flatMap((slot) => Object.values(slot.bindings)),
-    ...Object.values(profile.auxiliaryBindings ?? {}),
-  ].filter((tag): tag is string => Boolean(tag));
+interface BindingEmission {
+  tag: string;
+  count: number;
+  source: string;
+}
+
+function declaredBindingEmissions(profile: TemplateProfile): BindingEmission[] {
+  const emissions: BindingEmission[] = [];
+  for (const slot of profile.semanticSlots) {
+    for (const [field, tag] of Object.entries(slot.bindings)) {
+      emissions.push({ tag, count: slot.itemCapacity * slot.bindingExpansion[field], source: `semantic slot ${slot.id}.${field}` });
+    }
+  }
+  for (const [field, tag] of Object.entries(profile.auxiliaryBindings ?? {})) {
+    const cardinality = profile.auxiliaryCapacities?.[field];
+    if (!cardinality) throw new Error(`Auxiliary binding ${field} has no declared cardinality`);
+    emissions.push({ tag, count: cardinality.itemCapacity * cardinality.valuesPerItem, source: `auxiliary binding ${field}` });
+  }
+  for (const [field, tag] of Object.entries(profile.pageBindings)) {
+    const count = field === "imageCaption" || field === "figureRef" ? profile.imageSlots.placeholderCount : 1;
+    emissions.push({ tag, count, source: `page binding ${field}` });
+  }
+  return emissions;
 }
 
 function rawTagCount(html: string, tag: string): number {
@@ -83,6 +101,53 @@ function rawTagCount(html: string, tag: string): number {
 function actualPlaceholderCount(template: ReturnType<typeof loadTemplate>, tag: string): number {
   if (tag === "page-title") return rawTagCount(template.html, tag);
   return template.placeholders.find((placeholder) => placeholder.tag === tag)?.count ?? 0;
+}
+
+const SIMPLE_LOCAL_SELECTOR = /^(?:[a-z][a-z0-9-]*|[.#][A-Za-z_][A-Za-z0-9_-]*)$/;
+const FORBIDDEN_IMAGE_CONTAINER_SELECTORS = new Set(["html", "body", "article", "main", ".bid-page"]);
+const LANDMARK_SELECTORS: Record<SemanticLandmark, string> = {
+  "page-header": "header, .page-header, .visual-header",
+  "chapter-band": ".chapter-band, chapter-label",
+  "subsection-title": ".subsection-title, subsection-title",
+  "summary-band": ".summary-band, .visual-summary, [data-component=\"summary-band\"]",
+  "page-footer": "footer, .page-footer, .visual-footer",
+};
+
+function validateImageContainerSelector(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
+  if (profile.imageSlots.unusedPolicy !== "remove-container") return;
+  const selector = profile.imageSlots.containerSelector;
+  if (!selector || !SIMPLE_LOCAL_SELECTOR.test(selector) || FORBIDDEN_IMAGE_CONTAINER_SELECTORS.has(selector.toLowerCase())) {
+    throw new Error(`Template profile ${profile.slug} has an unsafe image container selector: ${selector ?? "missing"}`);
+  }
+  const doc = new JSDOM(template.html).window.document;
+  const placeholders = Array.from(doc.querySelectorAll(profile.imageSlots.placeholderTag));
+  const containers = placeholders.map((placeholder) => placeholder.closest(selector));
+  if (containers.some((container) => !container)) {
+    throw new Error(`Template profile ${profile.slug} image container selector ${selector} does not match every image placeholder`);
+  }
+  const resolved = containers.filter((container): container is Element => Boolean(container));
+  const distinct = new Set(resolved);
+  if (distinct.size !== placeholders.length) {
+    throw new Error(`Template profile ${profile.slug} image container selector ${selector} must resolve to a distinct container per placeholder`);
+  }
+  const selectorMatches = Array.from(doc.querySelectorAll(selector));
+  if (selectorMatches.length !== distinct.size || selectorMatches.some((element) => !distinct.has(element))) {
+    throw new Error(`Template profile ${profile.slug} image container selector ${selector} is too broad for its image placeholders`);
+  }
+  const pageRoots = new Set<Element>([
+    doc.documentElement,
+    doc.body,
+    ...Array.from(doc.querySelectorAll("article, .bid-page, [data-slide-page], [data-page-number]")),
+  ]);
+  const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark])));
+  for (const container of distinct) {
+    if (pageRoots.has(container)) {
+      throw new Error(`Template profile ${profile.slug} image container selector ${selector} resolves to a page root`);
+    }
+    if (protectedLandmarks.some((landmark) => container === landmark || container.contains(landmark))) {
+      throw new Error(`Template profile ${profile.slug} image container selector ${selector} contains a required semantic landmark`);
+    }
+  }
 }
 
 export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
@@ -109,7 +174,14 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   for (const profile of profiles) {
     if (!actual.has(profile.slug)) throw new Error(`Template profile has no matching HTML: ${profile.slug}`);
     const template = loadTemplate(templatesDir, profile.slug);
-    const declaredTags = [...new Set(declaredPlaceholderTags(profile))];
+    const emissions = declaredBindingEmissions(profile);
+    const emissionsByTag = new Map<string, BindingEmission[]>();
+    for (const emission of emissions) emissionsByTag.set(emission.tag, [...(emissionsByTag.get(emission.tag) ?? []), emission]);
+    const duplicateTargets = [...emissionsByTag.entries()].filter(([, targets]) => targets.length > 1);
+    if (duplicateTargets.length > 0) {
+      throw new Error(`Template profile ${profile.slug} has duplicate placeholder target tags: ${duplicateTargets.map(([tag, targets]) => `${tag} (${targets.map((target) => target.source).join(", ")})`).join("; ")}`);
+    }
+    const declaredTags = [...emissionsByTag.keys()];
     const missing = declaredTags.filter((tag) => actualPlaceholderCount(template, tag) === 0);
     if (missing.length > 0) throw new Error(`Template profile ${profile.slug} declares missing placeholders: ${[...new Set(missing)].join(", ")}`);
     const undeclared = template.placeholders
@@ -119,31 +191,18 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
     for (const tag of declaredTags) {
       if (!profile.maxCharsBySlot[tag]) throw new Error(`Template profile ${profile.slug} has no character capacity for bound placeholder ${tag}`);
     }
-    for (const slot of profile.semanticSlots) {
-      for (const [field, tag] of Object.entries(slot.bindings)) {
-        const expansion = slot.bindingExpansion[field];
-        const actual = actualPlaceholderCount(template, tag);
-        if (slot.itemCapacity * expansion !== actual) {
-          throw new Error(`Template profile ${profile.slug} semantic binding ${tag} cardinality ${slot.itemCapacity}x${expansion} does not match placeholder count ${actual}`);
-        }
+    for (const [tag, targets] of emissionsByTag) {
+      const declaredCount = targets.reduce((total, target) => total + target.count, 0);
+      const actualCount = actualPlaceholderCount(template, tag);
+      if (declaredCount !== actualCount) {
+        throw new Error(`Template profile ${profile.slug} binding ${tag} cardinality ${declaredCount} does not match placeholder count ${actualCount}`);
       }
-    }
-    for (const [field, tag] of Object.entries(profile.auxiliaryBindings ?? {})) {
-      const cardinality = profile.auxiliaryCapacities?.[field];
-      const actual = actualPlaceholderCount(template, tag);
-      if (!cardinality || cardinality.itemCapacity * cardinality.valuesPerItem !== actual) {
-        throw new Error(`Template profile ${profile.slug} auxiliary binding ${tag} cardinality does not match placeholder count ${actual}`);
-      }
-    }
-    for (const [field, tag] of Object.entries(profile.pageBindings)) {
-      const expected = field === "imageCaption" || field === "figureRef" ? profile.imageSlots.placeholderCount : 1;
-      const actual = actualPlaceholderCount(template, tag);
-      if (actual !== expected) throw new Error(`Template profile ${profile.slug} page binding ${tag} cardinality ${actual} does not match ${expected}`);
     }
     const actualImageSlots = template.placeholders.find((placeholder) => placeholder.tag === profile.imageSlots.placeholderTag)?.count ?? 0;
     if (actualImageSlots !== profile.imageSlots.placeholderCount || profile.imageSlots.maxAssets !== actualImageSlots) {
       throw new Error(`Template profile ${profile.slug} image slot capacity ${profile.imageSlots.placeholderCount} does not match HTML count ${actualImageSlots}`);
     }
+    validateImageContainerSelector(template, profile);
   }
   for (const slug of actual) {
     if (!slugs.includes(slug)) throw new Error(`HTML template has no approved profile: ${slug}`);

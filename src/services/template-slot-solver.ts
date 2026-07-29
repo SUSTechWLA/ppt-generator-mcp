@@ -125,16 +125,31 @@ function fieldValues(field: string, item: SemanticItem): string[] {
   return [item.title];
 }
 
+function completeFactBody(item: SemanticItem): string {
+  return [item.body, ...item.bullets].filter(Boolean).join("；");
+}
+
+function factBearingValue(slot: SemanticSlot, item: SemanticItem): string | undefined {
+  const field = slot.factBearingBinding
+    ?? (["body", "narrativeBody", "tableCell"].find((candidate) => candidate in slot.bindings) as SemanticSlot["factBearingBinding"] | undefined);
+  if (!field || !(field in slot.bindings)) return undefined;
+  const expansion = slot.bindingExpansion?.[field] ?? 1;
+  const defaultIndex = field === "tableCell" ? 1 : 0;
+  const index = slot.factBearingValueIndex ?? defaultIndex;
+  return fieldValues(field, item).slice(0, expansion)[index];
+}
+
+function emitsCompleteFactBody(slot: SemanticSlot, item: SemanticItem): boolean {
+  return factBearingValue(slot, item) === completeFactBody(item);
+}
+
 function bindingValuesFit(item: SemanticItem, slot: SemanticSlot, profile: TemplateProfile): boolean {
-  const factBearing = slot.factBearingBinding
-    ?? (["body", "narrativeBody", "tableCell"].find((field) => field in slot.bindings) as SemanticSlot["factBearingBinding"] | undefined);
   return Object.entries(slot.bindings).every(([field, tag]) => {
     const limit = profile.maxCharsBySlot[tag];
     if (!limit) return false;
     const expansion = slot.bindingExpansion?.[field] ?? 1;
     const emittedFit = fieldValues(field, item).slice(0, expansion).every((value) => Array.from(value).length <= limit);
-    const factFits = field === factBearing ? Array.from(item.body).length <= limit : true;
-    return emittedFit && factFits;
+    return emittedFit;
   });
 }
 
@@ -161,13 +176,13 @@ export function solveTemplateSlots(content: PageBlueprint | SlideSpec, profile: 
     const roleSlots = profile.supportedRoles.includes(item.role)
       ? slots.filter((slot) => slot.acceptedRoles.includes(item.role))
       : [];
-    const roleCompatible = roleSlots.filter(hasLosslessFactBinding);
+    const roleCompatible = roleSlots.filter((slot) => hasLosslessFactBinding(slot) && emitsCompleteFactBody(slot, item));
     if (roleSlots.length > 0 && roleCompatible.length === 0) {
       unmatched.push({
         groupId: item.id,
         role: item.role,
         sourceFactIds: item.sourceFactIds,
-        reason: "可兼容槽位没有声明无损事实承载绑定",
+        reason: "可兼容槽位没有在声明位置输出完整无损事实正文",
       });
       continue;
     }

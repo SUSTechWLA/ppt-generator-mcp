@@ -15,6 +15,7 @@
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
+        "factBearingValueIndex": 0,
         "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
@@ -74,6 +75,7 @@
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
+        "factBearingValueIndex": 0,
         "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
@@ -119,6 +121,7 @@
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
+        "factBearingValueIndex": 0,
         "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
@@ -166,6 +169,7 @@
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
+        "factBearingValueIndex": 0,
         "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
@@ -213,6 +217,7 @@
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
         "bindings": { "tableCell": "table-cell" },
         "factBearingBinding": "tableCell",
+        "factBearingValueIndex": 1,
         "bindingExpansion": { "tableCell": 4 }
       }
     ],
@@ -271,6 +276,7 @@
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence", "visual"],
         "bindings": { "tableCell": "table-cell" },
         "factBearingBinding": "tableCell",
+        "factBearingValueIndex": 1,
         "bindingExpansion": { "tableCell": 2 }
       }
     ],

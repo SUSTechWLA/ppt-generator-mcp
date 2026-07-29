@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { loadTemplate } from "../../src/lib/template-parser.js";
 import { loadTemplateProfiles, selectTemplate } from "../../src/services/template-selector.js";
-import type { TemplateProfile } from "../../src/domain/template-profile.js";
+import { templateProfileSchema, type TemplateProfile } from "../../src/domain/template-profile.js";
 import { makeSlideSpec, makeTemplateProfiles } from "../helpers/domain-fixtures.js";
 
 function capabilityProfile(overrides: Record<string, unknown> = {}): TemplateProfile {
@@ -80,6 +80,12 @@ test("loads one approved profile for every repository template", () => {
   const profiles = loadTemplateProfiles(resolve("templates"));
   assert.equal(profiles.length, 6);
   assert.equal(new Set(profiles.map((profile) => profile.slug)).size, 6);
+});
+
+test("schema requires an explicit fact-bearing emitted value position", () => {
+  const candidate = structuredClone(makeTemplateProfiles()[0]) as unknown as { semanticSlots: Array<Record<string, unknown>> };
+  delete candidate.semanticSlots[0].factBearingValueIndex;
+  assert.equal(templateProfileSchema.safeParse(candidate).success, false);
 });
 
 test("forced unknown templates fail with an actionable message", () => {
@@ -183,9 +189,10 @@ test("selector rejects emitted table-cell text above the declared tag capacity",
 
 async function temporaryCatalog(
   mutate: (profile: TemplateProfile, html: string) => { profile: TemplateProfile; html: string },
+  selectProfile: (profiles: TemplateProfile[]) => TemplateProfile = (profiles) => profiles[0],
 ): Promise<{ directory: string; cleanup(): Promise<void> }> {
   const directory = await mkdtemp(join(tmpdir(), "template-profile-test-"));
-  const sourceProfile = structuredClone(loadTemplateProfiles(resolve("templates"))[0]);
+  const sourceProfile = structuredClone(selectProfile(loadTemplateProfiles(resolve("templates"))));
   const sourceTemplate = loadTemplate(resolve("templates"), sourceProfile.slug);
   const changed = mutate(sourceProfile, sourceTemplate.html);
   await writeFile(join(directory, "fixture.html"), changed.html);
@@ -224,6 +231,76 @@ test("loader rejects semantic HTML placeholders above declared binding cardinali
   }));
   try {
     assert.throws(() => loadTemplateProfiles(fixture.directory), /cardinality|placeholder count/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects two semantic slots that emit to the same placeholder tag", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    profile.semanticSlots.push({
+      ...structuredClone(profile.semanticSlots[0]),
+      id: "duplicate-target",
+      priority: profile.semanticSlots[0].priority + 1,
+      required: false,
+    });
+    return { profile, html };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /duplicate.*placeholder|multiple bindings|target tag/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+for (const selector of ["html", "body", ".bid-page"]) {
+  test(`loader rejects page-root image container selector ${selector}`, async () => {
+    const fixture = await temporaryCatalog((profile, html) => ({
+      profile: { ...profile, imageSlots: { ...profile.imageSlots, containerSelector: selector } },
+      html,
+    }));
+    try {
+      assert.throws(() => loadTemplateProfiles(fixture.directory), /image container selector|unsafe|page root/i);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
+
+test("loader rejects a nonmatching image container selector", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile: { ...profile, imageSlots: { ...profile.imageSlots, containerSelector: ".missing-image-container" } },
+    html,
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /image container selector|does not match/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects a malformed image container selector", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile: { ...profile, imageSlots: { ...profile.imageSlots, containerSelector: "figure[" } },
+    html,
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /image container selector|malformed|simple/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects an image selector that resolves all placeholders to one shared container", async () => {
+  const fixture = await temporaryCatalog(
+    (profile, html) => ({
+      profile: { ...profile, imageSlots: { ...profile.imageSlots, containerSelector: ".body-grid" } },
+      html,
+    }),
+    (profiles) => profiles.find((profile) => profile.imageSlots.placeholderCount === 4)!,
+  );
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /image container selector|distinct|shared/i);
   } finally {
     await fixture.cleanup();
   }

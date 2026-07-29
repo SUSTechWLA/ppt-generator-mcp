@@ -194,3 +194,26 @@ test("short-title-only slots cannot claim source facts are represented", () => {
   assert.deepEqual(result.unrepresentedFactIds, ["fact-1"]);
   assert.match(result.unmatched[0]?.reason ?? "", /无损事实/);
 });
+
+test("table expansion that emits only the title cannot represent the fact body", () => {
+  const page = blueprint([{ role: "fact", title: "履约要求", body: "完整事实正文必须出现。" }]);
+  const result = solveTemplateSlots(page, profile({
+    blockCapacity: 1,
+    semanticSlots: [{
+      id: "title-only-table",
+      priority: 1,
+      required: true,
+      itemCapacity: 1,
+      maxCharsPerItem: 120,
+      acceptedRoles: ["fact"],
+      bindings: { tableCell: "table-cell" },
+      factBearingBinding: "tableCell",
+      factBearingValueIndex: 0,
+      bindingExpansion: { tableCell: 1 },
+    }],
+    maxCharsBySlot: { ...profile().maxCharsBySlot, "table-cell": 120 },
+  }));
+  assert.equal(result.feasible, false);
+  assert.deepEqual(result.unrepresentedFactIds, ["fact-1"]);
+  assert.match(result.unmatched[0]?.reason ?? "", /完整事实正文|无损事实/);
+});

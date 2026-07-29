@@ -50,6 +50,7 @@ function delivery(slide: Awaited<ReturnType<typeof fixture>>["plannedDeck"]["sli
         semanticItems: [],
         blankComponents: [],
         protectedGeneratedText: [],
+        protectedClipViolations: [],
       },
     },
   };

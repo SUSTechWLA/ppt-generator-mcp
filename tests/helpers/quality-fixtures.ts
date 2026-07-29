@@ -20,7 +20,7 @@ export function makeEvaluationFixtures() {
       designTokens: { fontFamily: "Arial", textColor: "rgb(0, 0, 0)", backgroundColor: "rgb(255, 255, 255)", fontScale: "1", spacingScale: "1", contrastMode: "normal" },
       landmarkCounts: { "page-header": 0, "chapter-band": 0, "subsection-title": 0, "summary-band": 0, "page-footer": 0 },
       landmarkRects: { "page-header": [], "chapter-band": [], "subsection-title": [], "summary-band": [], "page-footer": [] },
-      pageFields: {}, semanticItems: [], blankComponents: [], protectedGeneratedText: [],
+      pageFields: {}, semanticItems: [], blankComponents: [], protectedGeneratedText: [], protectedClipViolations: [],
     },
     layout: { containmentViolations: [], collisions: [] },
     signals: { networkRequests: [], hasScripts: false, hasExecutableDom: false, hasUnresolvedPlaceholders: false, hasSecretLikeText: false, screenshotCreated: true },

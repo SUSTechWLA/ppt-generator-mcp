@@ -13,6 +13,7 @@ import { renderPage } from "../../src/services/page-renderer.js";
 import { getDocumentTemplatePolicy } from "../../src/services/template-selector.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
 import { composeSlide } from "../../src/services/slide-composer.js";
+import { solveTemplateSlots } from "../../src/services/template-slot-solver.js";
 import { loadTemplate } from "../../src/lib/template-parser.js";
 import { DeckStore } from "../../src/workflow/deck-store.js";
 import { createPlanDeckDependencies, planDeckWorkflow } from "../../src/workflow/plan-deck.js";
@@ -210,16 +211,21 @@ test("real planned composition exposes fact-bearing DOM text and enforces the ex
     const mutatedTitle = await renderPage({ html: mutatedTitleDom.serialize(), screenshotPath: join(directory, "mutated-title.png") });
     assert.equal(evaluateDeterministic(mutatedTitle, context).hardGatePassed, false, "an ungrounded semantic title must fail even when fact body remains exact");
 
+    const trustBoundaryFailures: string[] = [];
     for (const [label, css] of [
-      ["clipped-fact", "[data-fact-text-owner]{clip-path:inset(100%)!important}"],
-      ["clipped-page-field", '[data-page-field="subsectionTitle"]{clip-path:inset(100%)!important}'],
+      ["clipped-inset-round", "[data-fact-text-owner]{clip-path:inset(100% round 1px)!important}"],
+      ["clipped-inset-calc", '[data-page-field="subsectionTitle"]{clip-path:inset(calc(50% + 1px))!important}'],
+      ["clipped-circle", "[data-fact-text-owner]{clip-path:circle(0)!important}"],
+      ["clipped-polygon", '[data-page-field="subsectionTitle"]{clip-path:polygon(0 0,0 0,0 0)!important}'],
+      ["clipped-legacy-rect", "[data-fact-text-owner]{position:absolute!important;clip:rect(0,0,0,0)!important}"],
       ["generated-semantic-text", '[data-fact-text-owner]::after{content:"微软99亿元"}'],
     ] as const) {
       const html = composed.html.replace("</head>", `<style>${css}</style></head>`);
       const rendered = await renderPage({ html, screenshotPath: join(directory, `${label}.png`) });
       const report = evaluateDeterministic(rendered, context);
-      assert.equal(report.hardGatePassed, false, `${label} must not cross the painted-text trust boundary`);
+      if (report.hardGatePassed) trustBoundaryFailures.push(label);
     }
+    assert.deepEqual(trustBoundaryFailures, [], "computed clipping and generated lexical content must fail closed in protected text zones");
 
     const decorativePseudoHtml = composed.html.replace("</head>", '<style>[data-semantic-slot]::before{content:"◆"}</style></head>');
     const decorativePseudo = await renderPage({ html: decorativePseudoHtml, screenshotPath: join(directory, "decorative-pseudo.png") });
@@ -230,6 +236,91 @@ test("real planned composition exposes fact-bearing DOM text and enforces the ex
     const belowReport = evaluateDeterministic(below, context);
     assert.equal(belowReport.hardGatePassed, false);
     assert.ok(belowReport.issues.some((issue) => issue.category === "readability" && /8\.5pt/.test(issue.evidence)));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("real four-column table binding uses canonical plan order and rejects forged projected cells", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ppt-table-projection-gate-"));
+  try {
+    const profiles = loadTemplateProfiles(resolve("templates"));
+    const profile = profiles.find((candidate) => candidate.slug === "green-infographic-bid-a4-landscape-table-image");
+    assert.ok(profile);
+    const spec = {
+      title: "履约数据总览",
+      eyebrow: "服务实施",
+      conclusion: "按计划完成履约要求并留存证据。",
+      blocks: [{
+        id: "block-1",
+        type: "table" as const,
+        semanticRole: "comparison" as const,
+        title: "履约指标",
+        body: "固定负责人1名，30分钟内启动响应。",
+        bullets: [],
+        metrics: [{ label: "响应时限", value: "30分钟" }],
+        sourceFactIds: ["fact-1"],
+      }],
+      assets: [{
+        id: "img-001",
+        type: "image" as const,
+        blockId: "block-1",
+        prompt: "professional service evidence scene, no text",
+        alt: "履约证据场景示意图",
+        sourceFactIds: ["fact-1"],
+        width: 1792 as const,
+        height: 1024 as const,
+      }],
+      sourceFactIds: ["fact-1"],
+      designIntent: { tone: "professional" as const, density: "medium" as const, visualRatio: 0.12 },
+    };
+    const solution = solveTemplateSlots(spec, profile);
+    assert.equal(solution.feasible, true, JSON.stringify(solution.unmatched));
+    const composed = await composeSlide({
+      spec,
+      profile,
+      template: loadTemplate(resolve("templates"), profile.slug),
+      slotSolution: solution,
+      page: { number: 206, sectionTitle: "数字产品方案", partNumber: "PART.02", partLabel: "履约响应", chapterLabel: "服务实施", subsectionTitle: "履约数据总览" },
+      assets: [{ id: "img-001", promptHash: "hash-table", mimeType: "image/png", filePath: "/tmp/img-001.png", dataUrl: `data:image/png;base64,${png}`, reused: false }],
+    });
+    const body = spec.blocks[0].body;
+    const displayPlan = displayPlanSchema.parse({
+      version: 1,
+      items: [{ id: "group-1", order: 0, role: "comparison", title: spec.blocks[0].title, body, sourceFactIds: ["fact-1"] }],
+      factCoverages: [{
+        factId: "fact-1", displayItemId: "group-1", sourceText: body,
+        selectedSpans: [{ start: 0, end: body.length, text: body }],
+        criticalAnchors: extractCanonicalAnchors(body), displayText: body, omittedCharacterCount: 0, extractionLevel: "full",
+      }],
+      targetBudget: {
+        blockCapacity: profile.blockCapacity,
+        semanticPositionCapacity: profile.semanticSlots[0].itemCapacity,
+        factBindingPositionCapacity: profile.semanticSlots[0].itemCapacity,
+        itemCapacity: profile.semanticSlots[0].itemCapacity,
+        maxCharsPerItem: profile.semanticSlots[0].maxCharsPerItem,
+        minimumBodyFontPt: profile.minimumBodyFontPt,
+        positionBudgets: [{ displayItemId: "group-1", slotId: profile.semanticSlots[0].id, itemIndex: 0, maxChars: profile.semanticSlots[0].maxCharsPerItem }],
+      },
+      grounding: { passed: true, issues: [], mappedFactIds: ["fact-1"], displayedCharacterCount: body.length, omittedCharacterCount: 0 },
+    });
+    const context = { profile, documentPolicy: getDocumentTemplatePolicy("bid"), expectedPageNumber: 206, displayPlan, plannedSpec: spec };
+    const honest = await renderPage({ html: composed.html, screenshotPath: join(directory, "honest.png") });
+    assert.equal(honest.structure.semanticItems[0].bindingTexts.length, 4);
+    const honestReport = evaluateDeterministic(honest, context);
+    assert.equal(honestReport.hardGatePassed, true, JSON.stringify(honestReport.issues, null, 2));
+
+    for (const [label, selector] of [
+      ["forged-title", '[data-semantic-binding-field="tableCell"][data-semantic-binding-index="0"]'],
+      ["forged-metric", '[data-semantic-binding-field="tableCell"][data-semantic-binding-index="2"]'],
+    ] as const) {
+      const dom = new JSDOM(composed.html);
+      const owner = dom.window.document.querySelector(selector);
+      assert.ok(owner);
+      owner.textContent = "微软99亿元";
+      const forged = await renderPage({ html: dom.serialize(), screenshotPath: join(directory, `${label}.png`) });
+      assert.equal(evaluateDeterministic(forged, context).hardGatePassed, false, label);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

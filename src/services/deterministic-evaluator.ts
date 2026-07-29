@@ -89,10 +89,14 @@ export function evaluateDeterministic(render: RenderResult, policy: Deterministi
   for (const generated of render.structure.protectedGeneratedText ?? []) {
     issue({ severity: "error", category: "fidelity", targetId: generated.owner, evidence: `${generated.zone} \u53d7\u4fdd\u62a4\u6587\u672c\u533a\u4f7f\u7528\u672a\u7eb3\u5165 DOM \u8bed\u4e49\u6d4b\u91cf\u7684\u4f2a\u5143\u7d20\u8bcd\u6cd5\u5185\u5bb9`, suggestedAction: "\u5c06\u5e94\u5c55\u793a\u7684\u8bcd\u6cd5\u5185\u5bb9\u4f5c\u4e3a\u53ef\u5f52\u56e0 DOM \u6587\u672c\u586b\u5145\uff1b\u4f2a\u5143\u7d20\u4ec5\u7528\u4e8e\u65e0\u6587\u5b57\u88c5\u9970" });
   }
+  for (const clipped of render.structure.protectedClipViolations ?? []) {
+    issue({ severity: "error", category: "fidelity", targetId: clipped.owner, evidence: `${clipped.zone} \u53d7\u4fdd\u62a4\u6587\u672c\u533a\u5b58\u5728\u975e\u9ed8\u8ba4 computed clip/clip-path\uff0c\u4e0d\u80fd\u4f5c\u4e3a\u53ef\u89c1\u4ea4\u4ed8\u6587\u672c`, suggestedAction: "\u79fb\u9664\u4e8b\u5b9e\u3001\u6807\u9898\u548c\u9875\u5143\u6570\u636e owner \u53ca\u5176\u7956\u5148\u7684 clip \u6837\u5f0f" });
+  }
   if (policy.displayPlan) {
     const expectedItems = policy.displayPlan.items;
     const actualItems = render.structure.semanticItems;
     if (actualItems.length !== expectedItems.length) issue({ severity: "error", category: "structure", evidence: `\u53ef\u89c1\u8bed\u4e49\u9879\u6570 ${actualItems.length} \u4e0e\u8ba1\u5212 ${expectedItems.length} \u4e0d\u4e00\u81f4`, suggestedAction: "\u6062\u590d\u6bcf\u4e2a\u5df2\u5206\u914d\u8bed\u4e49\u69fd\u4e14\u79fb\u9664\u91cd\u590d\u9879" });
+    if (policy.plannedSpec && policy.plannedSpec.blocks.length !== expectedItems.length) issue({ severity: "error", category: "fidelity", evidence: "plannedSpec block \u987a\u5e8f\u6295\u5f71\u4e0e displayPlan item \u6570\u91cf\u4e0d\u4e00\u81f4", suggestedAction: "\u4f7f\u7528 persisted planned deck \u4e2d\u540c\u5e8f\u4e14\u7b49\u957f\u7684 block/item \u6295\u5f71" });
     for (const [index, expected] of expectedItems.entries()) {
       const actual = actualItems[index];
       const budget = policy.displayPlan.targetBudget.positionBudgets.find((entry) => entry.displayItemId === expected.id);
@@ -105,7 +109,15 @@ export function evaluateDeterministic(render: RenderResult, policy: Deterministi
       if (normalizedVisibleText(actual.titleText) !== normalizedVisibleText(expected.title)) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u53ef\u89c1\u6807\u9898\u4e0d\u7b49\u4e8e grounded display title\uff0c\u53ef\u80fd\u542b\u672a\u5f52\u56e0\u6570\u5b57\u6216\u540d\u79f0`, suggestedAction: "\u4ec5\u6e32\u67d3 displayPlan \u7684\u8bed\u4e49\u6807\u9898" });
       if (normalizedVisibleText(actual.factText) !== normalizedVisibleText(expected.body)) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u53ef\u89c1\u4e8b\u5b9e\u6587\u672c\u4e0d\u7b49\u4e8e grounded display text\uff0c\u53ef\u80fd\u7f3a\u5931\u5173\u952e\u9528\u70b9\u6216\u542b\u672a\u5f52\u56e0\u6570\u5b57/\u540d\u79f0`, suggestedAction: "\u4ec5\u6e32\u67d3 displayPlan \u7684\u62bd\u53d6\u5f0f\u6587\u672c" });
       const slot = policy.profile?.semanticSlots.find((candidate) => candidate.id === actual.slotId);
-      const plannedBlock = policy.plannedSpec?.blocks.find((candidate) => candidate.id === expected.id);
+      // plannedDeckSchema persists display groups and SlideSpec blocks as the same canonical order,
+      // while deliberately keeping their cross-layer IDs distinct (group-N versus block-N).
+      const plannedBlock = policy.plannedSpec?.blocks[index];
+      if (policy.plannedSpec && (!plannedBlock
+        || plannedBlock.title !== expected.title || plannedBlock.body !== expected.body
+        || plannedBlock.semanticRole !== expected.role
+        || !orderedEqual(plannedBlock.sourceFactIds, expected.sourceFactIds))) {
+        issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u4e0e plannedSpec \u7684\u6301\u4e45\u5316\u987a\u5e8f\u6295\u5f71\u4e0d\u4e00\u81f4`, suggestedAction: "\u6309 planned deck \u4e2d display item/block \u7684 canonical \u987a\u5e8f\u91cd\u5efa\u6295\u5f71" });
+      }
       const expectedBindingKeys = Object.entries(slot?.bindingExpansion ?? {}).flatMap(([field, count]) => (
         Array.from({ length: count }, (_, valueIndex) => `${field}:${valueIndex}`)
       )).sort();

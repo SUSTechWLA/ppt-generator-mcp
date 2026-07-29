@@ -145,21 +145,49 @@ const contextualPeriodCases = [
     name: "title and label abbreviations",
     body: "Dr. Chen arrives. Use No. 1 channel.",
     facts: ["Dr. Chen arrives.", "Use No. 1 channel."],
+    pageNumbers: [201, 202],
   },
   {
     name: "an ASCII ellipsis",
     body: "Wait... Continue checks.",
     facts: ["Wait...", "Continue checks."],
+    pageNumbers: [201, 202],
   },
   {
     name: "a sentence-final initialism",
     body: "Operations are in the U.S. Response complete.",
     facts: ["Operations are in the U.S.", "Response complete."],
+    pageNumbers: [201, 202],
   },
   {
     name: "a contextual numbered-list marker",
     body: "Scope includes 1. Inspect power; Continue checks.",
     facts: ["Scope includes 1. Inspect power;", "Continue checks."],
+    pageNumbers: [201, 202],
+  },
+  {
+    name: "a consecutive Unicode ellipsis",
+    body: "等待……继续检查。",
+    facts: ["等待……", "继续检查。"],
+    pageNumbers: [201, 202],
+  },
+  {
+    name: "organization continuations after initialisms",
+    body: "The U.S. Army responds. The U.N. Security Council met. Response complete.",
+    facts: ["The U.S. Army responds.", "The U.N. Security Council met.", "Response complete."],
+    pageNumbers: [201, 202, 203],
+  },
+  {
+    name: "sentence-final numeric prose",
+    body: "Complete phase 2. Release starts. Coverage reached 8. Next action begins.",
+    facts: ["Complete phase 2.", "Release starts.", "Coverage reached 8.", "Next action begins."],
+    pageNumbers: [201, 202, 203, 204],
+  },
+  {
+    name: "a label abbreviation without a label value",
+    body: "See Fig. Response complete. See Fig. 2.",
+    facts: ["See Fig.", "Response complete.", "See Fig. 2."],
+    pageNumbers: [201, 202, 203],
   },
 ] as const;
 
@@ -170,9 +198,9 @@ for (const scenario of contextualPeriodCases) {
     });
 
     assert.deepEqual(source.facts.map((fact) => fact.text), [...scenario.facts]);
-    assert.ok(source.facts.every((fact) => fact.text.length > 0 && !/^\.+$/.test(fact.text)));
+    assert.ok(source.facts.every((fact) => fact.text.length > 0 && !/^[.。！？!?；;…]+$/u.test(fact.text)));
 
-    const pages = paginateSource(source, [201, 202]);
+    const pages = paginateSource(source, [...scenario.pageNumbers]);
     assert.deepEqual(pages.map((page) => page.sourceSections[0].body), [...scenario.facts]);
     assert.deepEqual(
       pages.flatMap((page) => page.originalSourceFactIds),

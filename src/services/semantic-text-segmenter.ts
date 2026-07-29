@@ -13,19 +13,33 @@ const QUOTE_PAIRS: Readonly<Record<string, string>> = {
   "《": "》",
 };
 
-// Closed class of titles and document labels whose period normally introduces a continuation.
-const CONTINUATION_ABBREVIATIONS = new Set([
-  "dr",
-  "eq",
-  "fig",
-  "mr",
-  "mrs",
-  "ms",
-  "no",
-  "prof",
-  "sec",
-  "vol",
-]);
+// Generic English policy for period roles that cannot be resolved from punctuation alone.
+const ENGLISH_PERIOD_POLICY = {
+  titleAbbreviations: new Set(["dr", "mr", "mrs", "ms", "prof"]),
+  labelAbbreviations: new Set(["eq", "fig", "no", "sec", "vol"]),
+  continuationInitialisms: new Set(["eg", "ie"]),
+  organizationContinuations: new Set([
+    "administration",
+    "agency",
+    "air",
+    "army",
+    "association",
+    "bureau",
+    "congress",
+    "council",
+    "department",
+    "embassy",
+    "force",
+    "government",
+    "mission",
+    "navy",
+    "office",
+    "security",
+  ]),
+  enumerativeCues: new Set(["comprises", "consists", "contains", "following", "include", "includes", "including", "namely"]),
+};
+
+const LIST_INTRODUCERS = new Set(["(", ":", ";", "[", "{", "：", "；"]);
 
 type PeriodDecision =
   | { kind: "protected" }
@@ -55,6 +69,12 @@ function nextNonWhitespaceIndex(value: string, start: number): number {
   return index;
 }
 
+function previousNonWhitespaceIndex(value: string, start: number): number {
+  let index = start;
+  while (index >= 0 && /\s/.test(value[index])) index -= 1;
+  return index;
+}
+
 function isTokenInternalPeriod(value: string, index: number): boolean {
   return value[index] === "."
     && isLetterOrNumber(value[index - 1])
@@ -77,35 +97,50 @@ function wordBefore(value: string, index: number): string {
   return value.slice(start, index);
 }
 
-function isContextualNumberedMarker(value: string, index: number): boolean {
+function wordAt(value: string, index: number): string {
+  let end = index;
+  while (end < value.length && isLetterOrNumber(value[end])) end += 1;
+  return value.slice(index, end);
+}
+
+function isContextualNumberedMarker(value: string, index: number, segmentStart: number): boolean {
   let start = index;
   while (start > 0 && /\d/.test(value[start - 1])) start -= 1;
   if (start === index || isLetterOrNumber(value[start - 1])) return false;
   if (!/\s/.test(value[index + 1] ?? "")) return false;
-  return isLetter(value[nextNonWhitespaceIndex(value, index + 1)]);
+  if (!isLetter(value[nextNonWhitespaceIndex(value, index + 1)])) return false;
+
+  if (value.slice(segmentStart, start).trim() === "") return true;
+  const previousIndex = previousNonWhitespaceIndex(value, start - 1);
+  if (LIST_INTRODUCERS.has(value[previousIndex])) return true;
+  return ENGLISH_PERIOD_POLICY.enumerativeCues.has(wordBefore(value, previousIndex + 1).toLowerCase());
 }
 
 function isClosedClassAbbreviation(value: string, index: number): boolean {
   const abbreviation = wordBefore(value, index).toLowerCase();
-  if (!CONTINUATION_ABBREVIATIONS.has(abbreviation)) return false;
   if (!/\s/.test(value[index + 1] ?? "")) return false;
-  return isLetterOrNumber(value[nextNonWhitespaceIndex(value, index + 1)]);
+  const nextIndex = nextNonWhitespaceIndex(value, index + 1);
+  const nextToken = wordAt(value, nextIndex);
+  if (ENGLISH_PERIOD_POLICY.titleAbbreviations.has(abbreviation)) return nextToken.length > 0;
+  if (!ENGLISH_PERIOD_POLICY.labelAbbreviations.has(abbreviation)) return false;
+  return /^\d/.test(nextToken) || /^[A-Z]$/.test(nextToken);
 }
 
 function initialismContinues(value: string, index: number, initialism: string): boolean {
   const nextIndex = nextNonWhitespaceIndex(value, index + 1);
   if (nextIndex >= value.length) return false;
-  if (initialism === initialism.toLowerCase()) return true;
-  return /[\p{Ll}\p{N}]/u.test(value[nextIndex]);
+  if (ENGLISH_PERIOD_POLICY.continuationInitialisms.has(initialism.toLowerCase())) return true;
+  if (/[\p{Ll}\p{N}]/u.test(value[nextIndex])) return true;
+  return ENGLISH_PERIOD_POLICY.organizationContinuations.has(wordAt(value, nextIndex).toLowerCase());
 }
 
-function classifyPeriod(value: string, index: number): PeriodDecision {
+function classifyPeriod(value: string, index: number, segmentStart: number): PeriodDecision {
   let runEnd = index + 1;
   while (value[runEnd] === ".") runEnd += 1;
   if (runEnd - index >= 2) return { kind: "terminal", end: runEnd };
 
   if (isDecimalPoint(value, index)
-    || isContextualNumberedMarker(value, index)
+    || isContextualNumberedMarker(value, index, segmentStart)
     || isClosedClassAbbreviation(value, index)
     || isTokenInternalPeriod(value, index)) return { kind: "protected" };
 
@@ -166,10 +201,17 @@ export function segmentSemanticText(value: string): SemanticTextSegment[] {
       continue;
     }
     if (character === ".") {
-      const decision = classifyPeriod(value, index);
+      const decision = classifyPeriod(value, index, segmentStart);
       if (decision.kind === "protected") continue;
       pushSegment(decision.end);
       index = decision.end - 1;
+      continue;
+    }
+    if (character === "…") {
+      let runEnd = index + 1;
+      while (value[runEnd] === "…") runEnd += 1;
+      pushSegment(runEnd);
+      index = runEnd - 1;
       continue;
     }
     if (!isTerminal(character)) continue;

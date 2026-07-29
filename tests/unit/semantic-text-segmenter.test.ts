@@ -89,3 +89,52 @@ test("semantic segmenter protects a contextual numbered-list marker after prose"
     { text: "Continue checks.", start: 33, end: 49, gapBefore: " " },
   ]);
 });
+
+test("semantic segmenter consumes a consecutive Unicode ellipsis as one terminal span", () => {
+  assert.deepEqual(segmentSemanticText("等待……继续检查。"), [
+    { text: "等待……", start: 0, end: 4, gapBefore: "" },
+    { text: "继续检查。", start: 4, end: 9, gapBefore: "" },
+  ]);
+});
+
+test("semantic segmenter keeps organization-name continuations after initialisms", () => {
+  assert.deepEqual(segmentSemanticText("The U.S. Army responds. The U.N. Security Council met."), [
+    { text: "The U.S. Army responds.", start: 0, end: 23, gapBefore: "" },
+    { text: "The U.N. Security Council met.", start: 24, end: 54, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter ends numeric prose before a genuine next sentence", () => {
+  assert.deepEqual(segmentSemanticText("Complete phase 2. Release starts. Coverage reached 8. Next action begins."), [
+    { text: "Complete phase 2.", start: 0, end: 17, gapBefore: "" },
+    { text: "Release starts.", start: 18, end: 33, gapBefore: " " },
+    { text: "Coverage reached 8.", start: 34, end: 53, gapBefore: " " },
+    { text: "Next action begins.", start: 54, end: 73, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter uses label value context for an abbreviation period", () => {
+  assert.deepEqual(segmentSemanticText("See Fig. Response complete. See Fig. 2."), [
+    { text: "See Fig.", start: 0, end: 8, gapBefore: "" },
+    { text: "Response complete.", start: 9, end: 27, gapBefore: " " },
+    { text: "See Fig. 2.", start: 28, end: 39, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter preserves source traceability without punctuation-only fragments", () => {
+  const inputs = [
+    "等待……继续检查。",
+    "Wait... Continue checks.",
+    "The U.S. Army responds.",
+    "Complete phase 2. Release starts.",
+    "Scope includes 1. Inspect power;",
+    "See Fig. Response complete.",
+  ];
+
+  for (const input of inputs) {
+    const segments = segmentSemanticText(input);
+    assert.ok(segments.every((segment) => segment.text.length > 0 && !/^[.。！？!?；;…]+$/u.test(segment.text)));
+    assert.ok(segments.every((segment) => input.slice(segment.start, segment.end) === segment.text));
+    assert.equal(segments.map((segment) => segment.gapBefore + segment.text).join(""), input);
+  }
+});

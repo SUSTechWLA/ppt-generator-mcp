@@ -150,6 +150,18 @@ export const templateProfileSchema = z.object({
     if (slot.factBearingValueIndex !== expectedFactIndex) {
       context.addIssue({ code: "custom", message: `${slot.factBearingBinding} emits its complete fact body at value index ${expectedFactIndex}`, path: ["semanticSlots", index, "factBearingValueIndex"] });
     }
+    const factTag = slot.bindings[slot.factBearingBinding];
+    const auxiliaryFactTags = Object.entries(profile.auxiliaryBindings ?? {})
+      .filter(([field]) => ["body", "narrativeBody", "tableCell"].includes(field))
+      .map(([, tag]) => tag);
+    const emittedFactLimits = [factTag, ...auxiliaryFactTags]
+      .filter((tag): tag is string => Boolean(tag))
+      .map((tag) => profile.maxCharsBySlot[tag])
+      .filter((limit): limit is number => typeof limit === "number");
+    const effectiveFactLimit = emittedFactLimits.length > 0 ? Math.min(...emittedFactLimits) : undefined;
+    if (effectiveFactLimit !== undefined && slot.maxCharsPerItem > effectiveFactLimit) {
+      context.addIssue({ code: "custom", message: `Semantic capacity cannot exceed emitted complete-fact binding capacity ${effectiveFactLimit}`, path: ["semanticSlots", index, "maxCharsPerItem"] });
+    }
   }
   const auxiliaryFields = Object.keys(profile.auxiliaryBindings ?? {}).sort();
   const auxiliaryCapacityFields = Object.keys(profile.auxiliaryCapacities ?? {}).sort();

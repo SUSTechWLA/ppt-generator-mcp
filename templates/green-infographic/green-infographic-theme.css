@@ -97,10 +97,13 @@ body {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   grid-auto-rows: 1fr;
-  gap: calc(2.5mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale));
+  gap: calc(0.5mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale));
   min-height: 0;
   padding: calc(1mm * var(--workflow-spacing-scale)) calc(2.5mm * var(--workflow-spacing-scale));
 }
+.bid-page[data-capacity-filled="true"] .layout-rows-6 { grid-template-rows: repeat(5, minmax(0, 1fr)) 10mm; }
+.bid-page[data-capacity-filled="true"] .layout-rows-5 { grid-template-rows: repeat(4, minmax(0, 1fr)) 10mm; }
+.bid-page[data-capacity-filled="true"] .layout-rows-4 { grid-template-rows: repeat(3, minmax(0, 1fr)) 10mm; }
 .bid-page[data-semantic-item-count="1"] .body-grid { grid-template-columns: minmax(0, 1fr); }
 .bid-page[data-semantic-item-count="1"] .body-grid > * { grid-column: 1 / -1; }
 .span-3 { grid-column: span 3; }
@@ -113,8 +116,8 @@ body {
 .row-span-2 { grid-row: span 2; }
 
 .component { min-width: 0; min-height: 0; overflow: hidden; border: 0.35mm solid var(--line); border-radius: 2.5mm; }
-.text-card { display: flex; flex-direction: column; padding: calc(1.5mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale)); background: var(--green-100); font-size: var(--body-size); font-weight: 500; line-height: 1.48; text-align: justify; }
-.text-card p { flex: 1 1 auto; margin: 0 0 calc(0.8mm * var(--workflow-spacing-scale)); text-indent: 2em; overflow: hidden; text-overflow: ellipsis; }
+.text-card { display: flex; flex-direction: column; padding: calc(1mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale)); background: var(--green-100); font-size: var(--body-size); font-weight: 500; line-height: 1.42; text-align: justify; }
+.text-card p { flex: 1 1 auto; margin: 0 0 calc(0.8mm * var(--workflow-spacing-scale)); text-indent: 2em; overflow: hidden; }
 .text-card p:last-child { margin-bottom: 0; }
 .text-card .bullet-list { flex: 0 0 auto; margin-top: auto; }
 .component-title { flex: 0 0 auto; margin: 0 0 calc(0.5mm * var(--workflow-spacing-scale)); color: var(--green-900); font-size: max(8.5pt, calc(12.5pt * var(--workflow-font-scale))); font-weight: 700; line-height: 1.25; }
@@ -167,10 +170,10 @@ body {
 .photo-item { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; overflow: hidden; border-radius: 1.5mm; }
 .photo-item .image-caption { min-height: 0; }
 
-.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(50mm, 1fr); gap: calc(4mm * var(--workflow-spacing-scale)); padding: calc(2.5mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale)); background: #fff; overflow: hidden; align-items: center; }
-.summary-band p { overflow: hidden; text-overflow: ellipsis; margin: 0; }
-.summary-list { margin: 0; padding-left: 1.4em; font-size: var(--body-dense-size); font-weight: 600; line-height: 1.42; }
-.summary-list li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0.3mm 0; }
+.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(50mm, 1fr); gap: calc(2mm * var(--workflow-spacing-scale)); padding: calc(1mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale)); background: #fff; overflow: hidden; align-items: center; }
+.summary-band p { overflow: hidden; margin: 0; }
+.summary-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(1mm * var(--workflow-spacing-scale)); margin: 0; padding: 0; list-style-position: inside; font-size: var(--body-dense-size); font-weight: 600; line-height: 1.2; }
+.summary-list li { overflow: hidden; white-space: nowrap; padding: 0; }
 /* Asset slots — ID'd placeholder boxes for images/icons to be generated later */
 /* Asset slots — placeholder boxes for images/icons to be generated later */
 .img-slot { display: grid; place-items: center; align-content: center; gap: 1mm; padding: 2mm; border: 0.5mm solid var(--line); border-radius: 2mm; background: #fff; height: 100%; overflow: hidden; }

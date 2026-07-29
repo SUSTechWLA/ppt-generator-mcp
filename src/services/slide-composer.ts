@@ -25,6 +25,19 @@ export interface ComposeResult {
   warnings: string[];
 }
 
+function assertSafeCss(css: string): void {
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const inspected = `${css}\n${withoutComments}`;
+  if (/\\|@import\b|@font-face\b|\burl\s*\(|\b(?:-webkit-)?image-set\s*\(|\blocal\s*\(|\b(?:https?|file|data|javascript|ftp|blob|wss?|resource)\s*:|\/\//i.test(inspected)) {
+    throw new Error("Unsafe style resource directive is not allowed");
+  }
+}
+
+function validateFinalStyles(doc: Document): void {
+  for (const style of Array.from(doc.querySelectorAll("style"))) assertSafeCss(style.textContent ?? "");
+  for (const element of Array.from(doc.querySelectorAll<HTMLElement>("[style]"))) assertSafeCss(element.getAttribute("style") ?? "");
+}
+
 async function inlineCss(doc: Document, templatePath: string): Promise<void> {
   const familyRoot = await realpath(dirname(templatePath));
   const links = Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'));
@@ -51,9 +64,7 @@ async function inlineCss(doc: Document, templatePath: string): Promise<void> {
       throw new Error("Stylesheet symlink resolves outside the template family");
     }
     const css = await readFile(cssPath, "utf8");
-    if (/\\|@import\b|\burl\s*\(|\b(?:-webkit-)?image-set\s*\(|(?:https?|file|data):|\/\//i.test(css)) {
-      throw new Error("Unsafe stylesheet resource directive is not allowed");
-    }
+    assertSafeCss(css);
     const style = doc.createElement("style");
     style.setAttribute("data-inline-source", href);
     style.textContent = css
@@ -161,7 +172,9 @@ function prepareTemplateHtml(template: ParsedTemplate, profile: TemplateProfile,
     });
   }
   const assignedCount = solution.assignments.length;
-  doc.querySelector(".bid-page")?.setAttribute("data-semantic-item-count", String(assignedCount));
+  const page = doc.querySelector(".bid-page");
+  page?.setAttribute("data-semantic-item-count", String(assignedCount));
+  if (assignedCount === profile.blockCapacity) page?.setAttribute("data-capacity-filled", "true");
   for (const group of profile.auxiliaryGroups ?? []) {
     const capacity = group.itemCapacity;
     const usedItems = Math.min(assignedCount, capacity);
@@ -193,6 +206,7 @@ export async function composeSlide(input: ComposeSlideInput): Promise<ComposeRes
   await inlineIcons(doc, input.template.filePath);
   injectAssets(doc, input.spec, input.profile, input.assets);
   applyMarkersAndTokens(doc, input);
+  validateFinalStyles(doc);
   const html = dom.serialize().replace(/<!--([\s\S]*?)-->/g, "");
   return { html, warnings: [...filled.warnings, ...scanResiduals(html)] };
 }

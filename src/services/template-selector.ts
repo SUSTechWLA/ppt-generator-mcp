@@ -186,6 +186,37 @@ function validateImageContainerSelector(template: ReturnType<typeof loadTemplate
 
 function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
   const doc = new JSDOM(template.html).window.document;
+  const rootNodes = new Set<Element>([
+    doc.documentElement,
+    doc.body,
+    ...Array.from(doc.querySelectorAll("article, main, .bid-page, .body-grid, [data-slide-page], [data-page-number]")),
+  ]);
+  const landmarkNodes = new Set(profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark]))));
+  const semanticNodes = new Set(Array.from(doc.querySelectorAll("[data-semantic-slot]")));
+  const imagePlaceholders = Array.from(doc.querySelectorAll(profile.imageSlots.placeholderTag));
+  const imageContainers = profile.imageSlots.containerSelector
+    ? imagePlaceholders.map((placeholder) => placeholder.closest(profile.imageSlots.containerSelector!)).filter((element): element is Element => Boolean(element))
+    : [];
+  const imageNodes = new Set<Element>([...imagePlaceholders, ...imageContainers]);
+  const bindingTags = new Set(declaredBindingEmissions(profile).map((emission) => emission.tag));
+  const ownedNodes: Array<{ element: Element; groupId: string; kind: "item" | "connector" }> = [];
+  const overlaps = (left: Element, right: Element): boolean => left === right || left.contains(right) || right.contains(left);
+  const countTag = (element: Element, tag: string): number => (element.matches(tag) ? 1 : 0) + element.querySelectorAll(tag).length;
+  const validateProtectedOwnership = (element: Element, groupId: string): void => {
+    if ([...rootNodes].some((root) => element === root || element.contains(root))) {
+      throw new Error(`Template profile ${profile.slug} auxiliary group ${groupId} cannot own a page structure root`);
+    }
+    if ([...landmarkNodes].some((landmark) => element === landmark || element.contains(landmark))) {
+      throw new Error(`Template profile ${profile.slug} auxiliary group ${groupId} cannot own a required landmark`);
+    }
+    if ([...semanticNodes].some((semantic) => element === semantic || element.contains(semantic))) {
+      throw new Error(`Template profile ${profile.slug} auxiliary group ${groupId} overlaps semantic fact ownership`);
+    }
+    if ([...imageNodes].some((image) => element === image || element.contains(image))) {
+      throw new Error(`Template profile ${profile.slug} auxiliary group ${groupId} overlaps image slot ownership`);
+    }
+  };
+
   for (const group of profile.auxiliaryGroups ?? []) {
     for (const selector of [group.itemSelector, group.connectorSelector].filter((value): value is string => Boolean(value))) {
       if (!SIMPLE_LOCAL_SELECTOR.test(selector) || FORBIDDEN_IMAGE_CONTAINER_SELECTORS.has(selector.toLowerCase())) {
@@ -193,14 +224,60 @@ function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, prof
       }
     }
     const capacity = group.itemCapacity;
-    const itemCount = doc.querySelectorAll(group.itemSelector).length;
-    if (itemCount !== capacity) {
-      throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} item selector count ${itemCount} does not match capacity ${capacity}`);
+    const items = Array.from(doc.querySelectorAll(group.itemSelector));
+    if (items.length !== capacity) {
+      throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} item selector count ${items.length} does not match capacity ${capacity}`);
     }
+    const connectors = group.connectorSelector ? Array.from(doc.querySelectorAll(group.connectorSelector)) : [];
     if (group.connectorSelector) {
-      const connectorCount = doc.querySelectorAll(group.connectorSelector).length;
-      if (connectorCount !== Math.max(0, capacity - 1)) {
-        throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} connector selector count ${connectorCount} does not match capacity ${capacity}`);
+      if (connectors.length !== Math.max(0, capacity - 1)) {
+        throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} connector selector count ${connectors.length} does not match capacity ${capacity}`);
+      }
+      for (const connector of connectors) {
+        if ([...bindingTags].some((tag) => countTag(connector, tag) > 0)) {
+          throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} connector cannot contain a placeholder`);
+        }
+        validateProtectedOwnership(connector, group.id);
+        ownedNodes.push({ element: connector, groupId: group.id, kind: "connector" });
+      }
+      const following = doc.defaultView!.Node.DOCUMENT_POSITION_FOLLOWING;
+      for (const [index, connector] of connectors.entries()) {
+        const afterItem = Boolean(items[index].compareDocumentPosition(connector) & following);
+        const beforeNextItem = Boolean(connector.compareDocumentPosition(items[index + 1]) & following);
+        if (!afterItem || !beforeNextItem) {
+          throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} connector order must alternate between owned items`);
+        }
+      }
+    }
+    const expectedTags = new Map<string, number>();
+    for (const field of group.bindingFields) {
+      const tag = (profile.auxiliaryBindings as Record<string, string> | undefined)?.[field];
+      const valuesPerItem = profile.auxiliaryCapacities?.[field]?.valuesPerItem;
+      if (!tag || !valuesPerItem) throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} has an undeclared binding`);
+      expectedTags.set(tag, (expectedTags.get(tag) ?? 0) + valuesPerItem);
+    }
+    for (const item of items) {
+      validateProtectedOwnership(item, group.id);
+      for (const [tag, expectedCount] of expectedTags) {
+        const actualCount = countTag(item, tag);
+        if (actualCount !== expectedCount) {
+          throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} item must own exactly ${expectedCount} bound placeholder ${tag}; found ${actualCount}`);
+        }
+      }
+      const foreignTags = [...bindingTags].filter((tag) => !expectedTags.has(tag) && countTag(item, tag) > 0);
+      if (foreignTags.length > 0) {
+        throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} item ownership includes placeholders from another binding: ${foreignTags.join(", ")}`);
+      }
+      ownedNodes.push({ element: item, groupId: group.id, kind: "item" });
+    }
+  }
+
+  for (let leftIndex = 0; leftIndex < ownedNodes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < ownedNodes.length; rightIndex += 1) {
+      const left = ownedNodes[leftIndex];
+      const right = ownedNodes[rightIndex];
+      if (overlaps(left.element, right.element)) {
+        throw new Error(`Template profile ${profile.slug} auxiliary group ownership must be pairwise disjoint; ${left.groupId}.${left.kind} overlaps ${right.groupId}.${right.kind}`);
       }
     }
   }

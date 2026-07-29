@@ -13,6 +13,7 @@ import { composeSlide } from "../../src/services/slide-composer.js";
 import { evaluateSlide } from "../../src/services/slide-evaluator.js";
 import { executeRepairs, type RepairState } from "../../src/services/repair-executor.js";
 import { getDocumentTemplatePolicy, loadTemplateProfiles, selectTemplate } from "../../src/services/template-selector.js";
+import { solveTemplateSlots } from "../../src/services/template-slot-solver.js";
 import { runQualityLoop } from "../../src/workflow/quality-loop.js";
 import { makeSourceDocument } from "../helpers/domain-fixtures.js";
 
@@ -61,6 +62,67 @@ function generatedAssets(spec: SlideSpec): GeneratedAsset[] {
     dataUrl: `data:image/png;base64,${png}`,
     reused: false,
   }));
+}
+
+function profileBoundarySpec(profile: (typeof profiles)[number], bodyChars: number): SlideSpec {
+  const factBinding = profile.semanticSlots[0].factBearingBinding;
+  const type: SlideBlockType = factBinding === "tableCell" ? "table" : "text";
+  const spec = specFor(Array.from({ length: profile.blockCapacity }, () => type), { density: "high" });
+  spec.blocks = spec.blocks.map((block, index) => ({
+    ...block,
+    title: `边界要点${index + 1}`,
+    body: "项".repeat(bodyChars),
+  }));
+  spec.assets = Array.from({ length: profile.imageSlots.minAssets }, (_, index) => ({
+    id: `img-${String(index + 1).padStart(3, "0")}`,
+    type: "image" as const,
+    blockId: spec.blocks[index % spec.blocks.length].id,
+    prompt: "professional bid service illustration, no text",
+    alt: "项目服务示意图",
+    sourceFactIds: spec.blocks[index % spec.blocks.length].sourceFactIds,
+    width: 1792 as const,
+    height: 1024 as const,
+  }));
+  spec.designIntent.visualRatio = spec.assets.length > 0 ? profile.maxRasterAreaRatio : 0;
+  return spec;
+}
+
+for (const profile of profiles) {
+  test(`${profile.slug} renders its declared fact boundary at default tokens`, async () => {
+    const slot = profile.semanticSlots[0];
+    const factTag = slot.bindings[slot.factBearingBinding]!;
+    const auxiliaryFactTags = Object.entries(profile.auxiliaryBindings ?? {})
+      .filter(([field]) => ["body", "narrativeBody", "tableCell"].includes(field))
+      .map(([, tag]) => tag);
+    const effectiveFactCapacity = Math.min(...[factTag, ...auxiliaryFactTags].map((tag) => profile.maxCharsBySlot[tag]));
+    assert.equal(slot.maxCharsPerItem, effectiveFactCapacity, "semantic capacity must equal the smallest emitted fact-bearing tag capacity");
+    const spec = profileBoundarySpec(profile, slot.maxCharsPerItem);
+    const solution = solveTemplateSlots(spec, profile);
+    assert.equal(solution.feasible, true, JSON.stringify(solution.unmatched));
+    const composed = await composeSlide({
+      spec,
+      profile,
+      template: loadTemplate(templatesDir, profile.slug),
+      assets: generatedAssets(spec),
+      slotSolution: solution,
+      designTokens: { fontScale: 1, spacingScale: 1, contrastMode: "normal" },
+    });
+    const output = await mkdtemp(join(tmpdir(), "green-capacity-boundary-"));
+    const render = await renderPage({ html: composed.html, screenshotPath: join(output, `${profile.slug}.png`) });
+    const report = evaluateDeterministic(render, {
+      maxRasterAreaRatio: profile.maxRasterAreaRatio,
+      maximumRasterAssets: profile.imageSlots.maxAssets,
+      minimumBodyFontPt: profile.minimumBodyFontPt,
+    });
+    assert.equal(report.hardGatePassed, true, JSON.stringify(report.issues, null, 2));
+  });
+
+  test(`${profile.slug} rejects one character above its declared fact boundary`, () => {
+    const cap = profile.semanticSlots[0].maxCharsPerItem;
+    const solution = solveTemplateSlots(profileBoundarySpec(profile, cap + 1), profile);
+    assert.equal(solution.feasible, false);
+    assert.ok(solution.unmatched.some((item) => /字符上限/.test(item.reason)));
+  });
 }
 
 for (const scenario of [

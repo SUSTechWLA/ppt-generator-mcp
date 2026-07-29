@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { JSDOM } from "jsdom";
 
 import { listTemplates, loadTemplate } from "../../src/lib/template-parser.js";
 import { auditTemplateFamilies, loadTemplateProfiles, selectTemplate } from "../../src/services/template-selector.js";
@@ -156,6 +157,12 @@ test("schema requires an explicit minimum body font capability", () => {
   assert.equal(templateProfileSchema.safeParse(candidate).success, false);
 });
 
+test("schema rejects semantic capacity above any emitted complete-fact binding", () => {
+  const candidate = structuredClone(loadTemplateProfiles(resolve("templates"))[0]);
+  candidate.semanticSlots[0].maxCharsPerItem += 1;
+  assert.equal(templateProfileSchema.safeParse(candidate).success, false);
+});
+
 test("forced unknown templates fail with an actionable message", () => {
   assert.throws(
     () => selectTemplate(makeSlideSpec(), makeTemplateProfiles(), "missing-template"),
@@ -303,6 +310,12 @@ async function temporaryCatalog(
   await writeFile(join(directory, "fixture.html"), changed.html);
   await writeFile(join(directory, "template-profiles.json"), JSON.stringify([changed.profile]));
   return { directory, cleanup: () => rm(directory, { recursive: true, force: true }) };
+}
+
+function serializeTemplateMutation(dom: JSDOM, originalHtml: string): string {
+  const rawTitle = originalHtml.match(/<title>[\s\S]*?<\/title>/i)?.[0];
+  const serialized = dom.serialize();
+  return rawTitle ? serialized.replace(/<title>[\s\S]*?<\/title>/i, rawTitle) : serialized;
 }
 
 test("loader rejects a profile whose raw page-title binding is absent", async () => {
@@ -467,6 +480,131 @@ test("loader rejects conflicting comment and HTML template slugs", async () => {
   }));
   try {
     assert.throws(() => loadTemplateProfiles(fixture.directory), /conflicting.*template slug/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects an auxiliary selector borrowed from another repeated group", async () => {
+  const fixture = await temporaryCatalog(
+    (profile, html) => {
+      profile.auxiliaryGroups!.find((group) => group.id === "capability")!.itemSelector = ".process-step";
+      return { profile, html };
+    },
+    (profiles) => profiles.find((profile) => profile.slug.endsWith("-visual"))!,
+  );
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*(?:binding|placeholder|ownership|overlap)/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects swapped auxiliary group item selectors", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    const capability = profile.auxiliaryGroups!.find((group) => group.id === "capability")!;
+    const organization = profile.auxiliaryGroups!.find((group) => group.id === "organization")!;
+    [capability.itemSelector, organization.itemSelector] = [organization.itemSelector, capability.itemSelector];
+    return { profile, html };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*(?:binding|placeholder|ownership)/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects shared auxiliary item ownership even when both bindings are present", async () => {
+  const fixture = await temporaryCatalog(
+    (profile, html) => {
+      const dom = new JSDOM(html);
+      const doc = dom.window.document;
+      const processItems = Array.from(doc.querySelectorAll(".process-step"));
+      Array.from(doc.querySelectorAll(".capability-item item-label")).forEach((label, index) => processItems[index].append(label));
+      profile.auxiliaryGroups!.find((group) => group.id === "capability")!.itemSelector = ".process-step";
+      return { profile, html: serializeTemplateMutation(dom, html) };
+    },
+    (profiles) => profiles.find((profile) => profile.slug.endsWith("-visual"))!,
+  );
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*(?:shared|overlap|ownership|disjoint)/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects nested auxiliary item ownership", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+    const organizationLevels = Array.from(doc.querySelectorAll(".org-level"));
+    Array.from(doc.querySelectorAll(".capability-item item-label")).forEach((label, index) => organizationLevels[index].append(label));
+    profile.auxiliaryGroups!.find((group) => group.id === "capability")!.itemSelector = ".org-level";
+    profile.auxiliaryGroups!.find((group) => group.id === "organization")!.itemSelector = ".org-node";
+    return { profile, html: serializeTemplateMutation(dom, html) };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*(?:nested|overlap|ownership|disjoint)/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+for (const [name, selector] of [["required landmark", ".summary-band"], ["page structure root", ".body-grid"]] as const) {
+  test(`loader rejects an auxiliary group that owns a ${name}`, async () => {
+    const fixture = await temporaryCatalog((profile, html) => {
+      const dom = new JSDOM(html);
+      const doc = dom.window.document;
+      Array.from(doc.querySelectorAll(".summary-item")).slice(1).forEach((element) => element.remove());
+      profile.auxiliaryCapacities!.bullet.itemCapacity = 1;
+      const summary = profile.auxiliaryGroups!.find((group) => group.id === "summary")!;
+      summary.itemCapacity = 1;
+      summary.itemSelector = selector;
+      return { profile, html: serializeTemplateMutation(dom, html) };
+    });
+    try {
+      assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*(?:landmark|root|structure|ownership)/i);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
+
+test("loader rejects an auxiliary item without its declared bound placeholder", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    profile.auxiliaryGroups!.find((group) => group.id === "capability")!.itemSelector = ".org-node";
+    return { profile, html };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*(?:bound placeholder|binding|item-label)/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects auxiliary connectors outside the order of their owned items", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    const dom = new JSDOM(html);
+    const process = dom.window.document.querySelector('[data-component="icon-process"]')!;
+    Array.from(process.querySelectorAll(":scope > .process-arrow")).forEach((arrow) => process.append(arrow));
+    return { profile, html: serializeTemplateMutation(dom, html) };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*connector.*order/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects an auxiliary connector that contains a placeholder", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    const dom = new JSDOM(html);
+    const doc = dom.window.document;
+    doc.querySelector(".process-arrow")!.append(doc.querySelector(".process-step step-label")!);
+    return { profile, html: serializeTemplateMutation(dom, html) };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /auxiliary group.*connector.*placeholder/i);
   } finally {
     await fixture.cleanup();
   }

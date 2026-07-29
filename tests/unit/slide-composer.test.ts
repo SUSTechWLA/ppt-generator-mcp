@@ -239,3 +239,46 @@ for (const [name, unsafeCss] of [
     }
   });
 }
+
+for (const [name, unsafeCss] of [
+  ["import", '@import "file:///tmp/private-theme.css";'],
+  ["URL", ".x{background-image:url(https://example.invalid/private.png)}"],
+  ["image-set", ".x{background-image:image-set('https://example.invalid/a.png' 1x)}"],
+  ["escaped resource function", ".x{background-image:u\\72l(https://example.invalid/a.png)}"],
+  ["commented URL", "/* https://example.invalid/private.png */ .x{color:#171a18}"],
+] as const) {
+  test(`rejects unsafe inline style block ${name} before composing final HTML`, async () => {
+    const injectedUrl = "https://example.invalid/private.png";
+    const parsed = {
+      ...template,
+      html: template.html.replace("</head>", `<style>${unsafeCss}</style></head>`),
+    };
+    await assert.rejects(
+      () => composeSlide({ spec, template: parsed, profile, assets }),
+      (error: unknown) => error instanceof Error
+        && /unsafe.*style|resource directive/i.test(error.message)
+        && !error.message.includes(injectedUrl)
+        && !error.message.includes("/tmp/private-theme.css"),
+    );
+  });
+}
+
+for (const [name, unsafeStyle] of [
+  ["remote URL", "background-image:url(https://example.invalid/private.png)"],
+  ["file URL", "--private-source:file:///tmp/private.css"],
+  ["data URL", "list-style-image:url(data:image/svg+xml;base64,PHN2Zz4=)"],
+] as const) {
+  test(`rejects unsafe style attribute ${name} before composing final HTML`, async () => {
+    const parsed = {
+      ...template,
+      html: template.html.replace('class="bid-page"', `class="bid-page" style="${unsafeStyle}"`),
+    };
+    await assert.rejects(
+      () => composeSlide({ spec, template: parsed, profile, assets }),
+      (error: unknown) => error instanceof Error
+        && /unsafe.*style|resource directive/i.test(error.message)
+        && !error.message.includes("example.invalid")
+        && !error.message.includes("/tmp/private.css"),
+    );
+  });
+}

@@ -445,28 +445,39 @@ test("loader rejects a malformed image container selector", async () => {
   }
 });
 
-test("loader accepts only a narrowly owned image-caption overlap exemption", async () => {
-  const fixture = await temporaryCatalog((profile, html) => ({
-    profile: { ...profile, overlapExemptionSelectors: [".image-card"] },
-    html,
-  }));
+test("loader accepts only one explicitly selected image-caption node pair", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    const dom = new JSDOM(html);
+    dom.window.document.querySelector("figures")!.classList.add("qa-overlap-image");
+    dom.window.document.querySelector("figcaption")!.classList.add("qa-overlap-caption");
+    return {
+      profile: {
+        ...profile,
+        overlapExemptions: [{ imageSelector: ".qa-overlap-image", captionSelector: ".qa-overlap-caption" }],
+      },
+      html: serializeTemplateMutation(dom, html),
+    };
+  });
   try {
     const [loaded] = loadTemplateProfiles(fixture.directory);
-    assert.deepEqual(loaded.overlapExemptionSelectors, [".image-card"]);
+    assert.deepEqual(loaded.overlapExemptions, [{ imageSelector: ".qa-overlap-image", captionSelector: ".qa-overlap-caption" }]);
   } finally {
     await fixture.cleanup();
   }
 });
 
-test("loader rejects an overlap exemption targeting semantic or landmark content", async () => {
+test("loader rejects an overlap exemption whose caption selector targets ordinary landmark text", async () => {
   const fixture = await temporaryCatalog((profile, html) => ({
-    profile: { ...profile, overlapExemptionSelectors: [".summary-band"] },
+    profile: {
+      ...profile,
+      overlapExemptions: [{ imageSelector: ".image-card", captionSelector: ".summary-band" }],
+    },
     html,
   }));
   try {
     assert.throws(
       () => loadTemplateProfiles(fixture.directory),
-      /overlap exemption.*(?:image-caption|semantic|landmark|owned|unsafe)/i,
+      /overlap exemption.*(?:image|caption|semantic|landmark|owned|unsafe|node pair)/i,
     );
   } finally {
     await fixture.cleanup();

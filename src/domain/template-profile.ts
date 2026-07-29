@@ -61,6 +61,11 @@ export const auxiliaryGroupSchema = z.object({
   connectorSelector: z.string().trim().min(1).max(120).optional(),
 }).strict();
 
+export const overlapExemptionSchema = z.object({
+  imageSelector: z.string().regex(/^\.[A-Za-z_][A-Za-z0-9_-]*$/),
+  captionSelector: z.string().regex(/^\.[A-Za-z_][A-Za-z0-9_-]*$/),
+}).strict();
+
 export const pageBindingsSchema = z.object({
   pageTitle: placeholderTagSchema,
   pageNumber: placeholderTagSchema,
@@ -104,7 +109,7 @@ export const templateProfileSchema = z.object({
   auxiliaryBindings: slotBindingsSchema.optional(),
   auxiliaryCapacities: z.record(z.string(), auxiliaryCapacitySchema).optional(),
   auxiliaryGroups: z.array(auxiliaryGroupSchema).max(24).optional(),
-  overlapExemptionSelectors: z.array(z.string().regex(/^\.[A-Za-z_][A-Za-z0-9_-]*$/)).max(8).optional(),
+  overlapExemptions: z.array(overlapExemptionSchema).max(8).optional(),
   pageBindings: pageBindingsSchema,
   blockCapacity: z.number().int().min(1).max(12),
   supportedBlocks: z.array(slideBlockTypeSchema).min(1),

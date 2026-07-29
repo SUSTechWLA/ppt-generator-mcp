@@ -10,6 +10,21 @@ const NAVIGATION_ATTRIBUTES = new Set([
   "action", "archive", "background", "codebase", "data", "formaction", "href", "manifest", "ping", "poster", "src", "srcdoc", "srcset", "xlink:href",
 ]);
 const EXECUTABLE_PROTOCOL = /^[\u0000-\u0020\u007f]*(?:javascript|vbscript)\s*:/i;
+const EXTERNAL_PROTOCOL = /(?:https?|file|data|blob|ftp|wss?|resource)\s*:/i;
+const LOCAL_FRAGMENT = /^#[A-Za-z_][A-Za-z0-9_.:-]*$/;
+
+function hasExternalSvgAttributeResource(attribute: Attr): boolean {
+  const name = attribute.name.toLowerCase();
+  if (name === "xmlns" || name.startsWith("xmlns:") || attribute.namespaceURI?.includes("xmlns")) return false;
+  const value = attribute.value;
+  if (value.includes("\\") || EXTERNAL_PROTOCOL.test(value) || /(?:^|[\s('"=])\/\//.test(value)) return true;
+  const resourceFunctions = Array.from(value.matchAll(/url\s*\(([^)]*)\)/gi));
+  for (const match of resourceFunctions) {
+    const target = match[1].trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, (_whole, doubleQuoted, singleQuoted) => doubleQuoted ?? singleQuoted);
+    if (!LOCAL_FRAGMENT.test(target)) return true;
+  }
+  return /url\s*\(/i.test(value) && resourceFunctions.length === 0;
+}
 
 function allElements(root: ParentNode): Element[] {
   const elements = Array.from(root.querySelectorAll("*"));
@@ -42,6 +57,7 @@ export function executableDomViolations(root: ParentNode): string[] {
       const allowedImageSource = tag === "img" && localName === "src"
         && /^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/i.test(attribute.value);
       if (navigationAttribute && !allowedImageSource) violations.add("attribute:navigation-or-resource");
+      if (namespace.includes("svg") && hasExternalSvgAttributeResource(attribute)) violations.add("svg:external-attribute-resource");
     }
   }
   return [...violations];

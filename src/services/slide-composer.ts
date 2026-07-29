@@ -156,6 +156,9 @@ function injectAssets(doc: Document, spec: SlideSpec, profile: TemplateProfile, 
     image.setAttribute("alt", declared.alt);
     image.setAttribute("data-asset-id", declared.id);
     image.setAttribute("decoding", "sync");
+    for (const exemption of profile.overlapExemptions ?? []) {
+      if (slot.matches(exemption.imageSelector)) image.classList.add(exemption.imageSelector.slice(1));
+    }
     slot.replaceWith(image);
     const parent = image.closest("figure");
     parent?.setAttribute("data-asset-ref", declared.id);

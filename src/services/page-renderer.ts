@@ -54,11 +54,17 @@ export interface RenderResult {
   };
 }
 
-export async function renderPage(input: { html: string; screenshotPath: string; validatedOverlapSelectors?: string[] }): Promise<RenderResult> {
+export async function renderPage(input: {
+  html: string;
+  screenshotPath: string;
+  validatedOverlapPairs?: Array<{ imageSelector: string; captionSelector: string }>;
+}): Promise<RenderResult> {
   await mkdir(dirname(input.screenshotPath), { recursive: true });
-  const validatedOverlapSelectors = input.validatedOverlapSelectors ?? [];
-  for (const selector of validatedOverlapSelectors) {
-    if (!/^\.[a-z_][a-z0-9_-]*$/i.test(selector)) throw new Error("Validated overlap selectors must be a single explicit class selector");
+  const validatedOverlapPairs = input.validatedOverlapPairs ?? [];
+  for (const pair of validatedOverlapPairs) {
+    if (!/^\.[a-z_][a-z0-9_-]*$/i.test(pair.imageSelector) || !/^\.[a-z_][a-z0-9_-]*$/i.test(pair.captionSelector)) {
+      throw new Error("Validated overlap pair selectors must be explicit class selectors");
+    }
   }
   const executableDom = hasExecutableDom(input.html);
   const browser = await chromium.launch({ headless: true });
@@ -80,7 +86,7 @@ export async function renderPage(input: { html: string; screenshotPath: string; 
     // The callback executes in Chromium, so expose the identity helper there too.
     await page.evaluate("globalThis.__name = (target) => target");
 
-    const measured = await page.evaluate(async ({ overlapSelectors }) => {
+    const measured = await page.evaluate(async ({ overlapPairs }) => {
       const parseColor = (value: string): [number, number, number, number] | null => {
         const match = value.match(/rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)(?:[, /]+([\d.]+))?\)/);
         return match ? [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])] : null;
@@ -147,6 +153,15 @@ export async function renderPage(input: { html: string; screenshotPath: string; 
         id: contentIds.get(element)!,
         visualRect: visualRect(element),
       }));
+      const resolvedOverlapPairs = overlapPairs.flatMap((pair) => {
+        const images = Array.from(document.querySelectorAll<HTMLElement>(pair.imageSelector));
+        const captions = Array.from(document.querySelectorAll<HTMLElement>(pair.captionSelector));
+        if (images.length !== 1 || captions.length !== 1) return [];
+        const image = images[0];
+        const caption = captions[0];
+        if (image.localName !== "img" || caption.localName !== "figcaption" || image.closest("figure") !== caption.closest("figure")) return [];
+        return [{ image, caption }];
+      });
 
       const containmentViolations: Array<{ targetId: string; ancestorId: string; overflowPx: number }> = [];
       for (const candidate of candidates) {
@@ -181,12 +196,11 @@ export async function renderPage(input: { html: string; screenshotPath: string; 
         for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
           const left = candidates[leftIndex];
           const right = candidates[rightIndex];
-          if (directTextNodes(left.element).length === 0 || directTextNodes(right.element).length === 0) continue;
           if (left.element.contains(right.element) || right.element.contains(left.element)) continue;
-          const explicitlyExempt = overlapSelectors.some((selector) => {
-            const leftOwner = left.element.closest(selector);
-            return leftOwner !== null && leftOwner === right.element.closest(selector);
-          });
+          const explicitlyExempt = resolvedOverlapPairs.some(({ image, caption }) => (
+            (left.element === image && right.element === caption)
+            || (left.element === caption && right.element === image)
+          ));
           if (explicitlyExempt) continue;
           const leftRect = rectValue(left.element.getBoundingClientRect());
           const rightRect = rectValue(right.element.getBoundingClientRect());
@@ -277,7 +291,7 @@ export async function renderPage(input: { html: string; screenshotPath: string; 
         occupiedRatio: Math.min(1, area / (1123 * 794)),
         layout: { containmentViolations, collisions },
       };
-    }, { overlapSelectors: validatedOverlapSelectors });
+    }, { overlapPairs: validatedOverlapPairs });
 
     await page.screenshot({ path: input.screenshotPath, type: "png", fullPage: false, animations: "disabled" });
     await context.close();

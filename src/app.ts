@@ -106,7 +106,7 @@ export function createProductionDependencies(
           const render = await renderPage({
             html: composed.html,
             screenshotPath,
-            validatedOverlapSelectors: profile.overlapExemptionSelectors,
+            validatedOverlapPairs: profile.overlapExemptions,
           });
           renderByAttempt.set(attempt, render);
           return { html: composed.html, htmlPath, screenshotPath, qualityPath };

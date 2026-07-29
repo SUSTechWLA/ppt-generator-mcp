@@ -139,7 +139,7 @@ body {
 .icon-process { display: flex; align-items: center; justify-content: space-evenly; padding: calc(2mm * var(--workflow-spacing-scale)); overflow: hidden; height: 100%; }
 .process-step { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--ink); font-size: max(8.5pt, calc(9pt * var(--workflow-font-scale))); font-weight: 650; line-height: 1.25; text-align: center; }
 .process-step span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.process-step img { display: block; width: 14mm; height: 14mm; margin: 0 auto 1.5mm; filter: brightness(0) saturate(100%) invert(25%) sepia(83%) saturate(781%) hue-rotate(105deg) brightness(89%) contrast(96%); }
+.process-step img { display: block; width: 13mm; height: 13mm; margin: 0 auto 1.5mm; filter: brightness(0) saturate(100%) invert(25%) sepia(83%) saturate(781%) hue-rotate(105deg) brightness(89%) contrast(96%); }
 .process-arrow { flex: 0 0 auto; color: var(--muted); font-size: max(8.5pt, calc(18pt * var(--workflow-font-scale))); font-weight: 800; text-align: center; }
 .capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(2mm * var(--workflow-spacing-scale)); padding: calc(2mm * var(--workflow-spacing-scale)); height: 100%; }
 .capability-panel { display: grid; padding: 0; }

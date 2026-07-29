@@ -392,3 +392,52 @@ test("rejects case-insensitive executable protocols padded with controls", async
     /executable|unsafe|resource|navigation/i,
   );
 });
+
+test("preserves an explicitly selected image node identity when replacing its placeholder", async () => {
+  const parsed = {
+    ...template,
+    html: template.html.replace("<figures>", '<figures class="qa-overlap-image">'),
+  };
+  const pairedProfile = {
+    ...profile,
+    overlapExemptions: [{ imageSelector: ".qa-overlap-image", captionSelector: ".image-caption" }],
+  } as unknown as typeof profile;
+  const result = await composeSlide({ spec, template: parsed, profile: pairedProfile, assets });
+  const document = new JSDOM(result.html).window.document;
+  assert.equal(document.querySelectorAll("img.qa-overlap-image").length, 1);
+});
+
+for (const [attribute, value] of [
+  ["fill", "url(https://example.invalid/fill.svg#paint)"],
+  ["mask", "url(//example.invalid/mask.svg#mask)"],
+  ["clip-path", "url(file:///tmp/private.svg#clip)"],
+  ["marker-start", "url(data:image/svg+xml;base64,PHN2Zz4=#marker)"],
+  ["cursor", "u\\72l(https://example.invalid/cursor.svg), auto"],
+  ["stroke", "https://example.invalid/direct-reference.svg#paint"],
+] as const) {
+  test(`rejects external SVG presentation resource in generic ${attribute} attribute inspection`, async () => {
+    const parsed = {
+      ...template,
+      html: template.html.replace("</body>", `<svg xmlns="http://www.w3.org/2000/svg"><rect ${attribute}="${value}"></rect></svg></body>`),
+    };
+    await assert.rejects(
+      () => composeSlide({ spec, template: parsed, profile, assets }),
+      (error: unknown) => error instanceof Error
+        && /svg|external|resource|url|unsafe/i.test(error.message)
+        && !error.message.includes("example.invalid")
+        && !error.message.includes("/tmp/private.svg"),
+    );
+  });
+}
+
+test("allows same-document SVG url fragment references without a browser request", async () => {
+  const parsed = {
+    ...template,
+    html: template.html.replace("</body>", '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true"><defs><linearGradient id="safe-gradient"><stop offset="0" stop-color="#075f34"></stop></linearGradient></defs><rect fill="url(#safe-gradient)"></rect></svg></body>'),
+  };
+  const composed = await composeSlide({ spec, template: parsed, profile, assets });
+  const output = await mkdtemp(join(tmpdir(), "local-svg-fragment-"));
+  const render = await renderPage({ html: composed.html, screenshotPath: join(output, "page.png") });
+  assert.deepEqual(render.signals.networkRequests, []);
+  assert.equal(render.signals.hasExecutableDom, false);
+});

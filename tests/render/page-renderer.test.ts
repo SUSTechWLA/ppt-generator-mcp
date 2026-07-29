@@ -101,14 +101,46 @@ test("detects sibling content collisions", async () => {
   assert.ok(report.issues.some((issue) => issue.category === "layout" && /重叠|碰撞/.test(issue.evidence)));
 });
 
-test("accepts only renderer-validated overlap selectors and ignores forged template exemptions", async () => {
+test("accepts only one renderer-validated image-caption node pair and ignores forged owner exemptions", async () => {
   const output = await mkdtemp(join(tmpdir(), "ppt-render-overlap-policy-"));
-  const page = (attribute = "") => `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}.overlay{position:relative;height:100px}.overlay p{position:absolute;top:30px;left:30px;width:220px;height:36px;margin:0;font:16px/36px Arial}</style></head><body><article data-slide-page="1"><div class="overlay" ${attribute}><p>受控底层标注</p><p>受控上层标注</p></div></article></body></html>`;
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XG9uAAAAAElFTkSuQmCC";
+  const page = (attribute = "") => `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}.overlay{position:relative;height:180px;margin:0}.allowed-image,.allowed-caption{position:absolute;top:30px;left:30px;width:220px;height:80px;margin:0}.allowed-caption{display:flex;align-items:center;font:16px/24px Arial}</style></head><body><article data-slide-page="1"><figure class="overlay" ${attribute}><img class="allowed-image" src="data:image/png;base64,${png}" alt="测试图片"><figcaption class="allowed-caption">指定图片说明</figcaption></figure></article></body></html>`;
 
-  const forged = await renderPage({ html: page('data-allow-overlap="true"'), screenshotPath: join(output, "forged.png") });
-  assert.ok(forged.layout.collisions.length > 0, "template-authored exemption attributes must not bypass collision QA");
+  const unapproved = await renderPage({ html: page('data-allow-overlap="true"'), screenshotPath: join(output, "unapproved.png") });
+  assert.ok(unapproved.layout.collisions.some((collision) => new Set([collision.firstId, collision.secondId]).has("allowed-image") && new Set([collision.firstId, collision.secondId]).has("allowed-caption")), "template-authored owner attributes must not bypass image-caption collision QA");
+  assert.equal(evaluateDeterministic(unapproved).hardGatePassed, false);
 
-  const validated = await renderPage({ html: page(), screenshotPath: join(output, "validated.png"), validatedOverlapSelectors: [".overlay"] });
+  const validated = await renderPage({
+    html: page(),
+    screenshotPath: join(output, "validated.png"),
+    validatedOverlapPairs: [{ imageSelector: ".allowed-image", captionSelector: ".allowed-caption" }],
+  });
   assert.deepEqual(validated.layout.collisions, []);
-  assert.equal(evaluateDeterministic(validated).hardGatePassed, true);
+  const validatedReport = evaluateDeterministic(validated);
+  assert.equal(validatedReport.hardGatePassed, true, JSON.stringify(validatedReport.issues, null, 2));
+});
+
+test("an approved image-caption pair does not exempt other colliding text in the same owner", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-overlap-extra-text-"));
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XG9uAAAAAElFTkSuQmCC";
+  const html = `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}.overlay{position:relative;height:300px;margin:0}.allowed-image,.allowed-caption{position:absolute;top:30px;left:30px;width:220px;height:80px;margin:0}.allowed-caption{font:16px/24px Arial}.extra-a,.extra-b{position:absolute;top:180px;left:30px;width:220px;height:50px;margin:0;font:16px/30px Arial}</style></head><body><article data-slide-page="1"><figure class="overlay"><img class="allowed-image" src="data:image/png;base64,${png}" alt="测试图片"><figcaption class="allowed-caption">指定图片说明</figcaption><p class="extra-a">普通辅助文本甲</p><p class="extra-b">普通辅助文本乙</p></figure></article></body></html>`;
+  const render = await renderPage({
+    html,
+    screenshotPath: join(output, "preview.png"),
+    validatedOverlapPairs: [{ imageSelector: ".allowed-image", captionSelector: ".allowed-caption" }],
+  });
+  assert.ok(render.layout.collisions.some((collision) => new Set([collision.firstId, collision.secondId]).has("extra-a") && new Set([collision.firstId, collision.secondId]).has("extra-b")));
+  assert.equal(evaluateDeterministic(render).hardGatePassed, false);
+});
+
+test("detects and blocks external url functions in arbitrary SVG attributes", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-svg-resource-"));
+  const remote = "https://example.invalid/external-paint.svg#paint";
+  const html = `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}</style></head><body><article data-slide-page="1"><p>SAFE</p><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" fill="url(${remote})"></rect></svg></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  const report = evaluateDeterministic(render);
+  assert.equal(render.signals.hasExecutableDom, true);
+  assert.ok(render.signals.networkRequests.some((request) => request.startsWith("https://example.invalid/external-paint.svg")), JSON.stringify(render.signals.networkRequests));
+  assert.equal(report.safeToReturn, false);
+  assert.ok(report.issues.some((issue) => issue.category === "technical" && issue.severity === "error"));
 });

@@ -285,27 +285,40 @@ function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, prof
 }
 
 function validateOverlapExemptions(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
-  if (!profile.overlapExemptionSelectors?.length) return;
+  if (!profile.overlapExemptions?.length) return;
   const doc = new JSDOM(template.html).window.document;
   const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark])));
-  for (const selector of profile.overlapExemptionSelectors) {
-    if (!/^\.[A-Za-z_][A-Za-z0-9_-]*$/.test(selector)) {
-      throw new Error(`Template profile ${profile.slug} overlap exemption has an unsafe selector`);
+  const claimedNodes = new Set<Element>();
+  for (const exemption of profile.overlapExemptions) {
+    const images = Array.from(doc.querySelectorAll(exemption.imageSelector));
+    const captions = Array.from(doc.querySelectorAll(exemption.captionSelector));
+    if (images.length !== 1 || captions.length !== 1) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption selectors must resolve to exactly one image-caption node pair`);
     }
-    const matches = Array.from(doc.querySelectorAll(selector));
-    if (matches.length !== 1) {
-      throw new Error(`Template profile ${profile.slug} overlap exemption must own exactly one image-caption container`);
+    const image = images[0];
+    const caption = captions[0];
+    if (claimedNodes.has(image) || claimedNodes.has(caption)) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption node pairs must be disjoint`);
     }
-    const owner = matches[0];
+    const ownerSelector = profile.imageSlots.containerSelector;
+    const imageOwner = ownerSelector ? image.closest(ownerSelector) : image.closest("figure");
+    const captionOwner = ownerSelector ? caption.closest(ownerSelector) : caption.closest("figure");
+    const owner = imageOwner;
+    const expectedCaptionTag = profile.pageBindings.imageCaption;
+    if (!owner || imageOwner !== captionOwner) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption is not an explicitly owned image-caption node pair`);
+    }
     const ownsLandmark = protectedLandmarks.some((landmark) => owner === landmark || owner.contains(landmark));
     const ownsSemanticContent = Boolean(owner.querySelector("[data-semantic-slot], [data-source-paragraph], h1, h2, h3, h4, h5, h6, table, form"));
     const isImageCard = owner.matches('figure[data-component="image-card"]');
-    const imageCount = owner.querySelectorAll(profile.imageSlots.placeholderTag).length;
-    const captionTag = profile.pageBindings.imageCaption;
-    const captionCount = captionTag ? owner.querySelectorAll(`figcaption ${captionTag}`).length : 0;
-    if (ownsLandmark || ownsSemanticContent || !isImageCard || imageCount !== 1 || captionCount !== 1) {
-      throw new Error(`Template profile ${profile.slug} overlap exemption is not a narrowly owned image-caption overlay`);
+    const isImagePlaceholder = image.localName.toLowerCase() === profile.imageSlots.placeholderTag;
+    const isCaption = caption.localName.toLowerCase() === "figcaption"
+      && Boolean(expectedCaptionTag && caption.querySelector(expectedCaptionTag));
+    if (ownsLandmark || ownsSemanticContent || !isImageCard || !isImagePlaceholder || !isCaption) {
+      throw new Error(`Template profile ${profile.slug} overlap exemption is not an explicitly owned image-caption node pair`);
     }
+    claimedNodes.add(image);
+    claimedNodes.add(caption);
   }
 }
 

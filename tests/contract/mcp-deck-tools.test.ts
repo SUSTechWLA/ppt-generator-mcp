@@ -111,6 +111,45 @@ test("artifact sanitizer removes physical metadata and redacts credential assign
   assert.match(serialized, /redacted-credential/);
 });
 
+test("artifact sanitizer uses canonical safety views for encoded, folded, and nested values", () => {
+  const unsafeValues = [
+    "api_key=\"quoted-secret\"",
+    "%2566%2569%256C%2565%253A%252F%252F%252FUsers%252Falice%252Fpercent-secret.txt",
+    "file&colon;&sol;&sol;&sol;Users&sol;alice&sol;entity-secret.txt",
+    "&#102;&#105;&#108;&#101;&#58;&#47;&#47;&#47;Users&#47;alice&#47;numeric-entity-secret.txt",
+    "h\u200Bt t\tp\r s : / /example.invalid/folded-secret",
+    "C:/alice/forward-secret.txt",
+    "C:\\alice\\back-secret.txt",
+    "/Users/alice/unix-secret.txt",
+    "data:text/plain;base64,U0VDUkVUX0RBVEFfVVJM",
+    Buffer.from("file:///Users/alice/base64-secret.txt").toString("base64"),
+    Buffer.from("api_key=short-secret").toString("base64"),
+  ];
+  const sanitized = sanitizePublicData({ nested: unsafeValues, ordinary: "请核对页面路径与网址字段，不包含任何外部地址。" });
+  const serialized = JSON.stringify(sanitized);
+  for (const secret of [
+    "quoted-secret", "percent-secret", "entity-secret", "numeric-entity-secret", "folded-secret", "forward-secret",
+    "back-secret", "unix-secret", "U0VDUkVUX0RBVEFfVVJM", "base64-secret", "short-secret",
+  ]) assert.doesNotMatch(serialized, new RegExp(secret));
+  assert.match(serialized, /请核对页面路径与网址字段/);
+});
+
+test("plan_deck fails closed when canonical source evidence contains a credential", async (t) => {
+  const { client } = await productionClient(t);
+  const result = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText: page(92, "安全凭据", "项目必须使用api_key=\"mcp-plan-secret\"完成调用，并保留1份记录。"),
+      pageNumbers: [92],
+      documentType: "bid",
+      quality: { minScore: 85, maxAttempts: 1 },
+    },
+  });
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(JSON.stringify(result), /mcp-plan-secret|api_key/i);
+  assert.match(JSON.stringify(result), /INTERNAL_ERROR|INPUT_INVALID/);
+});
+
 test("plan_deck production wiring preserves four explicit pages and immutable evidence", async (t) => {
   const { client } = await productionClient(t);
   const result = await client.callTool({

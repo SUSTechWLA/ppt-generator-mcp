@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,6 +44,53 @@ test("limits artifact lookup to a closed name set", async () => {
   const store = new RunStore(root);
   const run = await store.createOrResume({ canonicalInput });
   await assert.rejects(() => store.getArtifact(run.runId, "../secret" as "manifest.json"), /invalid artifact/i);
+});
+
+test("artifact lookup rejects external and internal symlinks with closed diagnostics", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ppt-runs-symlink-"));
+  const outside = await mkdtemp(join(tmpdir(), "ppt-runs-secret-"));
+  const store = new RunStore(root);
+  const run = await store.createOrResume({ canonicalInput });
+  const outsideSecret = join(outside, "outside-secret.html");
+  await writeFile(outsideSecret, "OUTSIDE_SECRET_CANARY", "utf8");
+  await symlink(outsideSecret, join(store.runDir(run.runId), "final.html"), "file");
+
+  await assert.rejects(
+    () => store.getArtifact(run.runId, "final.html"),
+    (error: Error) => {
+      assert.match(error.message, /artifact.*(?:unsafe|unavailable)/i);
+      assert.doesNotMatch(error.message, /OUTSIDE_SECRET_CANARY|ppt-runs-secret-|outside-secret|\/private\/|\/Users\//i);
+      return true;
+    },
+  );
+
+  await writeFile(join(store.runDir(run.runId), "internal.html"), "safe", "utf8");
+  await symlink(join(store.runDir(run.runId), "internal.html"), join(store.runDir(run.runId), "quality.json"), "file");
+  await assert.rejects(() => store.getArtifact(run.runId, "quality.json"), /artifact.*(?:unsafe|unavailable)/i);
+});
+
+test("artifact lookup rejects a symlinked run directory and non-regular artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ppt-runs-component-symlink-"));
+  const outside = await mkdtemp(join(tmpdir(), "ppt-runs-component-outside-"));
+  const store = new RunStore(root);
+  const run = await store.createOrResume({ canonicalInput });
+  const runDirectory = store.runDir(run.runId);
+  await rm(runDirectory, { recursive: true });
+  await writeFile(join(outside, "manifest.json"), "RUN_DIRECTORY_SECRET", "utf8");
+  await symlink(outside, runDirectory, "dir");
+  await assert.rejects(
+    () => store.getArtifact(run.runId, "manifest.json"),
+    (error: Error) => {
+      assert.match(error.message, /artifact.*(?:unsafe|unavailable)/i);
+      assert.doesNotMatch(error.message, /RUN_DIRECTORY_SECRET|component-outside|\/private\/|\/Users\//i);
+      return true;
+    },
+  );
+
+  await rm(runDirectory);
+  await mkdir(runDirectory);
+  await mkdir(join(runDirectory, "final.html"));
+  await assert.rejects(() => store.getArtifact(run.runId, "final.html"), /artifact.*unavailable/i);
 });
 
 test("normalizes quality diagnostics before RunStore writes the first attempt artifact", async () => {

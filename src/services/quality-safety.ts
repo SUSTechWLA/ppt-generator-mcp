@@ -10,6 +10,22 @@ const CLOSED_EVIDENCE = "External review diagnostic removed by safety policy";
 const CLOSED_ACTION = "Re-run the closed quality checks without external diagnostic details";
 const MAX_DIAGNOSTIC_SCAN_LENGTH = 8_192;
 const MAX_PERCENT_DECODE_ROUNDS = 4;
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  bsol: "\\",
+  colon: ":",
+  equals: "=",
+  gt: ">",
+  lt: "<",
+  newline: "\n",
+  num: "#",
+  period: ".",
+  quot: "\"",
+  semi: ";",
+  sol: "/",
+  tab: "\t",
+};
 
 function decodePercentOnce(value: string): string {
   try {
@@ -19,10 +35,27 @@ function decodePercentOnce(value: string): string {
   }
 }
 
+function decodeHtmlEntitiesOnce(value: string): string {
+  return value.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z][a-z0-9]+));/giu, (match, decimal: string | undefined, hex: string | undefined, named: string | undefined) => {
+    if (decimal !== undefined || hex !== undefined) {
+      const codePoint = Number.parseInt(decimal ?? hex!, decimal !== undefined ? 10 : 16);
+      if (Number.isSafeInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff) {
+        try {
+          return String.fromCodePoint(codePoint);
+        } catch {
+          return match;
+        }
+      }
+      return match;
+    }
+    return HTML_ENTITIES[named!.toLowerCase()] ?? match;
+  });
+}
+
 function diagnosticViews(value: string): string[] {
   const decoded: string[] = [value.normalize("NFKC")];
   for (let round = 0; round < MAX_PERCENT_DECODE_ROUNDS; round += 1) {
-    const next = decodePercentOnce(decoded.at(-1)!).normalize("NFKC");
+    const next = decodeHtmlEntitiesOnce(decodePercentOnce(decoded.at(-1)!)).normalize("NFKC");
     if (next === decoded.at(-1)) break;
     decoded.push(next);
   }
@@ -35,7 +68,7 @@ function diagnosticViews(value: string): string[] {
   return [...views];
 }
 
-function unsafeCanonicalView(value: string): boolean {
+function structurallyUnsafeCanonicalView(value: string): boolean {
   return /(?:https?|file|ftp):\/\//iu.test(value)
     || /data:[^\s,;]+(?:;base64)?,/iu.test(value)
     || /\bbase64\b/iu.test(value)
@@ -46,17 +79,46 @@ function unsafeCanonicalView(value: string): boolean {
     || /\b(?:sk-[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{12,})\b/u.test(value)
     || /\b(?:authorization|x-api-key|api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password|database_url)\s*[:=]\s*["']?[^\s;"']{4,}/iu.test(value)
     || /\b[A-Za-z0-9_-]{2,}:\/\/[^\s:@/]+:[^\s@/]+@/u.test(value)
-    || /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/u.test(value)
-    || /\b[A-Za-z0-9+/]{40,}={0,2}\b/u.test(value);
+    || /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/u.test(value);
 }
 
-export function hasUnsafeDiagnosticText(value: string): boolean {
-  if (value.length > MAX_DIAGNOSTIC_SCAN_LENGTH) return true;
-  return diagnosticViews(value).some(unsafeCanonicalView);
+function decodedSensitiveBase64(value: string): boolean {
+  const tokens = value.match(/\b[A-Za-z0-9+/_-]{8,}={0,2}\b/gu) ?? [];
+  for (const token of tokens) {
+    const normalized = token.replaceAll("-", "+").replaceAll("_", "/").replace(/=+$/u, "");
+    if (normalized.length % 4 === 1) continue;
+    try {
+      const decodedBytes = Buffer.from(normalized, "base64");
+      const canonical = decodedBytes.toString("base64").replace(/=+$/u, "");
+      if (canonical !== normalized) continue;
+      const decoded = decodedBytes.toString("utf8");
+      if (!Buffer.from(decoded, "utf8").equals(decodedBytes)) continue;
+      if (diagnosticViews(decoded).some(structurallyUnsafeCanonicalView)) return true;
+    } catch {
+      // Invalid base64 is ordinary text, not a decoded diagnostic channel.
+    }
+  }
+  return false;
+}
+
+export interface DiagnosticSafetyOptions {
+  allowLong?: boolean;
+  allowOpaqueBase64?: boolean;
+}
+
+export function hasUnsafeDiagnosticText(value: string, options: DiagnosticSafetyOptions = {}): boolean {
+  if (!options.allowLong && value.length > MAX_DIAGNOSTIC_SCAN_LENGTH) return true;
+  const views = diagnosticViews(value);
+  if (views.some(structurallyUnsafeCanonicalView)) return true;
+  if (decodedSensitiveBase64(value)) return true;
+  return options.allowOpaqueBase64 === false
+    ? false
+    : (value.normalize("NFKC").match(/[A-Za-z0-9+/]{40,}={0,2}/gu) ?? [])
+      .some((token) => /[+/]/u.test(token) || /=+$/u.test(token));
 }
 
 function normalizeIssue(issue: QualityIssue, index: number): QualityIssue {
-  if (![issue.id, issue.evidence, issue.targetId ?? "", issue.suggestedAction].some(hasUnsafeDiagnosticText)) return issue;
+  if (![issue.id, issue.evidence, issue.targetId ?? "", issue.suggestedAction].some((value) => hasUnsafeDiagnosticText(value))) return issue;
   return {
     id: `closed-external-diagnostic-${index + 1}`,
     severity: issue.severity,

@@ -15,6 +15,11 @@ import {
   qualityReportSchema,
 } from "../domain/quality-report.js";
 import { qualitySettingsSchema } from "../domain/source-document.js";
+import { WorkflowError } from "../domain/workflow-error.js";
+import {
+  hasUnsafeDiagnosticText,
+  hasUnsafeDiagnosticValue,
+} from "../services/quality-safety.js";
 
 export const mcpPlanDeckInputSchema = z.object({
   sourceMarkdown: z.string().trim().min(20).max(120_000).optional(),
@@ -238,7 +243,7 @@ function pageArtifactReferences(runId: string): z.infer<typeof publicPageArtifac
 
 export function publicGenerateDeckOutput(value: unknown): PublicGenerateDeckOutput {
   const output = generateDeckOutputSchema.parse(value);
-  return mcpGenerateDeckOutputSchema.parse({
+  const publicOutput = mcpGenerateDeckOutputSchema.parse({
     deckRunId: output.deckRunId,
     deckPlanId: output.deckPlanId,
     status: output.status,
@@ -265,18 +270,27 @@ export function publicGenerateDeckOutput(value: unknown): PublicGenerateDeckOutp
     },
     ...(output.consistency ? { consistency: output.consistency } : {}),
   });
+  assertSafePublicData(publicOutput);
+  return publicOutput;
 }
 
 const unsafeKey = /(?:^|_)(?:api[_-]?key|secret|token|authorization|stack|cause|path|file[_-]?path|request[_-]?(?:id|fingerprint)|asset[_-]?hashes|data[_-]?url)(?:$|_)/i;
-const absolutePath = /(?:\/(?:Users|private|home|var|tmp)\/[^\s"'<>]+|[A-Za-z]:[\\/][^\s"'<>]+)/g;
-const credential = /(?:Bearer\s+[^\s"'<>]+|\bsk-[A-Za-z0-9_-]{8,}|\bAKIA[A-Z0-9]{12,}|\b[A-Za-z0-9_-]*(?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password|database[_-]?url)\s*[:=]\s*[^\s;"'<>]+)/gi;
+const CLOSED_PUBLIC_VALUE = "[redacted-credential]";
 
-function publicText(value: string): string {
-  return value.replace(absolutePath, "[redacted-path]").replace(credential, "[redacted-credential]");
+export function assertSafePublicData(value: unknown): void {
+  if (hasUnsafeDiagnosticValue(value)) {
+    throw new WorkflowError({
+      code: "INTERNAL_ERROR",
+      stage: "mcp_tool",
+      retryable: false,
+      message: "The requested public result failed safety validation",
+      recovery: "Remove credentials and external locations from the source, then create a new immutable plan.",
+    });
+  }
 }
 
 export function sanitizePublicData(value: unknown, seen = new Set<object>()): unknown {
-  if (typeof value === "string") return publicText(value);
+  if (typeof value === "string") return hasUnsafeDiagnosticText(value) ? CLOSED_PUBLIC_VALUE : value;
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return "[redacted-cycle]";
   seen.add(value);
@@ -291,7 +305,9 @@ export function sanitizePublicData(value: unknown, seen = new Set<object>()): un
 }
 
 export function sanitizePlan(value: unknown): unknown {
-  return planDeckOutputSchema.parse(value);
+  const plan = planDeckOutputSchema.parse(value);
+  assertSafePublicData(plan);
+  return plan;
 }
 
 export function sanitizeDeckManifest(value: unknown): unknown {
@@ -381,5 +397,38 @@ export function sanitizeConsistencyText(text: string): z.infer<typeof deckConsis
 }
 
 export function sanitizeHtmlText(text: string): string {
-  return publicText(text);
+  const publicHtml = text.replace(/\sdata-inline-source=(?:"[^"]*"|'[^']*')/giu, "");
+  let unsafeEmbeddedImage = false;
+  const withoutEmbeddedImages = publicHtml.replace(
+    /data:image\/(?:png|jpeg|webp|svg\+xml);base64,([A-Za-z0-9+/]+={0,2})/giu,
+    (dataUrl, payload: string) => {
+      if (/^data:image\/svg\+xml/iu.test(dataUrl)) {
+        const bytes = Buffer.from(payload, "base64");
+        const decoded = bytes.toString("utf8");
+        if (!Buffer.from(decoded, "utf8").equals(bytes)) unsafeEmbeddedImage = true;
+        else {
+          const withoutSafeNamespaces = decoded
+            .replaceAll(/https?:\/\/www\.w3\.org\/2000\/svg/giu, "approved-svg-namespace")
+            .replaceAll(/https?:\/\/www\.w3\.org\/1999\/xlink/giu, "approved-xlink-namespace");
+          if (hasUnsafeDiagnosticText(withoutSafeNamespaces, { allowLong: true, allowOpaqueBase64: false })) {
+            unsafeEmbeddedImage = true;
+          }
+        }
+      }
+      return "approved-inline-image";
+    },
+  );
+  const withoutSafeNamespaces = withoutEmbeddedImages
+    .replaceAll(/https?:\/\/www\.w3\.org\/2000\/svg/giu, "approved-svg-namespace")
+    .replaceAll(/https?:\/\/www\.w3\.org\/1999\/xlink/giu, "approved-xlink-namespace");
+  if (unsafeEmbeddedImage || hasUnsafeDiagnosticText(withoutSafeNamespaces, { allowLong: true, allowOpaqueBase64: false })) {
+    throw new WorkflowError({
+      code: "INTERNAL_ERROR",
+      stage: "mcp_tool",
+      retryable: false,
+      message: "The HTML artifact failed public safety validation",
+      recovery: "Regenerate the page from the immutable plan before retrieving the artifact.",
+    });
+  }
+  return publicHtml;
 }

@@ -22,6 +22,7 @@ import { generateImages, generateSingleImage } from "../tools/generate-image.js"
 import { parseSourceContent } from "../tools/parse-source-content.js";
 import { insertAssetSlots } from "../tools/insert-asset-slots.js";
 import { safeTool, toJsonToolResult, toToolResult } from "./tool-result.js";
+import { withGenerateDeckRequestLock } from "./request-lock.js";
 import {
   getDeckInputSchema,
   getDeckOutputSchema,
@@ -88,7 +89,7 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
     inputSchema: mcpPlanDeckInputSchema,
     outputSchema: planDeckOutputSchema,
   }, async (input) => safeTool(async () => {
-    const result = planDeckOutputSchema.parse(await requireDeckWorkflow().planDeck(input));
+    const result = planDeckOutputSchema.parse(sanitizePlan(await requireDeckWorkflow().planDeck(input)));
     return toToolResult(result, `Planned immutable pages ${result.plannedDeck.pageNumbers.join(", ")} with ${result.assets.length} external asset request(s).`);
   }));
 
@@ -98,7 +99,12 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
     inputSchema: generateDeckInputSchema,
     outputSchema: mcpGenerateDeckOutputSchema,
   }, async (input) => safeTool(async () => {
-    const result = publicGenerateDeckOutput(await requireDeckWorkflow().generateDeck(input));
+    const workflow = requireDeckWorkflow();
+    const result = publicGenerateDeckOutput(await withGenerateDeckRequestLock(
+      workflow.deckStore,
+      input.requestId,
+      () => workflow.generateDeck(input),
+    ));
     return toToolResult(result, `${result.status}: ${result.pages.length} page result(s); ${result.assets.missingAssetIds.length} asset(s) still required.`);
   }));
 

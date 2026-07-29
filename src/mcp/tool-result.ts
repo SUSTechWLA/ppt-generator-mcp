@@ -1,19 +1,15 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { WorkflowError } from "../domain/workflow-error.js";
-
-function unsafeErrorText(value: string): boolean {
-  const normalized = value.normalize("NFKC");
-  const compact = normalized.replace(/[\p{White_Space}\p{Cf}\p{Cc}]+/gu, "");
-  const directUnsafe = /(?:https?|file|ftp):\/\/|data:[^,;]+(?:;base64)?,|(?:^|[\s("'=])\/(?:Users|private|home|var|tmp)\/|(?:[A-Za-z]:[\\/]|\\\\)[^\s"']+|(?:\n|\r)\s*at\s+[^\n]+:\d+|\b(?:Bearer|Basic)\s+\S+|\b(?:sk-[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{12,})\b|\b(?:authorization|x-api-key|api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password|database_url)\s*[:=]/iu;
-  const compactUnsafe = /(?:https?|file|ftp):\/\/|data:[^,;]+(?:;base64)?,|(?:[A-Za-z]:[\\/]|\\\\)|(?:Bearer|Basic)[A-Za-z0-9._~+/=-]{8,}|(?:sk-[A-Za-z0-9_-]{8,}|AKIA[A-Z0-9]{12,})|(?:authorization|x-api-key|api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password|database_url)[:=]/iu;
-  return directUnsafe.test(normalized)
-    || compactUnsafe.test(compact)
-    || /\b[A-Za-z0-9+/]{80,}={0,2}\b/u.test(normalized);
-}
+import { hasUnsafeDiagnosticValue } from "../services/quality-safety.js";
 
 function safeWorkflowError(error: WorkflowError): boolean {
-  return [error.message, error.recovery ?? "", error.stage, error.code].every((value) => !unsafeErrorText(value));
+  return !hasUnsafeDiagnosticValue({
+    message: error.message,
+    recovery: error.recovery ?? "",
+    stage: error.stage,
+    code: error.code,
+  });
 }
 
 export function toToolResult<T extends Record<string, unknown>>(value: T, summary: string): CallToolResult {

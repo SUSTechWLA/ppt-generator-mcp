@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -16,6 +16,16 @@ function page(number: number, title: string, body: string): string {
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1792" height="1024" viewBox="0 0 1792 1024"><rect width="1792" height="1024" fill="#e6efe8"/><path d="M220 740h1350M320 680l280-220 250 120 300-300 310 250" fill="none" stroke="#145c3d" stroke-width="50"/><circle cx="1150" cy="280" r="90" fill="#c7a34b"/></svg>`;
 const externalDataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 async function fixture(t: test.TestContext) {
   const outputRoot = await mkdtemp(join(tmpdir(), "mcp-deck-acceptance-"));
@@ -203,4 +213,189 @@ test("production MCP delivers a zero-asset plan and returns only sanitized artif
   const manifest = await client.callTool({ name: "get_deck", arguments: { id: output.deckRunId, view: "manifest" } });
   assert.equal(manifest.isError, undefined, JSON.stringify(manifest.content));
   assert.doesNotMatch(JSON.stringify(manifest), /\/Users\/|requestFingerprint|assetHashes|manifestPath|htmlPath|previewPath/i);
+});
+
+test("same-request concurrent generate_deck calls enter page generation only once", async (t) => {
+  const { client, dependencies } = await fixture(t);
+  const planned = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText: page(83, "并发责任", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
+      pageNumbers: [83], documentType: "bid", quality: { minScore: 90, maxAttempts: 2 },
+    },
+  });
+  const deckPlanId = (planned.structuredContent as { plannedDeck: { deckPlanId: string } }).plannedDeck.deckPlanId;
+  const original = dependencies.generateDeckDependencies.generatePage;
+  const entered = deferred();
+  const release = deferred();
+  let calls = 0;
+  dependencies.generateDeckDependencies.generatePage = async (input) => {
+    calls += 1;
+    entered.resolve();
+    await release.promise;
+    return original(input);
+  };
+
+  const argumentsValue = { deckPlanId, externalAssets: [], requestId: "same-request-concurrency" };
+  const first = client.callTool({ name: "generate_deck", arguments: argumentsValue });
+  await entered.promise;
+  const second = client.callTool({ name: "generate_deck", arguments: argumentsValue });
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  const callsBeforeRelease = calls;
+  release.resolve();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+  assert.equal(callsBeforeRelease, 1, "the follower must wait before Chromium page generation");
+  assert.equal(firstResult.isError, undefined, JSON.stringify(firstResult.content));
+  assert.equal(secondResult.isError, undefined, JSON.stringify(secondResult.content));
+  const left = firstResult.structuredContent as { deckRunId: string; pages: Array<{ runId: string; quality: { attempts: number } }> };
+  const right = secondResult.structuredContent as typeof left;
+  assert.equal(calls, 1);
+  assert.equal(right.deckRunId, left.deckRunId);
+  assert.equal(right.pages[0].runId, left.pages[0].runId);
+  assert.equal(right.pages[0].quality.attempts, left.pages[0].quality.attempts);
+  assert.deepEqual(secondResult.structuredContent, firstResult.structuredContent);
+  assert.deepEqual(secondResult.content, firstResult.content);
+});
+
+test("different generate_deck requestIds are not serialized by the single-flight scope", async (t) => {
+  const { client, dependencies } = await fixture(t);
+  const planned = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText: page(84, "独立请求", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
+      pageNumbers: [84], documentType: "bid", quality: { minScore: 90, maxAttempts: 2 },
+    },
+  });
+  const deckPlanId = (planned.structuredContent as { plannedDeck: { deckPlanId: string } }).plannedDeck.deckPlanId;
+  const original = dependencies.generateDeckDependencies.generatePage;
+  const bothEntered = deferred();
+  const release = deferred();
+  let calls = 0;
+  dependencies.generateDeckDependencies.generatePage = async (input) => {
+    calls += 1;
+    if (calls === 2) bothEntered.resolve();
+    await release.promise;
+    return original(input);
+  };
+
+  const first = client.callTool({ name: "generate_deck", arguments: { deckPlanId, externalAssets: [], requestId: "independent-request-a" } });
+  const second = client.callTool({ name: "generate_deck", arguments: { deckPlanId, externalAssets: [], requestId: "independent-request-b" } });
+  await Promise.race([
+    bothEntered.promise,
+    new Promise((_, rejectDelay) => setTimeout(() => rejectDelay(new Error("independent requests were serialized")), 1_000)),
+  ]);
+  assert.equal(calls, 2);
+  release.resolve();
+  const [left, right] = await Promise.all([first, second]);
+  assert.equal(left.isError, undefined, JSON.stringify(left.content));
+  assert.equal(right.isError, undefined, JSON.stringify(right.content));
+  assert.notEqual(
+    (left.structuredContent as { deckRunId: string }).deckRunId,
+    (right.structuredContent as { deckRunId: string }).deckRunId,
+  );
+});
+
+test("same requestId with a different plan still reaches persisted fingerprint validation", async (t) => {
+  const { client, dependencies } = await fixture(t);
+  const planIds: string[] = [];
+  for (const number of [85, 86]) {
+    const planned = await client.callTool({
+      name: "plan_deck",
+      arguments: {
+        sourceText: page(number, `指纹计划${number}`, "首先开始现场检查。其次提交问题清单。最后完成整改复核。"),
+        pageNumbers: [number], documentType: "bid", quality: { minScore: 85, maxAttempts: 1 },
+      },
+    });
+    assert.equal(planned.isError, undefined, JSON.stringify(planned.content));
+    planIds.push((planned.structuredContent as { plannedDeck: { deckPlanId: string } }).plannedDeck.deckPlanId);
+  }
+
+  const requestId = "same-request-different-plan";
+  const first = await client.callTool({
+    name: "generate_deck",
+    arguments: { deckPlanId: planIds[0], externalAssets: [], requestId },
+  });
+  assert.equal(first.isError, undefined, JSON.stringify(first.content));
+  let observedError = "";
+  const original = dependencies.generateDeck;
+  dependencies.generateDeck = async (input) => {
+    try {
+      return await original(input);
+    } catch (error) {
+      observedError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  };
+  const conflicting = await client.callTool({
+    name: "generate_deck",
+    arguments: { deckPlanId: planIds[1], externalAssets: [], requestId },
+  });
+  assert.equal(conflicting.isError, true);
+  assert.match(observedError, /fingerprint mismatch/i);
+  assert.doesNotMatch(JSON.stringify(conflicting), /fingerprint|same-request-different-plan|\/Users\//i);
+});
+
+test("get_deck rejects a page artifact replaced by an external symlink without leaking either target", async (t) => {
+  const { client, dependencies } = await fixture(t);
+  const outside = await mkdtemp(join(tmpdir(), "mcp-deck-outside-secret-"));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const planned = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText: page(87, "符号链接防护", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
+      pageNumbers: [87], documentType: "bid", quality: { minScore: 85, maxAttempts: 1 },
+    },
+  });
+  const deckPlanId = (planned.structuredContent as { plannedDeck: { deckPlanId: string } }).plannedDeck.deckPlanId;
+  const generated = await client.callTool({
+    name: "generate_deck",
+    arguments: { deckPlanId, externalAssets: [], requestId: "artifact-symlink-run" },
+  });
+  assert.equal(generated.isError, undefined, JSON.stringify(generated.content));
+  const pageRunId = (generated.structuredContent as { pages: Array<{ runId: string }> }).pages[0].runId;
+  const finalPath = join(dependencies.runStore.runDir(pageRunId), "final.html");
+  const externalPath = join(outside, "EXTERNAL_TARGET_NAME.html");
+  await writeFile(externalPath, "EXTERNAL_ARTIFACT_SECRET", "utf8");
+  await rm(finalPath);
+  await symlink(externalPath, finalPath, "file");
+
+  const result = await client.callTool({
+    name: "get_deck",
+    arguments: { id: pageRunId, view: "artifact", artifact: "final.html" },
+  });
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(JSON.stringify(result), /EXTERNAL_ARTIFACT_SECRET|EXTERNAL_TARGET_NAME|mcp-deck-outside-secret|\/Users\/|\/private\//i);
+});
+
+test("get_deck fails closed for encoded file locations injected into final HTML style", async (t) => {
+  const { client, dependencies } = await fixture(t);
+  const planned = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText: page(88, "HTML交付防护", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
+      pageNumbers: [88], documentType: "bid", quality: { minScore: 85, maxAttempts: 1 },
+    },
+  });
+  const deckPlanId = (planned.structuredContent as { plannedDeck: { deckPlanId: string } }).plannedDeck.deckPlanId;
+  const generated = await client.callTool({
+    name: "generate_deck",
+    arguments: { deckPlanId, externalAssets: [], requestId: "unsafe-html-artifact-run" },
+  });
+  assert.equal(generated.isError, undefined, JSON.stringify(generated.content));
+  const pageRunId = (generated.structuredContent as { pages: Array<{ runId: string }> }).pages[0].runId;
+  const finalPath = join(dependencies.runStore.runDir(pageRunId), "final.html");
+  const original = await readFile(finalPath, "utf8");
+  await writeFile(
+    finalPath,
+    `${original}\n<style>.unsafe{background:url(file&colon;&sol;&sol;&sol;Users&sol;alice&sol;UNSAFE_HTML_SECRET.png)}</style>`,
+    "utf8",
+  );
+
+  const result = await client.callTool({
+    name: "get_deck",
+    arguments: { id: pageRunId, view: "artifact", artifact: "final.html" },
+  });
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(JSON.stringify(result), /UNSAFE_HTML_SECRET|Users&sol;alice|file&colon;|\/Users\/alice/i);
+  assert.match(JSON.stringify(result), /INTERNAL_ERROR/);
 });

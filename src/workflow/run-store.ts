@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { hashCanonical } from "../domain/source-document.js";
@@ -26,6 +26,17 @@ export interface ActiveRun {
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ARTIFACTS = new Set<ArtifactName>(["manifest.json", "final.html", "final.png", "quality.json"]);
+
+class UnsafeArtifactEntryError extends Error {}
+
+function isErrno(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+function isContained(root: string, target: string): boolean {
+  const delta = relative(root, target);
+  return delta !== ".." && !delta.startsWith(`..${sep}`) && !isAbsolute(delta);
+}
 
 async function atomicWrite(path: string, value: string | Buffer): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -183,9 +194,36 @@ export class RunStore {
     const path = artifactName === "manifest.json" ? this.manifestPath(runId) : join(directory, artifactName);
     const delta = relative(directory, path);
     if (delta.startsWith("..") || isAbsolute(delta)) throw new Error("Artifact path escapes run directory");
-    const metadata = await stat(path);
-    const result: { path: string; size: number; text?: string } = { path, size: metadata.size };
-    if (metadata.size <= 512 * 1024 && artifactName !== "final.png") result.text = await readFile(path, "utf8");
-    return result;
+    try {
+      const [rootEntry, directoryEntry, artifactEntry] = await Promise.all([
+        lstat(this.root),
+        lstat(directory),
+        lstat(path),
+      ]);
+      if (rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) throw new UnsafeArtifactEntryError();
+      if (directoryEntry.isSymbolicLink() || !directoryEntry.isDirectory()) throw new UnsafeArtifactEntryError();
+      if (artifactEntry.isSymbolicLink() || !artifactEntry.isFile()) throw new UnsafeArtifactEntryError();
+
+      const [actualRoot, actualDirectory, actualPath] = await Promise.all([
+        realpath(this.root),
+        realpath(directory),
+        realpath(path),
+      ]);
+      if (!isContained(actualRoot, actualDirectory) || !isContained(actualDirectory, actualPath)) {
+        throw new UnsafeArtifactEntryError();
+      }
+
+      const metadata = await stat(path);
+      if (!metadata.isFile()) throw new UnsafeArtifactEntryError();
+      const result: { path: string; size: number; text?: string } = { path, size: metadata.size };
+      if (metadata.size <= 512 * 1024 && artifactName !== "final.png") result.text = await readFile(path, "utf8");
+      return result;
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) throw new Error(`Artifact not found (${artifactName})`);
+      if (error instanceof UnsafeArtifactEntryError || isErrno(error, "ELOOP")) {
+        throw new Error(`Artifact unavailable (${artifactName}): unsafe storage entry`);
+      }
+      throw new Error(`Unable to read artifact (${artifactName})`);
+    }
   }
 }

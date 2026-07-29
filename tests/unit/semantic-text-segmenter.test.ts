@@ -55,3 +55,37 @@ test("semantic segmenter keeps initialisms inside genuine English sentence bound
     "Arrive onsite.",
   ]);
 });
+
+test("semantic segmenter keeps title and label abbreviations with their continuation", () => {
+  assert.deepEqual(segmentSemanticText("Dr. Chen arrives. Mr. Lee uses No. 1 channel."), [
+    { text: "Dr. Chen arrives.", start: 0, end: 17, gapBefore: "" },
+    { text: "Mr. Lee uses No. 1 channel.", start: 18, end: 45, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter consumes ASCII and Unicode ellipses as whole terminals", () => {
+  const segments = segmentSemanticText("Wait... Continue checks. Pause… Resume.");
+
+  assert.deepEqual(segments, [
+    { text: "Wait...", start: 0, end: 7, gapBefore: "" },
+    { text: "Continue checks.", start: 8, end: 24, gapBefore: " " },
+    { text: "Pause…", start: 25, end: 31, gapBefore: " " },
+    { text: "Resume.", start: 32, end: 39, gapBefore: " " },
+  ]);
+  assert.ok(segments.every((segment) => segment.text.length > 0 && !/^\.+$/.test(segment.text)));
+});
+
+test("semantic segmenter uses following context for an initialism final period", () => {
+  assert.deepEqual(segmentSemanticText("Operations are in the U.S. Response complete. The U.S. team continues."), [
+    { text: "Operations are in the U.S.", start: 0, end: 26, gapBefore: "" },
+    { text: "Response complete.", start: 27, end: 45, gapBefore: " " },
+    { text: "The U.S. team continues.", start: 46, end: 70, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter protects a contextual numbered-list marker after prose", () => {
+  assert.deepEqual(segmentSemanticText("Scope includes 1. Inspect power; Continue checks."), [
+    { text: "Scope includes 1. Inspect power;", start: 0, end: 32, gapBefore: "" },
+    { text: "Continue checks.", start: 33, end: 49, gapBefore: " " },
+  ]);
+});

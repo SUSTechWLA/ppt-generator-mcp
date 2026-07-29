@@ -140,6 +140,47 @@ test("paginator keeps protected ASCII periods out of fragment facts and pages", 
   assert.deepEqual(pages.map((page) => page.originalSourceFactIds), [["fact-1"], ["fact-2"]]);
 });
 
+const contextualPeriodCases = [
+  {
+    name: "title and label abbreviations",
+    body: "Dr. Chen arrives. Use No. 1 channel.",
+    facts: ["Dr. Chen arrives.", "Use No. 1 channel."],
+  },
+  {
+    name: "an ASCII ellipsis",
+    body: "Wait... Continue checks.",
+    facts: ["Wait...", "Continue checks."],
+  },
+  {
+    name: "a sentence-final initialism",
+    body: "Operations are in the U.S. Response complete.",
+    facts: ["Operations are in the U.S.", "Response complete."],
+  },
+  {
+    name: "a contextual numbered-list marker",
+    body: "Scope includes 1. Inspect power; Continue checks.",
+    facts: ["Scope includes 1. Inspect power;", "Continue checks."],
+  },
+] as const;
+
+for (const scenario of contextualPeriodCases) {
+  test(`paginator preserves fact order without fragments for ${scenario.name}`, () => {
+    const source = normalizeSource({
+      sections: [{ heading: "Operations guide", body: scenario.body }],
+    });
+
+    assert.deepEqual(source.facts.map((fact) => fact.text), [...scenario.facts]);
+    assert.ok(source.facts.every((fact) => fact.text.length > 0 && !/^\.+$/.test(fact.text)));
+
+    const pages = paginateSource(source, [201, 202]);
+    assert.deepEqual(pages.map((page) => page.sourceSections[0].body), [...scenario.facts]);
+    assert.deepEqual(
+      pages.flatMap((page) => page.originalSourceFactIds),
+      source.facts.map((fact) => fact.id),
+    );
+  });
+}
+
 test("paginator keeps adjacent Chinese sentences naturally unspaced", () => {
   const source = normalizeSource({
     sections: [{

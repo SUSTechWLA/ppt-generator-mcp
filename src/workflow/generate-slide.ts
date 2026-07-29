@@ -9,6 +9,7 @@ import type { TemplateProfile, TemplateSelection } from "../domain/template-prof
 import { asWorkflowError } from "../domain/workflow-error.js";
 import type { ComposeResult } from "../services/slide-composer.js";
 import type { ExternalAsset } from "../services/asset-generator.js";
+import { validateFactReferences } from "../services/slide-spec-builder.js";
 import type { ActiveRun, RunStore } from "./run-store.js";
 import type { QualityLoopResult } from "./quality-loop.js";
 
@@ -84,7 +85,13 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
   }
 
   const source = await runStage(deps.runStore, run, "normalize_input", () => deps.normalizeSource(input));
-  const spec = await runStage(deps.runStore, run, "build_slide_spec", () => deps.buildSlideSpec(source, input.audience));
+  const spec = await runStage(deps.runStore, run, "build_slide_spec", async () => {
+    if (input.plannedSpec) {
+      validateFactReferences(source, input.plannedSpec);
+      return input.plannedSpec;
+    }
+    return deps.buildSlideSpec(source, input.audience);
+  });
   const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug));
   const assets = await runStage(deps.runStore, run, "generate_assets", () => deps.generateAssets(run.runId, spec.assets, input.externalAssets));
   const initialPage = await runStage(deps.runStore, run, "compose_html", () => deps.composeSlide(spec, selection, assets));

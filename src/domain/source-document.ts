@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import * as z from "zod/v4";
+import { slideSpecSchema } from "./slide-spec.js";
 
 export const sourceSectionInputSchema = z.object({
   heading: z.string().trim().min(1).max(120),
@@ -22,6 +23,7 @@ export const generateSlideInputSchema = z.object({
   sections: z.array(sourceSectionInputSchema).min(1).max(50).optional(),
   templateSlug: z.string().regex(/^[a-z0-9-]+$/).optional(),
   audience: z.string().trim().max(200).optional(),
+  plannedSpec: slideSpecSchema.optional(),
   externalAssets: z.array(externalAssetInputSchema).max(6).optional(),
   quality: qualitySettingsSchema,
   requestId: z.string().trim().min(8).max(128).optional(),

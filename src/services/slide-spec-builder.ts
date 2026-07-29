@@ -13,7 +13,7 @@ export const SLIDE_SPEC_SYSTEM_PROMPT = `你是中文商务投标单页信息设
 5. 图片必须有完整中文 alt；图片规格固定 1792×1024；ID 从 img-001 连续编号。
 6. 输出必须严格符合 SlideSpec JSON 结构，不要 Markdown，不要解释。`;
 
-function validateFactReferences(source: SourceDocument, spec: SlideSpec): void {
+export function validateFactReferences(source: SourceDocument, spec: SlideSpec): void {
   const allowed = new Set(source.facts.map((fact) => fact.id));
   const referenced = new Set([
     ...spec.sourceFactIds,

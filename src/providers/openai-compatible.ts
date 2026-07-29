@@ -1,6 +1,6 @@
 import type { AppConfig, ProviderProfile } from "../config/env.js";
 import { WorkflowError } from "../domain/workflow-error.js";
-import type { GeneratedImage, ProviderBundle } from "./contracts.js";
+import type { GeneratedImage, ImageProvider, ProviderBundle, ReviewProvider, TextProvider } from "./contracts.js";
 
 interface Runtime {
   sleep: (milliseconds: number) => Promise<void>;
@@ -180,6 +180,77 @@ export function createOpenAICompatibleProviders(
         }, runtime, timeout);
         return extractMessageJson(raw);
       },
+    },
+  };
+}
+
+function mergedRuntime(runtimeOverrides: Partial<Runtime>): Runtime {
+  return { ...defaultRuntime, ...runtimeOverrides };
+}
+
+export function createOpenAICompatibleTextProvider(
+  profile: ProviderProfile,
+  timeoutMs = 60_000,
+  runtimeOverrides: Partial<Runtime> = {},
+): TextProvider {
+  const runtime = mergedRuntime(runtimeOverrides);
+  return {
+    async generateJson(input) {
+      const raw = await requestJson(profile, "chat/completions", {
+        model: profile.model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: input.system },
+          { role: "user", content: JSON.stringify({ schemaName: input.schemaName, payload: input.payload }) },
+        ],
+      }, runtime, timeoutMs);
+      return extractMessageJson(raw);
+    },
+  };
+}
+
+export function createOpenAICompatibleImageProvider(
+  profile: ProviderProfile,
+  timeoutMs = 60_000,
+  runtimeOverrides: Partial<Runtime> = {},
+): ImageProvider {
+  const runtime = mergedRuntime(runtimeOverrides);
+  return {
+    async generate(input): Promise<GeneratedImage> {
+      const raw = await requestJson(profile, "images/generations", {
+        model: profile.model,
+        prompt: input.prompt,
+        size: input.size,
+        n: 1,
+        response_format: "b64_json",
+      }, runtime, timeoutMs) as { data?: Array<{ b64_json?: string; url?: string }> };
+      const first = raw.data?.[0];
+      if (first?.b64_json) return { kind: "base64", data: first.b64_json, mimeType: "image/png" };
+      if (first?.url) return { kind: "url", url: first.url };
+      throw new WorkflowError({ code: "ASSET_FAILED", stage: "provider_response", retryable: false, message: "Image provider returned no image" });
+    },
+  };
+}
+
+export function createOpenAICompatibleReviewProvider(
+  profile: ProviderProfile,
+  timeoutMs = 60_000,
+  runtimeOverrides: Partial<Runtime> = {},
+): ReviewProvider {
+  const runtime = mergedRuntime(runtimeOverrides);
+  return {
+    async review(input) {
+      const raw = await requestJson(profile, "chat/completions", {
+        model: profile.model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: input.system },
+          { role: "user", content: [{ type: "text", text: JSON.stringify(input.payload) }, { type: "image_url", image_url: { url: input.screenshotDataUrl } }] },
+        ],
+      }, runtime, timeoutMs);
+      return extractMessageJson(raw);
     },
   };
 }

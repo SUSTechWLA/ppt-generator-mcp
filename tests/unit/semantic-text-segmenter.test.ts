@@ -21,3 +21,37 @@ test("semantic segmenter supports Chinese punctuation without inventing gaps", (
     { text: "最终归档。", start: 11, end: 16, gapBefore: "" },
   ]);
 });
+
+test("semantic segmenter keeps ordered-list periods attached to their clauses", () => {
+  assert.deepEqual(segmentSemanticText("1. Inspect power; 2. Inspect network."), [
+    { text: "1. Inspect power;", start: 0, end: 17, gapBefore: "" },
+    { text: "2. Inspect network.", start: 18, end: 37, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter keeps URL, domain, and email periods inside their sentence", () => {
+  const firstSentence = "Visit www.example.com or https://docs.example.com, then email name@example.com.";
+  const secondSentence = "Arrive onsite.";
+  const input = `${firstSentence} ${secondSentence}`;
+
+  assert.deepEqual(segmentSemanticText(input), [
+    { text: firstSentence, start: 0, end: firstSentence.length, gapBefore: "" },
+    {
+      text: secondSentence,
+      start: firstSentence.length + 1,
+      end: input.length,
+      gapBefore: " ",
+    },
+  ]);
+});
+
+test("semantic segmenter keeps initialisms inside genuine English sentence boundaries", () => {
+  const firstSentence = "Use e.g. local checks and i.e. alternate checks with the U.S. team.";
+  const input = `${firstSentence} Response complete. Arrive onsite.`;
+
+  assert.deepEqual(segmentSemanticText(input).map((segment) => segment.text), [
+    firstSentence,
+    "Response complete.",
+    "Arrive onsite.",
+  ]);
+});

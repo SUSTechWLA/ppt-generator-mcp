@@ -122,6 +122,24 @@ test("paginator aligns ASCII semicolon list clauses with source facts", () => {
   );
 });
 
+test("paginator keeps protected ASCII periods out of fragment facts and pages", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "Inspection checklist",
+      body: "1. Inspect www.example.com; 2. Email name@example.com and follow the U.S. guide.",
+    }],
+  });
+
+  assert.deepEqual(source.facts.map((fact) => fact.text), [
+    "1. Inspect www.example.com;",
+    "2. Email name@example.com and follow the U.S. guide.",
+  ]);
+
+  const pages = paginateSource(source, [94, 95]);
+  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), source.facts.map((fact) => fact.text));
+  assert.deepEqual(pages.map((page) => page.originalSourceFactIds), [["fact-1"], ["fact-2"]]);
+});
+
 test("paginator keeps adjacent Chinese sentences naturally unspaced", () => {
   const source = normalizeSource({
     sections: [{

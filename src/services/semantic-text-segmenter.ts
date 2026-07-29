@@ -23,6 +23,34 @@ function isDecimalPoint(value: string, index: number): boolean {
     && /\d/.test(value[index + 1] ?? "");
 }
 
+function isOrderedListMarkerPeriod(value: string, index: number, segmentStart: number): boolean {
+  return value[index] === "."
+    && /^\d+$/.test(value.slice(segmentStart, index).trim())
+    && /\s/.test(value[index + 1] ?? "");
+}
+
+function isLetterOrNumber(character: string | undefined): boolean {
+  return character !== undefined && /[\p{L}\p{N}]/u.test(character);
+}
+
+function isTokenInternalPeriod(value: string, index: number): boolean {
+  return value[index] === "."
+    && isLetterOrNumber(value[index - 1])
+    && isLetterOrNumber(value[index + 1]);
+}
+
+function isInitialismPeriod(value: string, index: number): boolean {
+  if (value[index] !== ".") return false;
+
+  let cursor = index;
+  let groupCount = 0;
+  while (cursor > 0 && value[cursor] === "." && /\p{L}/u.test(value[cursor - 1])) {
+    groupCount += 1;
+    cursor -= 2;
+  }
+  return groupCount >= 2 && !isLetterOrNumber(value[cursor]);
+}
+
 export function segmentSemanticText(value: string): SemanticTextSegment[] {
   const segments: SemanticTextSegment[] = [];
   const quoteStack: string[] = [];
@@ -74,7 +102,11 @@ export function segmentSemanticText(value: string): SemanticTextSegment[] {
       pushSegment(index);
       continue;
     }
-    if (!isTerminal(character) || isDecimalPoint(value, index)) continue;
+    if (!isTerminal(character)
+      || isDecimalPoint(value, index)
+      || isOrderedListMarkerPeriod(value, index, segmentStart)
+      || isTokenInternalPeriod(value, index)
+      || isInitialismPeriod(value, index)) continue;
     pushSegment(index + 1);
   }
 

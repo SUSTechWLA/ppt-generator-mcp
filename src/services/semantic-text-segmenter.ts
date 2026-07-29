@@ -17,6 +17,9 @@ const QUOTE_PAIRS: Readonly<Record<string, string>> = {
 const ENGLISH_PERIOD_POLICY = {
   titleAbbreviations: new Set(["dr", "mr", "mrs", "ms", "prof"]),
   labelAbbreviations: new Set(["eq", "fig", "no", "sec", "vol"]),
+  companySuffixAbbreviations: new Set(["co", "corp", "inc", "llc", "ltd", "plc"]),
+  addressAbbreviations: new Set(["ft", "mt", "st"]),
+  locationPrepositions: new Set(["at", "from", "in", "near", "to"]),
   continuationInitialisms: new Set(["eg", "ie"]),
   organizationContinuations: new Set([
     "administration",
@@ -103,6 +106,10 @@ function wordAt(value: string, index: number): string {
   return value.slice(index, end);
 }
 
+function isTitleCaseWord(value: string): boolean {
+  return /^\p{Lu}[\p{L}\p{N}]*$/u.test(value);
+}
+
 function isContextualNumberedMarker(value: string, index: number, segmentStart: number): boolean {
   let start = index;
   while (start > 0 && /\d/.test(value[start - 1])) start -= 1;
@@ -116,14 +123,27 @@ function isContextualNumberedMarker(value: string, index: number, segmentStart: 
   return ENGLISH_PERIOD_POLICY.enumerativeCues.has(wordBefore(value, previousIndex + 1).toLowerCase());
 }
 
-function isClosedClassAbbreviation(value: string, index: number): boolean {
+function isClosedClassAbbreviation(value: string, index: number, segmentStart: number): boolean {
   const abbreviation = wordBefore(value, index).toLowerCase();
   if (!/\s/.test(value[index + 1] ?? "")) return false;
   const nextIndex = nextNonWhitespaceIndex(value, index + 1);
   const nextToken = wordAt(value, nextIndex);
+  if (/^\p{Ll}/u.test(nextToken)) {
+    return ENGLISH_PERIOD_POLICY.titleAbbreviations.has(abbreviation)
+      || ENGLISH_PERIOD_POLICY.labelAbbreviations.has(abbreviation)
+      || ENGLISH_PERIOD_POLICY.companySuffixAbbreviations.has(abbreviation)
+      || ENGLISH_PERIOD_POLICY.addressAbbreviations.has(abbreviation);
+  }
   if (ENGLISH_PERIOD_POLICY.titleAbbreviations.has(abbreviation)) return nextToken.length > 0;
-  if (!ENGLISH_PERIOD_POLICY.labelAbbreviations.has(abbreviation)) return false;
-  return /^\d/.test(nextToken) || /^[A-Z]$/.test(nextToken);
+  if (ENGLISH_PERIOD_POLICY.labelAbbreviations.has(abbreviation)) {
+    return /^\d/.test(nextToken) || /^[A-Z]$/.test(nextToken);
+  }
+  if (!ENGLISH_PERIOD_POLICY.addressAbbreviations.has(abbreviation) || !isTitleCaseWord(nextToken)) return false;
+
+  const abbreviationStart = index - abbreviation.length;
+  if (value.slice(segmentStart, abbreviationStart).trim() === "") return true;
+  const previousIndex = previousNonWhitespaceIndex(value, abbreviationStart - 1);
+  return ENGLISH_PERIOD_POLICY.locationPrepositions.has(wordBefore(value, previousIndex + 1).toLowerCase());
 }
 
 function initialismContinues(value: string, index: number, initialism: string): boolean {
@@ -131,7 +151,10 @@ function initialismContinues(value: string, index: number, initialism: string): 
   if (nextIndex >= value.length) return false;
   if (ENGLISH_PERIOD_POLICY.continuationInitialisms.has(initialism.toLowerCase())) return true;
   if (/[\p{Ll}\p{N}]/u.test(value[nextIndex])) return true;
-  return ENGLISH_PERIOD_POLICY.organizationContinuations.has(wordAt(value, nextIndex).toLowerCase());
+  const nextToken = wordAt(value, nextIndex);
+  if (ENGLISH_PERIOD_POLICY.organizationContinuations.has(nextToken.toLowerCase())) return true;
+  const followingIndex = nextNonWhitespaceIndex(value, nextIndex + nextToken.length);
+  return isTitleCaseWord(nextToken) && isTitleCaseWord(wordAt(value, followingIndex));
 }
 
 function classifyPeriod(value: string, index: number, segmentStart: number): PeriodDecision {
@@ -139,9 +162,10 @@ function classifyPeriod(value: string, index: number, segmentStart: number): Per
   while (value[runEnd] === ".") runEnd += 1;
   if (runEnd - index >= 2) return { kind: "terminal", end: runEnd };
 
-  if (isDecimalPoint(value, index)
+  if (value[nextNonWhitespaceIndex(value, index + 1)] === ","
+    || isDecimalPoint(value, index)
     || isContextualNumberedMarker(value, index, segmentStart)
-    || isClosedClassAbbreviation(value, index)
+    || isClosedClassAbbreviation(value, index, segmentStart)
     || isTokenInternalPeriod(value, index)) return { kind: "protected" };
 
   const initialism = initialismBefore(value, index);
@@ -153,6 +177,8 @@ export function segmentSemanticText(value: string): SemanticTextSegment[] {
   const segments: SemanticTextSegment[] = [];
   const quoteStack: string[] = [];
   let segmentStart = 0;
+  let pendingPunctuationStart: number | undefined;
+  let pendingPunctuationEnd = 0;
 
   const pushSegment = (end: number): void => {
     let start = segmentStart;
@@ -160,7 +186,8 @@ export function segmentSemanticText(value: string): SemanticTextSegment[] {
     while (start < trimmedEnd && /\s/.test(value[start])) start += 1;
     while (trimmedEnd > start && /\s/.test(value[trimmedEnd - 1])) trimmedEnd -= 1;
 
-    if (trimmedEnd > start) {
+    if (trimmedEnd > start && /[\p{L}\p{N}]/u.test(value.slice(start, trimmedEnd))) {
+      if (pendingPunctuationStart !== undefined) start = pendingPunctuationStart;
       const previousEnd = segments.at(-1)?.end ?? 0;
       segments.push({
         text: value.slice(start, trimmedEnd),
@@ -168,6 +195,11 @@ export function segmentSemanticText(value: string): SemanticTextSegment[] {
         end: trimmedEnd,
         gapBefore: value.slice(previousEnd, start),
       });
+      pendingPunctuationStart = undefined;
+      pendingPunctuationEnd = 0;
+    } else if (trimmedEnd > start) {
+      pendingPunctuationStart ??= start;
+      pendingPunctuationEnd = trimmedEnd;
     }
 
     segmentStart = end;
@@ -219,5 +251,10 @@ export function segmentSemanticText(value: string): SemanticTextSegment[] {
   }
 
   pushSegment(value.length);
+  if (pendingPunctuationStart !== undefined && segments.length > 0) {
+    const previous = segments[segments.length - 1];
+    previous.text = value.slice(previous.start, pendingPunctuationEnd);
+    previous.end = pendingPunctuationEnd;
+  }
   return segments;
 }

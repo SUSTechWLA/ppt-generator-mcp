@@ -123,18 +123,83 @@ test("semantic segmenter uses label value context for an abbreviation period", (
 
 test("semantic segmenter preserves source traceability without punctuation-only fragments", () => {
   const inputs = [
+    'A 2.5 ready. "Keep. Together." Next;',
+    "1. Inspect power; 2. Inspect network.",
+    "Visit www.example.com, then email name@example.com. Arrive onsite.",
+    "Dr. Chen arrives. Use No. 1 channel.",
     "等待……继续检查。",
     "Wait... Continue checks.",
+    "Operations are in the U.S. Response complete. The U.S. team continues.",
     "The U.S. Army responds.",
+    "The U.N. Security Council met.",
     "Complete phase 2. Release starts.",
+    "Coverage reached 8. Next action begins.",
     "Scope includes 1. Inspect power;",
     "See Fig. Response complete.",
+    "……继续检查。",
+    "... Continue checks.",
+    "Wait. ... Continue checks.",
+    "Acme Co., Ltd. provides service.",
+    "Acme Inc. Response complete.",
+    "Meet at St. Louis office.",
+    "The U.S. Postal Service responds.",
   ];
+  const allowedShortClauses = new Set(["等待……"]);
 
   for (const input of inputs) {
     const segments = segmentSemanticText(input);
     assert.ok(segments.every((segment) => segment.text.length > 0 && !/^[.。！？!?；;…]+$/u.test(segment.text)));
     assert.ok(segments.every((segment) => input.slice(segment.start, segment.end) === segment.text));
+    assert.ok(segments.every((segment) => {
+      const lexicalLength = segment.text.match(/[\p{L}\p{N}]/gu)?.length ?? 0;
+      return lexicalLength > 2 || allowedShortClauses.has(segment.text);
+    }));
     assert.equal(segments.map((segment) => segment.gapBefore + segment.text).join(""), input);
   }
+});
+
+test("semantic segmenter attaches leading and standalone ellipses to following lexical text", () => {
+  assert.deepEqual(segmentSemanticText("……继续检查。"), [
+    { text: "……继续检查。", start: 0, end: 7, gapBefore: "" },
+  ]);
+  assert.deepEqual(segmentSemanticText("... Continue checks."), [
+    { text: "... Continue checks.", start: 0, end: 20, gapBefore: "" },
+  ]);
+  assert.deepEqual(segmentSemanticText("Wait. ... Continue checks."), [
+    { text: "Wait.", start: 0, end: 5, gapBefore: "" },
+    { text: "... Continue checks.", start: 6, end: 26, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter terminates punctuation-only input without emitting a segment", () => {
+  assert.deepEqual(segmentSemanticText("..."), []);
+  assert.deepEqual(segmentSemanticText("……"), []);
+  assert.deepEqual(segmentSemanticText("... …… ;；!?！？"), []);
+});
+
+test("semantic segmenter keeps company suffix continuations but preserves sentence boundaries", () => {
+  assert.deepEqual(segmentSemanticText("Acme Co., Ltd. provides service. Acme Inc. provides service."), [
+    { text: "Acme Co., Ltd. provides service.", start: 0, end: 32, gapBefore: "" },
+    { text: "Acme Inc. provides service.", start: 33, end: 60, gapBefore: " " },
+  ]);
+  assert.deepEqual(segmentSemanticText("Acme Inc. Response complete."), [
+    { text: "Acme Inc.", start: 0, end: 9, gapBefore: "" },
+    { text: "Response complete.", start: 10, end: 28, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter uses address syntax for abbreviated proper names", () => {
+  assert.deepEqual(segmentSemanticText("Meet at St. Louis office. Status is St. Response complete."), [
+    { text: "Meet at St. Louis office.", start: 0, end: 25, gapBefore: "" },
+    { text: "Status is St.", start: 26, end: 39, gapBefore: " " },
+    { text: "Response complete.", start: 40, end: 58, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter keeps multi-token proper names after initialisms", () => {
+  assert.deepEqual(segmentSemanticText("The U.S. Postal Service responds. The U.S. Response complete."), [
+    { text: "The U.S. Postal Service responds.", start: 0, end: 33, gapBefore: "" },
+    { text: "The U.S.", start: 34, end: 42, gapBefore: " " },
+    { text: "Response complete.", start: 43, end: 61, gapBefore: " " },
+  ]);
 });

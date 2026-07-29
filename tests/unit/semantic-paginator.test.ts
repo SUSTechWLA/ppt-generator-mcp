@@ -189,6 +189,48 @@ const contextualPeriodCases = [
     facts: ["See Fig.", "Response complete.", "See Fig. 2."],
     pageNumbers: [201, 202, 203],
   },
+  {
+    name: "a leading Unicode ellipsis",
+    body: "……继续检查。",
+    facts: ["……继续检查。"],
+    pageNumbers: [201],
+  },
+  {
+    name: "a leading ASCII ellipsis",
+    body: "... Continue checks.",
+    facts: ["... Continue checks."],
+    pageNumbers: [201],
+  },
+  {
+    name: "a standalone ellipsis between lexical clauses",
+    body: "Wait. ... Continue checks.",
+    facts: ["Wait.", "... Continue checks."],
+    pageNumbers: [201, 202],
+  },
+  {
+    name: "company suffix continuations",
+    body: "Acme Co., Ltd. provides service. Acme Inc. provides service.",
+    facts: ["Acme Co., Ltd. provides service.", "Acme Inc. provides service."],
+    pageNumbers: [201, 202],
+  },
+  {
+    name: "a sentence-final company suffix",
+    body: "Acme Inc. Response complete.",
+    facts: ["Acme Inc.", "Response complete."],
+    pageNumbers: [201, 202],
+  },
+  {
+    name: "address abbreviation syntax",
+    body: "Meet at St. Louis office. Status is St. Response complete.",
+    facts: ["Meet at St. Louis office.", "Status is St.", "Response complete."],
+    pageNumbers: [201, 202, 203],
+  },
+  {
+    name: "a multi-token proper name after an initialism",
+    body: "The U.S. Postal Service responds. The U.S. Response complete.",
+    facts: ["The U.S. Postal Service responds.", "The U.S.", "Response complete."],
+    pageNumbers: [201, 202, 203],
+  },
 ] as const;
 
 for (const scenario of contextualPeriodCases) {
@@ -208,6 +250,20 @@ for (const scenario of contextualPeriodCases) {
     );
   });
 }
+
+test("normalizer and paginator terminate punctuation-only source without emitting facts", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "Punctuation", body: "... …… ;；!?！？" }],
+  });
+
+  assert.deepEqual(source.facts, []);
+  assert.throws(
+    () => paginateSource(source, [301]),
+    (error: unknown) => error instanceof WorkflowError
+      && error.stage === "paginate_source"
+      && /does not contain extractable facts|0 dependency-safe partitions/.test(error.message),
+  );
+});
 
 test("paginator keeps adjacent Chinese sentences naturally unspaced", () => {
   const source = normalizeSource({

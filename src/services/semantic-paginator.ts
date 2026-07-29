@@ -99,7 +99,7 @@ function paginationError(message: string, recovery: string): never {
 }
 
 function matchesFact(value: string, factText: string): boolean {
-  return normalizeSentence(value).includes(normalizeSentence(factText));
+  return normalizeSentence(value) === normalizeSentence(factText);
 }
 
 function unitCost(text: string, factCount: number): number {

@@ -102,6 +102,7 @@ export const templateProfileSchema = z.object({
   densityRange: z.tuple([templateDensitySchema, templateDensitySchema]),
   maxCharsBySlot: z.record(z.string(), z.number().int().positive()),
   maxRasterAreaRatio: z.number().min(0).max(1),
+  minimumBodyFontPt: z.number().min(8).max(24),
   requiredLandmarks: z.array(semanticLandmarkSchema).min(1),
   documentCompatibility: z.object({
     bid: z.boolean(),

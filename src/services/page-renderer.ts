@@ -34,7 +34,9 @@ export interface RenderResult {
     opaqueRatio: number;
     luminanceVariance: number;
     isVector: boolean;
+    displayedArea: number;
   }>;
+  rasterAreaRatio: number;
   bodyScroll: { width: number; height: number };
   occupiedRatio: number;
   signals: {
@@ -150,14 +152,28 @@ export async function renderPage(input: { html: string; screenshotPath: string }
           }
         }
         const src = image.currentSrc || image.src;
-        return { src, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, opaqueRatio, luminanceVariance, isVector: src.startsWith("data:image/svg+xml") };
+        const rect = image.getBoundingClientRect();
+        return {
+          src,
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          opaqueRatio,
+          luminanceVariance,
+          isVector: src.startsWith("data:image/svg+xml"),
+          displayedArea: Math.max(0, rect.width) * Math.max(0, rect.height),
+        };
       }));
 
       const area = elements.reduce((sum, element) => sum + Math.min(element.rect.width * element.rect.height, 1123 * 794), 0);
+      const rasterArea = images
+        .filter((image) => !image.isVector)
+        .reduce((sum, image) => sum + image.displayedArea, 0);
       return {
         pageCount: document.querySelectorAll("[data-slide-page]").length,
         elements,
         images,
+        rasterAreaRatio: Math.min(1, rasterArea / (1123 * 794)),
         bodyScroll: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight },
         occupiedRatio: Math.min(1, area / (1123 * 794)),
       };

@@ -54,6 +54,7 @@
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 120, "image-caption": 120, "figure-ref": 30, "component-title": 30, "paragraph": 150, "step-label": 8, "stage-label": 8, "stage-number": 4, "item-label": 8, "node-label": 8, "bullet": 80 },
     "maxRasterAreaRatio": 0.18,
+    "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
@@ -100,8 +101,9 @@
     "densityRange": ["low", "high"],
     "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 110, "image-caption": 120, "figure-ref": 30, "component-title": 30, "paragraph": 145, "bullet": 80 },
     "maxRasterAreaRatio": 0.45,
+    "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
-    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
+    "documentCompatibility": { "bid": false, "proposal": false, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
@@ -125,9 +127,10 @@
         "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
-    "auxiliaryBindings": { "stepLabel": "step-label", "bullet": "bullet" },
+    "auxiliaryBindings": { "stepLabel": "step-label", "itemLabel": "item-label", "bullet": "bullet" },
     "auxiliaryCapacities": {
-      "stepLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
+      "stepLabel": { "itemCapacity": 4, "valuesPerItem": 1 },
+      "itemLabel": { "itemCapacity": 4, "valuesPerItem": 1 },
       "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
     "pageBindings": {
@@ -146,10 +149,11 @@
     "supportedBlocks": ["text", "image", "process", "metric"],
     "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 1, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["low", "medium"],
-    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 100, "image-caption": 120, "component-title": 30, "paragraph": 100, "step-label": 8, "bullet": 80 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 100, "image-caption": 120, "component-title": 30, "paragraph": 100, "step-label": 8, "item-label": 8, "bullet": 80 },
     "maxRasterAreaRatio": 0.55,
+    "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
-    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
+    "documentCompatibility": { "bid": false, "proposal": false, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
@@ -196,6 +200,7 @@
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 110, "component-title": 30, "paragraph": 180, "table-header": 20, "table-cell": 24, "bullet": 80 },
     "maxRasterAreaRatio": 0,
+    "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
@@ -255,6 +260,7 @@
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 110, "image-caption": 120, "component-title": 30, "paragraph": 130, "table-header": 20, "table-cell": 24, "stage-label": 8, "stage-number": 4, "bullet": 80 },
     "maxRasterAreaRatio": 0.18,
+    "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
@@ -313,6 +319,7 @@
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 100, "image-caption": 120, "figure-ref": 30, "component-title": 30, "paragraph": 125, "table-header": 20, "table-cell": 22, "item-label": 8, "bullet": 80 },
     "maxRasterAreaRatio": 0.18,
+    "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",

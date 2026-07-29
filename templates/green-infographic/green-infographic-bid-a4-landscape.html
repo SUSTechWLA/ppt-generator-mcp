@@ -86,12 +86,12 @@
 
     <main class="body-grid">
       <!-- Row 1: text-card(span-8) + icon-process(span-4) -->
-      <section class="component text-card span-8" data-component="text-card">
+      <section class="component text-card span-8" data-component="text-card" data-semantic-slot="main-content">
         <h4 class="component-title"><component-title>卡片标题一</component-title></h4>
         <p data-source-paragraph="1"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
       </section>
 
-      <section class="component icon-process span-4" data-component="icon-process" aria-label="流程名称">
+      <section class="component icon-process span-4" data-component="icon-process" data-min-semantic-items="2" aria-label="流程名称">
         <div class="process-step">
           <icon name="calendar">日历图标</icon>
           <span><step-label>步骤一</step-label></span>
@@ -119,7 +119,7 @@
       </section>
 
       <!-- Row 2: text-card(span-8) + image-card(span-4) -->
-      <section class="component text-card span-8" data-component="text-card">
+      <section class="component text-card span-8" data-component="text-card" data-semantic-slot="main-content">
         <h4 class="component-title"><component-title>卡片标题二</component-title></h4>
         <p data-source-paragraph="2"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
       </section>
@@ -130,12 +130,12 @@
       </figure>
 
       <!-- Row 3: text-card(span-8) + timeline(span-4) -->
-      <section class="component text-card span-8" data-component="text-card">
+      <section class="component text-card span-8" data-component="text-card" data-semantic-slot="main-content">
         <h4 class="component-title"><component-title>卡片标题三</component-title></h4>
         <p data-source-paragraph="3"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
       </section>
 
-      <section class="component timeline span-4" data-component="timeline" aria-label="时间线名称">
+      <section class="component timeline span-4" data-component="timeline" data-min-semantic-items="2" aria-label="时间线名称">
         <div class="timeline-stage season-spring"><strong><stage-number>01</stage-number></strong><span><stage-label>阶段一</stage-label></span></div>
         <div class="timeline-stage season-summer"><strong><stage-number>02</stage-number></strong><span><stage-label>阶段二</stage-label></span></div>
         <div class="timeline-stage season-autumn"><strong><stage-number>03</stage-number></strong><span><stage-label>阶段三</stage-label></span></div>
@@ -143,12 +143,12 @@
       </section>
 
       <!-- Row 4: text-card(span-8) + capability-panel(span-4) -->
-      <section class="component text-card span-8" data-component="text-card">
+      <section class="component text-card span-8" data-component="text-card" data-semantic-slot="main-content">
         <h4 class="component-title"><component-title>卡片标题四</component-title></h4>
         <p data-source-paragraph="4"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
       </section>
 
-      <section class="component icon-process capability-panel span-4" data-component="icon-process" aria-label="能力面板名称">
+      <section class="component icon-process capability-panel span-4" data-component="icon-process" data-min-semantic-items="3" aria-label="能力面板名称">
         <div class="capability-grid">
           <div class="capability-item">
             <icon name="users-group">用户组图标</icon>
@@ -166,12 +166,12 @@
       </section>
 
       <!-- Row 5: text-card(span-8) + org-chart(span-4) -->
-      <section class="component text-card span-8" data-component="text-card">
+      <section class="component text-card span-8" data-component="text-card" data-semantic-slot="main-content">
         <h4 class="component-title"><component-title>卡片标题五</component-title></h4>
         <p data-source-paragraph="5"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
       </section>
 
-      <section class="component org-chart span-4" data-component="org-chart" aria-label="组织架构名称">
+      <section class="component org-chart span-4" data-component="org-chart" data-min-semantic-items="3" aria-label="组织架构名称">
         <div class="org-level">
           <div class="org-node"><node-label>节点名称一</node-label></div>
         </div>

@@ -7,7 +7,13 @@ export interface DeterministicReport {
   issues: QualityIssue[];
 }
 
-export function evaluateDeterministic(render: RenderResult): DeterministicReport {
+export interface DeterministicEvaluationPolicy {
+  maxRasterAreaRatio?: number;
+  maximumRasterAssets?: number;
+  minimumBodyFontPt?: number;
+}
+
+export function evaluateDeterministic(render: RenderResult, policy: DeterministicEvaluationPolicy = {}): DeterministicReport {
   const issues: QualityIssue[] = [];
   let safeToReturn = true;
   let hardGatePassed = true;
@@ -28,6 +34,26 @@ export function evaluateDeterministic(render: RenderResult): DeterministicReport
     issue({ severity: "error", category: "layout", evidence: `页面滚动尺寸 ${render.bodyScroll.width}×${render.bodyScroll.height} 超过画布`, suggestedAction: "压缩内容或切换更高容量模板" });
   }
 
+  const minimumBodyFontPt = policy.minimumBodyFontPt ?? 8.5;
+  const minimumBodyFontPx = minimumBodyFontPt * (96 / 72);
+  if (policy.maxRasterAreaRatio !== undefined && render.rasterAreaRatio > policy.maxRasterAreaRatio + 0.001) {
+    issue({
+      severity: "error",
+      category: "asset",
+      evidence: `位图面积占比 ${(render.rasterAreaRatio * 100).toFixed(1)}% 超过上限 ${(policy.maxRasterAreaRatio * 100).toFixed(1)}%`,
+      suggestedAction: "缩小位图容器或切换低位图占比模板",
+    });
+  }
+  const rasterAssetCount = render.images.filter((image) => !image.isVector).length;
+  if (policy.maximumRasterAssets !== undefined && rasterAssetCount > policy.maximumRasterAssets) {
+    issue({
+      severity: "error",
+      category: "asset",
+      evidence: `位图资产数量 ${rasterAssetCount} 超过上限 ${policy.maximumRasterAssets}`,
+      suggestedAction: "减少位图资产或切换兼容模板",
+    });
+  }
+
   for (const element of render.elements) {
     const { rect } = element;
     if (rect.x < -1 || rect.y < -1 || rect.x + rect.width > render.viewport.width + 1 || rect.y + rect.height > render.viewport.height + 1) {
@@ -38,8 +64,8 @@ export function evaluateDeterministic(render: RenderResult): DeterministicReport
     if (clippedHorizontally || clippedVertically) {
       issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} 存在文本滚动溢出`, suggestedAction: "定向改写该模块或切换模板" });
     }
-    if (element.text && element.fontSize < 11.3) {
-      issue({ severity: "error", category: "readability", targetId: element.id, evidence: `字号 ${element.fontSize.toFixed(1)}px 低于最小可读值`, suggestedAction: "提高字号并压缩文案" });
+    if (element.text && element.fontSize + 0.05 < minimumBodyFontPx) {
+      issue({ severity: "error", category: "readability", targetId: element.id, evidence: `字号 ${element.fontSize.toFixed(1)}px 低于 ${minimumBodyFontPt}pt 最小可读值`, suggestedAction: "提高字号并压缩文案" });
     }
     const minimumContrast = element.largeText ? 3 : 4.5;
     if (element.text && element.contrastMeasurable && element.contrastRatio < minimumContrast) {

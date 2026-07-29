@@ -15,6 +15,7 @@ export const planDeckInputSchema = z.object({
   pageNumbers: z.array(z.number().int().min(1).max(9999)).min(1).max(30),
   documentType: documentTypeSchema.default("bid"),
   templateSlug: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
   audience: z.string().trim().max(200).optional(),
   quality: qualitySettingsSchema,
   requestId: z.string().trim().min(8).max(128).optional(),
@@ -40,6 +41,7 @@ export const plannedDeckSchema = z.object({
   deckPlanId: z.string().uuid(),
   sourceHash: z.string().length(64),
   documentType: documentTypeSchema,
+  preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
   pageNumbers: z.array(z.number().int().positive()),
   slides: z.array(deckSlidePlanSchema).min(1).max(30),
 }).strict();

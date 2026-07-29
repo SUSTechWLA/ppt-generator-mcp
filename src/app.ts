@@ -18,7 +18,7 @@ import { renderPage, type RenderResult } from "./services/page-renderer.js";
 import { executeRepairs } from "./services/repair-executor.js";
 import { evaluateSlide } from "./services/slide-evaluator.js";
 import { buildSlideSpec } from "./services/slide-spec-builder.js";
-import { loadTemplateProfiles, selectTemplate } from "./services/template-selector.js";
+import { getDocumentTemplatePolicy, loadTemplateProfiles, selectTemplate } from "./services/template-selector.js";
 import { loadTemplate } from "./lib/template-parser.js";
 import { runQualityLoop } from "./workflow/quality-loop.js";
 import { RunStore } from "./workflow/run-store.js";
@@ -49,7 +49,7 @@ export function createProductionDependencies(
     buildSlideSpec: async (source, audience) => textProvider
       ? buildSlideSpec(source, textProvider, audience)
       : buildDeterministicSlideSpec(source),
-    selectTemplate: (spec, forcedSlug, documentType) => selectTemplate(spec, profiles, forcedSlug, documentType),
+    selectTemplate: (spec, forcedSlug, documentType, preferredThemeId) => selectTemplate(spec, profiles, forcedSlug, documentType, preferredThemeId),
     generateAssets: async (runId, specs, externalAssets) => generateAssets({
       specs,
       provider: imageProvider,
@@ -106,7 +106,14 @@ export function createProductionDependencies(
         evaluate: async ({ state, attempt, composed }) => {
           const render = renderByAttempt.get(attempt);
           if (!render) throw new Error(`Render result missing for attempt ${attempt}`);
-          const deterministic = evaluateDeterministic(render);
+          const profile = profiles.find((candidate) => candidate.slug === state.templateSlug);
+          if (!profile) throw new Error(`Approved profile not found: ${state.templateSlug}`);
+          const policy = getDocumentTemplatePolicy(workflowInput.documentType ?? "presentation");
+          const deterministic = evaluateDeterministic(render, {
+            maxRasterAreaRatio: Math.min(profile.maxRasterAreaRatio, policy.maxRasterAreaRatio),
+            maximumRasterAssets: policy.maxImageAssets,
+            minimumBodyFontPt: Math.max(profile.minimumBodyFontPt, policy.minimumBodyFontPt),
+          });
           const quality = await evaluateSlide({
             source: workflowInput.source,
             spec: state.spec,
@@ -123,7 +130,7 @@ export function createProductionDependencies(
           actions,
           source: workflowInput.source,
           switchTemplate: async (current) => {
-            const selection = selectTemplate(current.spec, profiles, undefined, workflowInput.documentType);
+            const selection = selectTemplate(current.spec, profiles, undefined, workflowInput.documentType, workflowInput.preferredThemeId);
             return selection.candidates.find((candidate) => candidate.slug !== current.templateSlug)?.slug ?? current.templateSlug;
           },
           regenerateAsset: async (assetId, current) => {

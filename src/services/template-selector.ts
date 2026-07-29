@@ -21,6 +21,8 @@ const DENSITIES = ["low", "medium", "high"] as const;
 export interface DocumentTemplatePolicy {
   documentType: DocumentType;
   maxRasterAreaRatio: number;
+  maxImageAssets: number;
+  minimumBodyFontPt: number;
   requiredLandmarks: SemanticLandmark[];
   requiredSupportedRoles: SemanticRole[];
   minimumSemanticSlotCapacity: number;
@@ -30,6 +32,8 @@ const DOCUMENT_POLICIES: Record<DocumentType, DocumentTemplatePolicy> = {
   bid: {
     documentType: "bid",
     maxRasterAreaRatio: 0.18,
+    maxImageAssets: 1,
+    minimumBodyFontPt: 8.5,
     requiredLandmarks: ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     requiredSupportedRoles: ["fact", "evidence", "metric", "process"],
     minimumSemanticSlotCapacity: 1,
@@ -37,6 +41,8 @@ const DOCUMENT_POLICIES: Record<DocumentType, DocumentTemplatePolicy> = {
   proposal: {
     documentType: "proposal",
     maxRasterAreaRatio: 0.35,
+    maxImageAssets: 4,
+    minimumBodyFontPt: 8.5,
     requiredLandmarks: ["page-header", "subsection-title", "summary-band", "page-footer"],
     requiredSupportedRoles: ["fact", "metric"],
     minimumSemanticSlotCapacity: 1,
@@ -44,6 +50,8 @@ const DOCUMENT_POLICIES: Record<DocumentType, DocumentTemplatePolicy> = {
   presentation: {
     documentType: "presentation",
     maxRasterAreaRatio: 0.65,
+    maxImageAssets: 12,
+    minimumBodyFontPt: 8.5,
     requiredLandmarks: ["page-header", "page-footer"],
     requiredSupportedRoles: ["fact"],
     minimumSemanticSlotCapacity: 1,
@@ -52,6 +60,32 @@ const DOCUMENT_POLICIES: Record<DocumentType, DocumentTemplatePolicy> = {
 
 export function getDocumentTemplatePolicy(documentType: DocumentType): DocumentTemplatePolicy {
   return DOCUMENT_POLICIES[documentType];
+}
+
+export interface TemplateProfileAudit {
+  slug: string;
+  themeId: string;
+  approved: boolean;
+  rejectionReasons: string[];
+  compatibleIntents: PageIntent[];
+  capacity: {
+    blocks: number;
+    semanticItems: number;
+    maxAssets: number;
+    maxRasterAreaRatio: number;
+    minimumBodyFontPt: number;
+  };
+}
+
+export interface TemplateFamilyAudit {
+  documentType: DocumentType;
+  policy: DocumentTemplatePolicy;
+  families: Array<{
+    themeId: string;
+    approvedProfiles: string[];
+    rejectedProfiles: Array<{ slug: string; reasons: string[] }>;
+    profiles: TemplateProfileAudit[];
+  }>;
 }
 
 function findProfileCatalogs(root: string): string[] {
@@ -198,6 +232,20 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
         throw new Error(`Template profile ${profile.slug} binding ${tag} cardinality ${declaredCount} does not match placeholder count ${actualCount}`);
       }
     }
+    const templateDocument = new JSDOM(template.html).window.document;
+    const declaredSlotIds = new Set(profile.semanticSlots.map((slot) => slot.id));
+    for (const slot of profile.semanticSlots) {
+      const markerCount = templateDocument.querySelectorAll(`[data-semantic-slot="${slot.id}"]`).length;
+      if (markerCount !== slot.itemCapacity) {
+        throw new Error(`Template profile ${profile.slug} semantic item marker ${slot.id} count ${markerCount} does not match item capacity ${slot.itemCapacity}`);
+      }
+    }
+    const undeclaredMarkers = Array.from(templateDocument.querySelectorAll("[data-semantic-slot]"))
+      .map((element) => element.getAttribute("data-semantic-slot") ?? "")
+      .filter((slotId) => !declaredSlotIds.has(slotId));
+    if (undeclaredMarkers.length > 0) {
+      throw new Error(`Template profile ${profile.slug} has undeclared semantic item markers: ${[...new Set(undeclaredMarkers)].join(", ")}`);
+    }
     const actualImageSlots = template.placeholders.find((placeholder) => placeholder.tag === profile.imageSlots.placeholderTag)?.count ?? 0;
     if (actualImageSlots !== profile.imageSlots.placeholderCount || profile.imageSlots.maxAssets !== actualImageSlots) {
       throw new Error(`Template profile ${profile.slug} image slot capacity ${profile.imageSlots.placeholderCount} does not match HTML count ${actualImageSlots}`);
@@ -311,6 +359,62 @@ function emittedCapacityErrors(content: PageBlueprint | SlideSpec, profile: Temp
   return [...new Set(errors)];
 }
 
+function profilePolicyErrors(profile: TemplateProfile, policy: DocumentTemplatePolicy): string[] {
+  const errors: string[] = [];
+  if (!profile.documentCompatibility[policy.documentType]) errors.push(`不支持 ${policy.documentType} 文档`);
+  if (profile.maxRasterAreaRatio > policy.maxRasterAreaRatio) {
+    errors.push(`位图面积上限 ${profile.maxRasterAreaRatio} 超过策略 ${policy.maxRasterAreaRatio}`);
+  }
+  if (profile.imageSlots.maxAssets > policy.maxImageAssets) {
+    errors.push(`图片槽位上限 ${profile.imageSlots.maxAssets} 超过策略 ${policy.maxImageAssets}`);
+  }
+  if (profile.minimumBodyFontPt < policy.minimumBodyFontPt) {
+    errors.push(`正文字号下限 ${profile.minimumBodyFontPt}pt 低于策略 ${policy.minimumBodyFontPt}pt`);
+  }
+  const missingLandmarks = policy.requiredLandmarks.filter((landmark) => !profile.requiredLandmarks.includes(landmark));
+  if (missingLandmarks.length > 0) errors.push(`缺少必需语义结构：${missingLandmarks.join("、")}`);
+  const missingPolicyRoles = policy.requiredSupportedRoles.filter((role) => !profile.supportedRoles.includes(role));
+  if (missingPolicyRoles.length > 0) errors.push(`缺少文档策略必需语义能力：${missingPolicyRoles.join("、")}`);
+  const slotCapacity = profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
+  if (slotCapacity < policy.minimumSemanticSlotCapacity) errors.push("可读语义槽位不足");
+  return errors;
+}
+
+export function auditTemplateFamilies(profiles: TemplateProfile[], documentType: DocumentType): TemplateFamilyAudit {
+  const policy = getDocumentTemplatePolicy(documentType);
+  const byTheme = new Map<string, TemplateProfileAudit[]>();
+  for (const profile of profiles) {
+    const rejectionReasons = profilePolicyErrors(profile, policy);
+    const record: TemplateProfileAudit = {
+      slug: profile.slug,
+      themeId: profile.themeId,
+      approved: rejectionReasons.length === 0,
+      rejectionReasons,
+      compatibleIntents: rejectionReasons.length === 0 ? [...profile.pageIntents] : [],
+      capacity: {
+        blocks: profile.blockCapacity,
+        semanticItems: profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0),
+        maxAssets: profile.imageSlots.maxAssets,
+        maxRasterAreaRatio: profile.maxRasterAreaRatio,
+        minimumBodyFontPt: profile.minimumBodyFontPt,
+      },
+    };
+    byTheme.set(profile.themeId, [...(byTheme.get(profile.themeId) ?? []), record]);
+  }
+  return {
+    documentType,
+    policy: { ...policy, requiredLandmarks: [...policy.requiredLandmarks], requiredSupportedRoles: [...policy.requiredSupportedRoles] },
+    families: [...byTheme.entries()].map(([themeId, familyProfiles]) => ({
+      themeId,
+      approvedProfiles: familyProfiles.filter((profile) => profile.approved).map((profile) => profile.slug),
+      rejectedProfiles: familyProfiles
+        .filter((profile) => !profile.approved)
+        .map((profile) => ({ slug: profile.slug, reasons: [...profile.rejectionReasons] })),
+      profiles: familyProfiles,
+    })),
+  };
+}
+
 function compatibility(
   content: PageBlueprint | SlideSpec,
   profile: TemplateProfile,
@@ -318,16 +422,8 @@ function compatibility(
 ): string[] {
   const requested = contentCapabilities(content);
   const policy = getDocumentTemplatePolicy(documentType);
-  const errors: string[] = [];
-  if (!profile.documentCompatibility[documentType]) errors.push(`不支持 ${documentType} 文档`);
-  if (profile.maxRasterAreaRatio > policy.maxRasterAreaRatio) errors.push(`位图面积上限 ${profile.maxRasterAreaRatio} 超过策略 ${policy.maxRasterAreaRatio}`);
+  const errors: string[] = profilePolicyErrors(profile, policy);
   if (requested.visualRatio > profile.maxRasterAreaRatio) errors.push(`请求视觉占比 ${requested.visualRatio} 超过模板位图容量 ${profile.maxRasterAreaRatio}`);
-  const missingLandmarks = policy.requiredLandmarks.filter((landmark) => !profile.requiredLandmarks.includes(landmark));
-  if (missingLandmarks.length > 0) errors.push(`缺少必需语义结构：${missingLandmarks.join("、")}`);
-  const missingPolicyRoles = policy.requiredSupportedRoles.filter((role) => !profile.supportedRoles.includes(role));
-  if (missingPolicyRoles.length > 0) errors.push(`缺少文档策略必需语义能力：${missingPolicyRoles.join("、")}`);
-  const slotCapacity = profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
-  if (slotCapacity < policy.minimumSemanticSlotCapacity) errors.push("可读语义槽位不足");
   if (requested.blockCount > profile.blockCapacity) errors.push("内容模块超过模板容量");
   const unsupportedBlocks = [...new Set(requested.blockTypes.filter((type) => !profile.supportedBlocks.includes(type)))];
   if (unsupportedBlocks.length > 0) errors.push(`不支持模块类型：${unsupportedBlocks.join("、")}`);

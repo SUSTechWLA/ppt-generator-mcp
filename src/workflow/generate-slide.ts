@@ -24,6 +24,7 @@ export interface WorkflowQualityInput {
   initialPage: ComposeResult;
   quality: GenerateSlideRequest["quality"];
   documentType?: DocumentType;
+  preferredThemeId?: string;
   page?: PageMetadata;
 }
 
@@ -32,7 +33,7 @@ export interface WorkflowDependencies {
   profiles: TemplateProfile[];
   normalizeSource(input: GenerateSlideRequest): SourceDocument;
   buildSlideSpec(source: SourceDocument, audience?: string): Promise<SlideSpec>;
-  selectTemplate(spec: SlideSpec, forcedSlug?: string, documentType?: DocumentType): TemplateSelection;
+  selectTemplate(spec: SlideSpec, forcedSlug?: string, documentType?: DocumentType, preferredThemeId?: string): TemplateSelection;
   generateAssets(runId: string, specs: AssetSpec[], externalAssets?: ExternalAsset[]): Promise<GeneratedAsset[]>;
   composeSlide(spec: SlideSpec, selection: TemplateSelection, assets: GeneratedAsset[], page?: PageMetadata): Promise<ComposeResult>;
   runQualityLoop(input: WorkflowQualityInput): Promise<QualityLoopResult>;
@@ -95,7 +96,7 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
     }
     return deps.buildSlideSpec(source, input.audience);
   });
-  const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug, input.documentType));
+  const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug, input.documentType, input.preferredThemeId));
   const assets = await runStage(deps.runStore, run, "generate_assets", () => deps.generateAssets(run.runId, spec.assets, input.externalAssets));
   const initialPage = await runStage(deps.runStore, run, "compose_html", () => deps.composeSlide(spec, selection, assets, input.page));
   const profile = deps.profiles.find((candidate) => candidate.slug === selection.slug);
@@ -116,6 +117,7 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
     initialPage,
     quality: input.quality,
     documentType: input.documentType,
+    preferredThemeId: input.preferredThemeId,
     page: input.page,
   });
   for (const attempt of loop.attempts) {

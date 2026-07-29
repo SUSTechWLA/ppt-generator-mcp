@@ -46,3 +46,15 @@ test("does not treat visible font ink or monochrome SVG icons as broken layout",
   assert.equal(report.issues.some((issue) => issue.category === "layout" && issue.severity === "error"), false, JSON.stringify(report.issues));
   assert.equal(report.issues.some((issue) => issue.category === "asset" && /变化过低/.test(issue.evidence)), false, JSON.stringify(report.issues));
 });
+
+test("measures displayed raster area and enforces the selected document threshold", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-raster-"));
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XG9uAAAAAElFTkSuQmCC";
+  const html = `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}article{padding:20px}img{display:block;width:400px;height:200px}</style></head><body><article data-slide-page="1"><img src="data:image/png;base64,${png}" alt="测试图片"></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  assert.ok(render.rasterAreaRatio > 0.08 && render.rasterAreaRatio < 0.1, String(render.rasterAreaRatio));
+
+  const report = evaluateDeterministic(render, { maxRasterAreaRatio: 0.08, minimumBodyFontPt: 8.5 });
+  assert.equal(report.hardGatePassed, false);
+  assert.ok(report.issues.some((issue) => issue.category === "asset" && /位图面积/.test(issue.evidence)));
+});

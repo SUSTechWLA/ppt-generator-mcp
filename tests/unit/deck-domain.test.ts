@@ -22,6 +22,15 @@ test("deck input rejects duplicate or unordered page numbers", () => {
   }));
 });
 
+test("deck planning accepts a generic preferred theme identifier", () => {
+  const input = planDeckInputSchema.parse({
+    sourceMarkdown: "<page 7>\n标题：通用方案\n正文：完整正文内容满足展示页规划要求。",
+    pageNumbers: [7],
+    preferredThemeId: "green-infographic-v1",
+  });
+  assert.equal(input.preferredThemeId, "green-infographic-v1");
+});
+
 test("single-slide input accepts deck-scoped page metadata and asset ids", () => {
   const input = generateSlideInputSchema.parse({
     sourceText: "项目必须在30分钟内启动人员调配，并在1小时内到场。",

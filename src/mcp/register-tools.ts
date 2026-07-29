@@ -52,7 +52,7 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
     const source = dependencies.normalizeSource(input);
     const spec = input.plannedSpec ?? await dependencies.buildSlideSpec(source, input.audience);
     validateFactReferences(source, spec);
-    const selection = dependencies.selectTemplate(spec, input.templateSlug, input.documentType);
+    const selection = dependencies.selectTemplate(spec, input.templateSlug, input.documentType, input.preferredThemeId);
     const output = {
       sourceHash: source.sourceHash,
       facts: source.facts,

@@ -67,6 +67,7 @@ function profile(overrides: Record<string, unknown> = {}): TemplateProfile {
       "summary-text": 160,
     },
     maxRasterAreaRatio: 0.18,
+    minimumBodyFontPt: 8.5,
     requiredLandmarks: ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     documentCompatibility: { bid: true, proposal: true, presentation: true },
     format: "a4-landscape",

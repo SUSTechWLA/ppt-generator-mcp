@@ -23,6 +23,7 @@ export const generateSlideInputSchema = z.object({
   sourceText: z.string().trim().min(20).max(120_000).optional(),
   sections: z.array(sourceSectionInputSchema).min(1).max(50).optional(),
   templateSlug: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
   audience: z.string().trim().max(200).optional(),
   plannedSpec: slideSpecSchema.optional(),
   externalAssets: z.array(externalAssetInputSchema).max(6).optional(),

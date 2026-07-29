@@ -26,6 +26,15 @@ test("generate_slide accepts exactly one source input", () => {
   assert.equal(unknown.success, false);
 });
 
+test("generate_slide accepts a generic preferred theme identifier", () => {
+  const parsed = generateSlideInputSchema.safeParse({
+    sourceText: "# 项目方案\n\n正文内容足够长，可用于生成页面。",
+    preferredThemeId: "green-infographic-v1",
+  });
+  assert.equal(parsed.success, true);
+  if (parsed.success) assert.equal(parsed.data.preferredThemeId, "green-infographic-v1");
+});
+
 test("workflow config keeps provider secrets server-side", () => {
   const config = loadAppConfig({
     PPT_LLM_BASE_URL: "https://model.example/v1",

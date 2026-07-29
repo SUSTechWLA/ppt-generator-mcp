@@ -6,7 +6,7 @@ import type { GeneratedAsset, SlideSpec } from "../domain/slide-spec.js";
 import type { PageMetadata } from "../domain/document-context.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
 import type { ParsedTemplate } from "../lib/template-parser.js";
-import type { TemplateSlotSolution } from "./template-slot-solver.js";
+import { solveTemplateSlots, type TemplateSlotSolution } from "./template-slot-solver.js";
 import { fillPlaceholders } from "../tools/fill-placeholders.js";
 import { mapSlideContent } from "./slide-content-mapper.js";
 
@@ -105,9 +105,6 @@ function applyMarkersAndTokens(doc: Document, input: ComposeSlideInput): void {
   const pages = doc.querySelectorAll(".bid-page");
   if (pages.length !== 1) throw new Error(`Template must contain exactly one .bid-page; found ${pages.length}`);
   pages[0].setAttribute("data-slide-page", String(input.page?.number ?? 1));
-  input.spec.blocks.forEach((block, index) => {
-    doc.querySelectorAll("[data-component]")[index]?.setAttribute("data-block-id", block.id);
-  });
   const root = doc.documentElement;
   root.style.setProperty("--workflow-font-scale", String(input.designTokens?.fontScale ?? 1));
   root.style.setProperty("--workflow-spacing-scale", String(input.designTokens?.spacingScale ?? 1));
@@ -122,9 +119,38 @@ function scanResiduals(html: string): string[] {
   return warnings;
 }
 
+function prepareTemplateHtml(template: ParsedTemplate, profile: TemplateProfile, solution: TemplateSlotSolution): string {
+  const dom = new JSDOM(template.html);
+  const doc = dom.window.document;
+  for (const slot of profile.semanticSlots) {
+    const elements = Array.from(doc.querySelectorAll(`[data-semantic-slot="${slot.id}"]`));
+    if (elements.length !== slot.itemCapacity) {
+      throw new Error(`Semantic slot ${slot.id} has ${elements.length} item markers; expected ${slot.itemCapacity}`);
+    }
+    const assignments = new Map(
+      solution.assignments
+        .filter((assignment) => assignment.slotId === slot.id)
+        .map((assignment) => [assignment.itemIndex, assignment]),
+    );
+    elements.forEach((element, index) => {
+      const assignment = assignments.get(index);
+      if (!assignment) element.remove();
+      else element.setAttribute("data-block-id", assignment.groupId);
+    });
+  }
+  const assignedCount = solution.assignments.length;
+  doc.querySelector(".bid-page")?.setAttribute("data-semantic-item-count", String(assignedCount));
+  for (const element of Array.from(doc.querySelectorAll("[data-min-semantic-items]"))) {
+    const minimum = Number.parseInt(element.getAttribute("data-min-semantic-items") ?? "", 10);
+    if (Number.isFinite(minimum) && assignedCount < minimum) element.remove();
+  }
+  return dom.serialize();
+}
+
 export async function composeSlide(input: ComposeSlideInput): Promise<ComposeResult> {
-  const content = mapSlideContent(input.spec, input.template, input.profile, input.page, input.slotSolution);
-  const filled = await fillPlaceholders({ html: input.template.html, content: { direct: content } });
+  const solution = input.slotSolution ?? solveTemplateSlots(input.spec, input.profile);
+  const content = mapSlideContent(input.spec, input.template, input.profile, input.page, solution);
+  const filled = await fillPlaceholders({ html: prepareTemplateHtml(input.template, input.profile, solution), content: { direct: content } });
   const dom = new JSDOM(filled.html);
   const doc = dom.window.document;
   doc.querySelectorAll("script, noscript").forEach((element) => element.remove());

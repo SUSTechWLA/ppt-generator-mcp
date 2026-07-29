@@ -211,7 +211,7 @@ test("anchor extraction has negative controls for place and ordinary noun prefix
 for (const subject of ["云栖府", "滨江壹品", "钱塘江沿线"] as const) {
   test(`conservative subject grounding retains unknown Chinese name ${subject}`, () => {
     const source = normalizeSource({
-      sections: [{ heading: "服务对象", body: `${subject}承担常态化环境维护、应急响应和设施巡检等综合工作，服务期间必须每日巡查并保留记录。` }],
+      sections: [{ heading: "服务对象", body: `${subject}承担常态化环境维护、应急响应和设施巡检等综合工作，后续运行状态稳定。` }],
       quality: { minScore: 90, maxAttempts: 3 },
     });
     const result = planGroundedDisplay(source, { pageNumber: 37, title: "服务对象", documentType: "bid", profile: profile({
@@ -301,12 +301,24 @@ test("overlong first semantic clause produces a structured capacity failure", ()
   );
 });
 
-test("bare obligation prefixes require a following generic action phrase", () => {
-  const positive = extractCanonicalAnchors("人员应及时完成检查并记录，团队需按要求提交结果。");
-  assert.ok(positive.some((anchor) => anchor.kind === "obligation" && anchor.text === "应"));
-  assert.ok(positive.some((anchor) => anchor.kind === "obligation" && anchor.text === "需"));
+test("syntactic bare obligation markers retain their complete actor-action-object clause", () => {
+  for (const clause of [
+    "人员应妥善保管资料",
+    "人员应每日完成检查",
+    "人员应定期完成检查",
+    "人员应书面提交结果",
+    "团队需持续保留记录",
+    "团队需妥善保管资料",
+    "团队需服从现场安排",
+    "采购人资料应保存完整",
+    "项目急需补充人员",
+    "材料为作业必需条件",
+  ]) {
+    const anchors = extractCanonicalAnchors(`${clause}，后续形成闭环。`);
+    assert.ok(anchors.some((anchor) => anchor.kind === "obligation" && anchor.text === clause), clause);
+  }
 
-  const negative = extractCanonicalAnchors("响应适应反应对应供应效应需求所需供需均属于普通词汇。");
+  const negative = extractCanonicalAnchors("响应适应反应对应供应效应相应应急应用应聘应届应收应付应力应变应试应景应酬需求所需供需刚需军需内需外需均属于普通词汇。");
   assert.equal(negative.some((anchor) => anchor.kind === "obligation"), false);
 });
 
@@ -323,4 +335,20 @@ test("ordinary conclusion does not compact to a fabricated obligation fragment",
   assert.equal(result.displayPlan.factCoverages[0].criticalAnchors.some((anchor) =>
     anchor.kind === "obligation" && anchor.text === "应"
   ), false);
+});
+
+test("reviewer max12 obligation example fails instead of dropping actor action and object", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "资料安全", body: "服务目标明确，中标人应妥善保管采购人资料，确保档案安全。" }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  assert.throws(
+    () => planGroundedDisplay(source, { pageNumber: 43, title: "资料安全", documentType: "bid", profile: profile({
+      semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 12 }],
+      maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 12 },
+    }) }),
+    (error: unknown) => error instanceof WorkflowError
+      && error.code === "INPUT_INVALID"
+      && /without losing grounded source anchors/.test(error.message),
+  );
 });

@@ -1,0 +1,68 @@
+[
+  {
+    "slug": "green-infographic-bid-a4-landscape",
+    "version": "1.0.0",
+    "blockCapacity": 5,
+    "supportedBlocks": ["text", "image", "process", "metric"],
+    "imageSlots": 1,
+    "densityRange": ["medium", "high"],
+    "maxCharsBySlot": { "title": 40, "body": 150, "summary": 120 },
+    "format": "a4-landscape",
+    "status": "approved"
+  },
+  {
+    "slug": "green-infographic-bid-a4-landscape-text-image",
+    "version": "1.0.0",
+    "blockCapacity": 4,
+    "supportedBlocks": ["text", "image", "process", "metric"],
+    "imageSlots": 4,
+    "densityRange": ["low", "high"],
+    "maxCharsBySlot": { "title": 40, "body": 145, "summary": 110 },
+    "format": "a4-landscape",
+    "status": "approved"
+  },
+  {
+    "slug": "green-infographic-bid-a4-landscape-visual",
+    "version": "1.0.0",
+    "blockCapacity": 3,
+    "supportedBlocks": ["text", "image", "process", "metric"],
+    "imageSlots": 1,
+    "densityRange": ["low", "medium"],
+    "maxCharsBySlot": { "title": 40, "body": 100, "summary": 100 },
+    "format": "a4-landscape",
+    "status": "approved"
+  },
+  {
+    "slug": "green-infographic-bid-a4-landscape-table-text",
+    "version": "1.0.0",
+    "blockCapacity": 2,
+    "supportedBlocks": ["text", "table", "metric"],
+    "imageSlots": 0,
+    "densityRange": ["medium", "high"],
+    "maxCharsBySlot": { "title": 40, "body": 180, "table-cell": 24, "summary": 110 },
+    "format": "a4-landscape",
+    "status": "approved"
+  },
+  {
+    "slug": "green-infographic-bid-a4-landscape-table-image",
+    "version": "1.0.0",
+    "blockCapacity": 4,
+    "supportedBlocks": ["text", "table", "image", "process", "metric"],
+    "imageSlots": 1,
+    "densityRange": ["medium", "high"],
+    "maxCharsBySlot": { "title": 40, "body": 130, "table-cell": 24, "summary": 110 },
+    "format": "a4-landscape",
+    "status": "approved"
+  },
+  {
+    "slug": "green-infographic-bid-a4-landscape-table-text-image",
+    "version": "1.0.0",
+    "blockCapacity": 4,
+    "supportedBlocks": ["text", "table", "image", "process", "metric"],
+    "imageSlots": 1,
+    "densityRange": ["medium", "high"],
+    "maxCharsBySlot": { "title": 40, "body": 125, "table-cell": 22, "summary": 100 },
+    "format": "a4-landscape",
+    "status": "approved"
+  }
+]

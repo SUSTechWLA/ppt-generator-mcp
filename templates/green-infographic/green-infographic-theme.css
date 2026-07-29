@@ -132,7 +132,7 @@ body {
 .image-card .placeholder-card { display: grid; place-items: center; width: 100%; height: 100%; background: var(--green-050); min-height: 0; }
 .image-card .placeholder-card strong { color: var(--green-900); font-size: max(8.5pt, calc(11pt * var(--workflow-font-scale))); font-weight: 700; }
 .image-card .placeholder-card span { color: var(--muted); font-size: 7.5pt; margin-top: 1mm; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.image-caption { padding: calc(1.5mm * var(--workflow-spacing-scale)) calc(2mm * var(--workflow-spacing-scale)); background: var(--green-900); color: #fff; font-size: var(--minimum-readable-size); font-weight: 500; line-height: 1.30; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-caption { padding: calc(0.8mm * var(--workflow-spacing-scale)) calc(1.5mm * var(--workflow-spacing-scale)); background: var(--green-900); color: #fff; font-size: var(--minimum-readable-size); font-weight: 500; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
 
 .icon-process { display: flex; align-items: center; justify-content: space-evenly; padding: calc(2mm * var(--workflow-spacing-scale)); overflow: hidden; height: 100%; }
 .process-step { flex: 1 1 0; min-width: 0; overflow: hidden; color: var(--ink); font-size: max(8.5pt, calc(9pt * var(--workflow-font-scale))); font-weight: 650; line-height: 1.25; text-align: center; }
@@ -170,10 +170,8 @@ body {
 .photo-item { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; overflow: hidden; border-radius: 1.5mm; }
 .photo-item .image-caption { min-height: 0; }
 
-.summary-band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(50mm, 1fr); gap: calc(2mm * var(--workflow-spacing-scale)); padding: calc(1mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale)); background: #fff; overflow: hidden; align-items: center; }
-.summary-band p { overflow: hidden; margin: 0; }
-.summary-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(1mm * var(--workflow-spacing-scale)); margin: 0; padding: 0; list-style-position: inside; font-size: var(--body-dense-size); font-weight: 600; line-height: 1.2; }
-.summary-list li { overflow: hidden; white-space: nowrap; padding: 0; }
+.summary-band { display: grid; grid-template-columns: minmax(0, 1fr); padding: calc(1mm * var(--workflow-spacing-scale)) calc(3mm * var(--workflow-spacing-scale)); background: #fff; align-items: center; }
+.summary-band p { margin: 0; line-height: 1.25; overflow-wrap: anywhere; }
 /* Asset slots — ID'd placeholder boxes for images/icons to be generated later */
 /* Asset slots — placeholder boxes for images/icons to be generated later */
 .img-slot { display: grid; place-items: center; align-content: center; gap: 1mm; padding: 2mm; border: 0.5mm solid var(--line); border-radius: 2mm; background: #fff; height: 100%; overflow: hidden; }

@@ -15,6 +15,7 @@ import {
 import { WorkflowError } from "../domain/workflow-error.js";
 import { listTemplates, loadTemplate } from "../lib/template-parser.js";
 import { solveTemplateSlots } from "./template-slot-solver.js";
+import { projectOptionalImages } from "./optional-image-projection.js";
 
 const DENSITIES = ["low", "medium", "high"] as const;
 
@@ -422,6 +423,9 @@ function emittedCapacityErrors(content: PageBlueprint | SlideSpec, profile: Temp
   if (profile.pageBindings) {
     check(profile.pageBindings.pageTitle, content.title);
     if (!("version" in content)) check(profile.pageBindings.summaryText, content.conclusion);
+    const images = projectOptionalImages(content);
+    for (const caption of images.captions) check(profile.pageBindings.imageCaption, caption);
+    for (const reference of images.figureRefs) check(profile.pageBindings.figureRef, reference);
   }
   const items = "version" in content
     ? content.groups.map((group) => ({ title: group.title, body: group.body, role: group.role, bullets: [] as string[], metrics: [] as string[] }))

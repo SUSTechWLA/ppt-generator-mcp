@@ -68,9 +68,14 @@ function profileBoundarySpec(profile: (typeof profiles)[number], bodyChars: numb
   const factBinding = profile.semanticSlots[0].factBearingBinding;
   const type: SlideBlockType = factBinding === "tableCell" ? "table" : "text";
   const spec = specFor(Array.from({ length: profile.blockCapacity }, () => type), { density: "high" });
+  const pageTitleTag = profile.pageBindings.pageTitle;
+  const componentTitleTag = profile.semanticSlots[0].bindings.title
+    ?? profile.auxiliaryBindings?.title
+    ?? "component-title";
+  spec.title = "页".repeat(profile.maxCharsBySlot[pageTitleTag]);
   spec.blocks = spec.blocks.map((block, index) => ({
     ...block,
-    title: `边界要点${index + 1}`,
+    title: `${String(index + 1).padStart(2, "0")}${"题".repeat(profile.maxCharsBySlot[componentTitleTag] - 2)}`,
     body: "项".repeat(bodyChars),
   }));
   spec.assets = Array.from({ length: profile.imageSlots.minAssets }, (_, index) => ({
@@ -78,7 +83,7 @@ function profileBoundarySpec(profile: (typeof profiles)[number], bodyChars: numb
     type: "image" as const,
     blockId: spec.blocks[index % spec.blocks.length].id,
     prompt: "professional bid service illustration, no text",
-    alt: "项目服务示意图",
+    alt: "图".repeat(profile.maxCharsBySlot[profile.pageBindings.imageCaption!]),
     sourceFactIds: spec.blocks[index % spec.blocks.length].sourceFactIds,
     width: 1792 as const,
     height: 1024 as const,
@@ -108,6 +113,36 @@ for (const profile of profiles) {
       designTokens: { fontScale: 1, spacingScale: 1, contrastMode: "normal" },
     });
     const output = await mkdtemp(join(tmpdir(), "green-capacity-boundary-"));
+    const render = await renderPage({ html: composed.html, screenshotPath: join(output, `${profile.slug}.png`) });
+    const report = evaluateDeterministic(render, {
+      maxRasterAreaRatio: profile.maxRasterAreaRatio,
+      maximumRasterAssets: profile.imageSlots.maxAssets,
+      minimumBodyFontPt: profile.minimumBodyFontPt,
+    });
+    assert.ok(render.elements.some((element) => element.text === spec.title), "page title boundary must remain visible in full");
+    for (const block of spec.blocks) {
+      assert.ok(render.elements.some((element) => element.text === block.title), `component title boundary must remain visible for ${block.id}`);
+      assert.ok(render.elements.some((element) => element.text === block.body), `fact body boundary must remain visible for ${block.id}`);
+    }
+    for (const asset of spec.assets) {
+      assert.ok(render.elements.some((element) => element.text === asset.alt), `image caption boundary must remain visible for ${asset.id}`);
+    }
+    assert.equal(report.hardGatePassed, true, JSON.stringify(report.issues, null, 2));
+  });
+
+  test(`${profile.slug} preserves its simultaneous declared boundary at repair tokens`, async () => {
+    const spec = profileBoundarySpec(profile, profile.semanticSlots[0].maxCharsPerItem);
+    const solution = solveTemplateSlots(spec, profile);
+    assert.equal(solution.feasible, true, JSON.stringify(solution.unmatched));
+    const composed = await composeSlide({
+      spec,
+      profile,
+      template: loadTemplate(templatesDir, profile.slug),
+      assets: generatedAssets(spec),
+      slotSolution: solution,
+      designTokens: { fontScale: 0.86, spacingScale: 0.88, contrastMode: "high" },
+    });
+    const output = await mkdtemp(join(tmpdir(), "green-capacity-repair-boundary-"));
     const render = await renderPage({ html: composed.html, screenshotPath: join(output, `${profile.slug}.png`) });
     const report = evaluateDeterministic(render, {
       maxRasterAreaRatio: profile.maxRasterAreaRatio,

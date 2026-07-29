@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { JSDOM } from "jsdom";
 
 import { loadTemplate } from "../../src/lib/template-parser.js";
+import { renderPage } from "../../src/services/page-renderer.js";
 import { composeSlide } from "../../src/services/slide-composer.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
 import { makeGeneratedAssets, makeSlideSpec } from "../helpers/domain-fixtures.js";
@@ -78,8 +79,37 @@ test("removes an unused optional figure instead of requiring or fabricating an i
     imageSlots: { placeholderTag: "figures", placeholderCount: 1, minAssets: 0, maxAssets: 1, unusedPolicy: "remove-container", containerSelector: "figure" },
   } as unknown as typeof profile;
   const noImageSpec = makeSlideSpec({ assetCount: 0 });
+  noImageSpec.title = "无图页面标题".repeat(8).slice(0, optionalProfile.maxCharsBySlot[optionalProfile.pageBindings.pageTitle]);
   const result = await composeSlide({ spec: noImageSpec, template: optionalTemplate, profile: optionalProfile, assets: [] });
   assert.doesNotMatch(result.html, /<figures|data-asset-id=/);
+  assert.doesNotMatch(result.html, /<figure-ref|<image-caption|方案场景示意图/);
+  assert.match(result.html, new RegExp(noImageSpec.title));
+});
+
+test("optional image projection rejects only the page title cap plus one and preserves image bindings when an image exists", async () => {
+  const optionalTemplateSlug = "green-infographic-bid-a4-landscape";
+  const optionalTemplate = loadTemplate(templatesDir, optionalTemplateSlug);
+  const optionalProfile = loadTemplateProfiles(templatesDir).find((item) => item.slug === optionalTemplateSlug)!;
+  const titleCap = optionalProfile.maxCharsBySlot[optionalProfile.pageBindings.pageTitle];
+  const tooLong = makeSlideSpec({ assetCount: 0 });
+  tooLong.title = "页".repeat(titleCap + 1);
+  await assert.rejects(
+    () => composeSlide({ spec: tooLong, template: optionalTemplate, profile: optionalProfile, assets: [] }),
+    /字符|capacity|too_big|40/i,
+  );
+
+  const withImage = makeSlideSpec({ assetCount: 1 });
+  withImage.title = "页".repeat(titleCap);
+  withImage.blocks[0].title = "图".repeat(optionalProfile.maxCharsBySlot[optionalProfile.pageBindings.figureRef!]);
+  withImage.assets[0].alt = "场".repeat(optionalProfile.maxCharsBySlot[optionalProfile.pageBindings.imageCaption!]);
+  const composed = await composeSlide({
+    spec: withImage,
+    template: optionalTemplate,
+    profile: optionalProfile,
+    assets: makeGeneratedAssets(withImage.assets),
+  });
+  assert.match(composed.html, /data-asset-id="img-001"/);
+  assert.match(composed.html, new RegExp(withImage.assets[0].alt));
 });
 
 test("four-figure template requires exact cardinality and never reuses an asset", async () => {
@@ -122,8 +152,7 @@ test("declarative auxiliary groups prune unused repeated UI for two through four
     assert.equal(doc.querySelectorAll(".capability-item").length, blockCount >= 3 ? expectedCompact : 0, `capability item count for ${blockCount} blocks`);
     assert.equal(doc.querySelectorAll(".org-node").length, blockCount >= 3 ? expectedCompact : 0, `org item count for ${blockCount} blocks`);
     assert.equal(doc.querySelectorAll(".org-connector").length, blockCount >= 3 ? Math.max(0, expectedCompact - 1) : 0, `org connector count for ${blockCount} blocks`);
-    assert.equal(doc.querySelectorAll(".summary-list li").length, expectedCompact, `summary item count for ${blockCount} blocks`);
-    for (const element of Array.from(doc.querySelectorAll(".process-step, .timeline-stage, .capability-item, .org-node, .summary-list li"))) {
+    for (const element of Array.from(doc.querySelectorAll(".process-step, .timeline-stage, .capability-item, .org-node"))) {
       assert.ok(element.textContent?.trim(), `visible auxiliary item must not be blank for ${blockCount} blocks`);
     }
   }
@@ -282,3 +311,52 @@ for (const [name, unsafeStyle] of [
     );
   });
 }
+
+for (const rel of ["stylesheet preload", "preload stylesheet", "StyleSheet PRELOAD"] as const) {
+  test(`inlines stylesheet rel token permutation ${rel} and leaves Chromium with no network request`, async () => {
+    const fixture = await cssSecurityFixture("./theme.css", ".safe-token-style{color:#171a18}");
+    fixture.parsed.html = fixture.parsed.html.replace('rel="stylesheet"', `rel="${rel}"`);
+    try {
+      const composed = await composeSlide({ spec, template: fixture.parsed, profile, assets });
+      assert.doesNotMatch(composed.html, /<link\b/i);
+      assert.match(composed.html, /data-inline-source="\.\/theme\.css"/);
+      const output = await mkdtemp(join(tmpdir(), "mixed-rel-network-"));
+      const render = await renderPage({ html: composed.html, screenshotPath: join(output, "page.png") });
+      assert.deepEqual(render.signals.networkRequests, []);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+}
+
+for (const rel of ["stylesheet preload", "preload stylesheet", "StyleSheet PRELOAD"] as const) {
+  test(`rejects remote stylesheet rel token permutation ${rel} without leaking the URL`, async () => {
+    const remote = "https://example.invalid/private.css";
+    const parsed = {
+      ...template,
+      html: template.html.replace('rel="stylesheet" href="./green-infographic-theme.css"', `rel="${rel}" href="${remote}"`),
+    };
+    await assert.rejects(
+      () => composeSlide({ spec, template: parsed, profile, assets }),
+      (error: unknown) => error instanceof Error && /stylesheet|resource/i.test(error.message) && !error.message.includes(remote),
+    );
+  });
+}
+
+test("rejects residual resource-bearing elements before returning final HTML", async () => {
+  const remote = "https://example.invalid/private-frame";
+  const parsed = { ...template, html: template.html.replace("</body>", `<iframe src="${remote}"></iframe></body>`) };
+  await assert.rejects(
+    () => composeSlide({ spec, template: parsed, profile, assets }),
+    (error: unknown) => error instanceof Error && /resource/i.test(error.message) && !error.message.includes(remote),
+  );
+});
+
+test("rejects legacy resource-loading attributes before returning final HTML", async () => {
+  const remote = "https://example.invalid/private-background";
+  const parsed = { ...template, html: template.html.replace("<body>", `<body background="${remote}">`) };
+  await assert.rejects(
+    () => composeSlide({ spec, template: parsed, profile, assets }),
+    (error: unknown) => error instanceof Error && /resource/i.test(error.message) && !error.message.includes(remote),
+  );
+});

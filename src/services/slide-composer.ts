@@ -9,6 +9,7 @@ import type { ParsedTemplate } from "../lib/template-parser.js";
 import { solveTemplateSlots, type TemplateSlotSolution } from "./template-slot-solver.js";
 import { fillPlaceholders } from "../tools/fill-placeholders.js";
 import { mapSlideContent } from "./slide-content-mapper.js";
+import { projectOptionalImages } from "./optional-image-projection.js";
 
 export interface ComposeSlideInput {
   spec: SlideSpec;
@@ -38,9 +39,29 @@ function validateFinalStyles(doc: Document): void {
   for (const element of Array.from(doc.querySelectorAll<HTMLElement>("[style]"))) assertSafeCss(element.getAttribute("style") ?? "");
 }
 
+function validateFinalResourceBoundary(doc: Document): void {
+  if (doc.querySelector("link, script, noscript, object, embed, iframe, frame, applet, portal, base, source, video, audio, track")) {
+    throw new Error("Residual resource-bearing element is not allowed");
+  }
+  if (doc.querySelector('meta[http-equiv="refresh" i]')) {
+    throw new Error("Residual resource redirect is not allowed");
+  }
+  for (const element of Array.from(doc.querySelectorAll<HTMLElement>("[src], [srcset], [href], [xlink\\:href], [poster], [data], [action], [formaction], [background], [manifest], [archive], [codebase]"))) {
+    const source = element.getAttribute("src");
+    if (element.tagName === "IMG" && source && /^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/i.test(source)
+      && !element.hasAttribute("srcset") && !element.hasAttribute("href") && !element.hasAttribute("xlink:href")
+      && !element.hasAttribute("poster") && !element.hasAttribute("data") && !element.hasAttribute("action") && !element.hasAttribute("formaction")
+      && !element.hasAttribute("background") && !element.hasAttribute("manifest") && !element.hasAttribute("archive") && !element.hasAttribute("codebase")) {
+      continue;
+    }
+    throw new Error("Residual resource URL attribute is not allowed");
+  }
+}
+
 async function inlineCss(doc: Document, templatePath: string): Promise<void> {
   const familyRoot = await realpath(dirname(templatePath));
-  const links = Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'));
+  const links = Array.from(doc.querySelectorAll<HTMLLinkElement>("link"))
+    .filter((link) => Array.from(link.relList).some((token) => token.toLowerCase() === "stylesheet"));
   for (const link of links) {
     const href = link.getAttribute("href");
     if (!href
@@ -97,7 +118,7 @@ function injectAssets(doc: Document, spec: SlideSpec, profile: TemplateProfile, 
   for (const declared of spec.assets) {
     if (!byId.has(declared.id)) throw new Error(`Missing generated asset: ${declared.id}`);
   }
-  const declaredImages = spec.assets.filter((asset) => asset.type === "image");
+  const declaredImages = projectOptionalImages(spec).assets;
   if (new Set(declaredImages.map((asset) => asset.id)).size !== declaredImages.length) throw new Error("SlideSpec image asset IDs must be unique");
   const imageSlots = profile.imageSlots;
   const figures = Array.from(doc.querySelectorAll(imageSlots.placeholderTag));
@@ -207,6 +228,7 @@ export async function composeSlide(input: ComposeSlideInput): Promise<ComposeRes
   injectAssets(doc, input.spec, input.profile, input.assets);
   applyMarkersAndTokens(doc, input);
   validateFinalStyles(doc);
+  validateFinalResourceBoundary(doc);
   const html = dom.serialize().replace(/<!--([\s\S]*?)-->/g, "");
   return { html, warnings: [...filled.warnings, ...scanResiduals(html)] };
 }

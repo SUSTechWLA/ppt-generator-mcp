@@ -4,6 +4,7 @@ import type { SlideBlock, SlideSpec } from "../domain/slide-spec.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
 import type { ParsedTemplate } from "../lib/template-parser.js";
 import { solveTemplateSlots, type TemplateSlotSolution } from "./template-slot-solver.js";
+import { projectOptionalImages } from "./optional-image-projection.js";
 
 export type FillContent = Record<string, string | string[]>;
 
@@ -95,14 +96,12 @@ function pageContent(spec: SlideSpec, page: PageMetadata | undefined, profile: T
     [bindings.subsectionTitle]: page?.subsectionTitle ?? spec.conclusion,
     [bindings.summaryText]: spec.conclusion,
   };
-  if (bindings.imageCaption && count(template, bindings.imageCaption) > 0) {
-    const captions = spec.assets.filter((asset) => asset.type === "image").map((asset) => asset.alt);
-    values[bindings.imageCaption] = exactValues(template, bindings.imageCaption, captions.length > 0 ? captions : ["方案场景示意图"]);
+  const images = projectOptionalImages(spec);
+  if (images.assets.length > 0 && bindings.imageCaption && count(template, bindings.imageCaption) > 0) {
+    values[bindings.imageCaption] = exactValues(template, bindings.imageCaption, images.captions);
   }
-  if (bindings.figureRef && count(template, bindings.figureRef) > 0) {
-    const blockById = new Map(spec.blocks.map((block) => [block.id, block]));
-    const references = spec.assets.map((asset) => blockById.get(asset.blockId)?.title ?? asset.alt);
-    values[bindings.figureRef] = exactValues(template, bindings.figureRef, references.length > 0 ? references : [spec.title]);
+  if (images.assets.length > 0 && bindings.figureRef && count(template, bindings.figureRef) > 0) {
+    values[bindings.figureRef] = exactValues(template, bindings.figureRef, images.figureRefs);
   }
   return values;
 }

@@ -102,8 +102,32 @@ test("green visual baseline preserves canonical placeholder cardinality", () => 
       bullet: counts.bullet,
       figures: counts.figures,
     },
-    { componentTitle: 3, paragraph: 3, stepLabel: 4, itemLabel: 4, bullet: 3, figures: 1 },
+    { componentTitle: 3, paragraph: 3, stepLabel: 4, itemLabel: 4, bullet: undefined, figures: 1 },
   );
+});
+
+test("selects the optional-image base profile for a no-image page at the declared page-title boundary", () => {
+  const profiles = loadTemplateProfiles(resolve("templates"));
+  const base = profiles.find((candidate) => candidate.slug === "green-infographic-bid-a4-landscape")!;
+  const spec = makeSlideSpec({ assetCount: 0 });
+  spec.title = "页".repeat(base.maxCharsBySlot[base.pageBindings.pageTitle]);
+  const selection = selectTemplate(spec, profiles, base.slug, "bid", base.themeId);
+  assert.equal(selection.slug, base.slug);
+});
+
+test("optional-image selection rejects page-title cap plus one but accepts active image bindings at their caps", () => {
+  const profiles = loadTemplateProfiles(resolve("templates"));
+  const base = profiles.find((candidate) => candidate.slug === "green-infographic-bid-a4-landscape")!;
+  const tooLong = makeSlideSpec({ assetCount: 0 });
+  tooLong.title = "页".repeat(base.maxCharsBySlot[base.pageBindings.pageTitle] + 1);
+  assert.throws(() => selectTemplate(tooLong, profiles, base.slug, "bid", base.themeId));
+
+  const withImage = makeSlideSpec({ assetCount: 1 });
+  withImage.designIntent.visualRatio = base.maxRasterAreaRatio;
+  withImage.title = "页".repeat(base.maxCharsBySlot[base.pageBindings.pageTitle]);
+  withImage.blocks[0].title = "图".repeat(base.maxCharsBySlot[base.pageBindings.figureRef!]);
+  withImage.assets[0].alt = "场".repeat(base.maxCharsBySlot[base.pageBindings.imageCaption!]);
+  assert.equal(selectTemplate(withImage, profiles, base.slug, "bid", base.themeId).slug, base.slug);
 });
 
 test("every repeated auxiliary binding is fully covered by declarative pruning groups", () => {
@@ -555,11 +579,14 @@ for (const [name, selector] of [["required landmark", ".summary-band"], ["page s
     const fixture = await temporaryCatalog((profile, html) => {
       const dom = new JSDOM(html);
       const doc = dom.window.document;
-      Array.from(doc.querySelectorAll(".summary-item")).slice(1).forEach((element) => element.remove());
-      profile.auxiliaryCapacities!.bullet.itemCapacity = 1;
-      const summary = profile.auxiliaryGroups!.find((group) => group.id === "summary")!;
-      summary.itemCapacity = 1;
-      summary.itemSelector = selector;
+      const protectedNode = doc.querySelector(selector)!;
+      protectedNode.append(doc.querySelector("step-label")!);
+      doc.querySelectorAll(".process-step, .process-arrow").forEach((element) => element.remove());
+      profile.auxiliaryCapacities!.stepLabel.itemCapacity = 1;
+      const process = profile.auxiliaryGroups!.find((group) => group.id === "process")!;
+      process.itemCapacity = 1;
+      process.itemSelector = selector;
+      delete process.connectorSelector;
       return { profile, html: serializeTemplateMutation(dom, html) };
     });
     try {

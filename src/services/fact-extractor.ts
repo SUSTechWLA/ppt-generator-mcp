@@ -8,7 +8,22 @@ const NAME = /《[^》]+》|“[^”]+”|「[^」]+」/;
 
 export function extractFacts(sections: SourceSection[]): SourceFact[] {
   const facts: SourceFact[] = [];
-  const seen = new Set<string>();
+
+  const losslessSegments = (value: string): string[] => {
+    const segments: string[] = [];
+    let start = 0;
+    while (start < value.length) {
+      let end = Math.min(value.length, start + 500);
+      if (end < value.length) {
+        const code = value.charCodeAt(end - 1);
+        if (code >= 0xd800 && code <= 0xdbff) end -= 1;
+      }
+      if (end <= start) end = Math.min(value.length, start + 1);
+      segments.push(value.slice(start, end));
+      start = end;
+    }
+    return segments;
+  };
 
   for (const section of sections) {
     const semanticValues = isSynthesizedKeyPointBody(section)
@@ -19,8 +34,7 @@ export function extractFacts(sections: SourceSection[]): SourceFact[] {
 
     for (const candidate of candidates) {
       const text = candidate.trim();
-      if (!text || seen.has(text)) continue;
-      seen.add(text);
+      if (!text) continue;
 
       const kind: SourceFact["kind"] = REQUIREMENT.test(text)
         ? "requirement"
@@ -30,14 +44,14 @@ export function extractFacts(sections: SourceSection[]): SourceFact[] {
             ? "name"
             : "conclusion";
 
-      facts.push({
-        id: `fact-${facts.length + 1}`,
-        text: text.slice(0, 500),
-        kind,
-        sourceSectionId: section.id,
-      });
-
-      if (facts.length >= 200) return facts;
+      for (const segment of losslessSegments(text)) {
+        facts.push({
+          id: `fact-${facts.length + 1}`,
+          text: segment,
+          kind,
+          sourceSectionId: section.id,
+        });
+      }
     }
   }
 

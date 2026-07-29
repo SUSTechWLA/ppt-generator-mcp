@@ -22,11 +22,23 @@ import { getDocumentTemplatePolicy, loadTemplateProfiles, selectTemplate } from 
 import { loadTemplate } from "./lib/template-parser.js";
 import { runQualityLoop } from "./workflow/quality-loop.js";
 import { RunStore } from "./workflow/run-store.js";
+import { DeckStore } from "./workflow/deck-store.js";
+import {
+  createPlanDeckDependencies,
+  planDeckWorkflow,
+  type PlanDeckDependencies,
+} from "./workflow/plan-deck.js";
+
+export interface ProductionDependencies extends PptMcpDependencies {
+  deckStore: DeckStore;
+  planDeckDependencies: PlanDeckDependencies;
+  planDeck(rawInput: unknown): ReturnType<typeof planDeckWorkflow>;
+}
 
 export function createProductionDependencies(
   config: AppConfig,
   options: { templatesDir?: string } = {},
-): PptMcpDependencies {
+): ProductionDependencies {
   const templatesDir = resolve(options.templatesDir ?? join(process.cwd(), "templates"));
   const profiles = loadTemplateProfiles(templatesDir);
   const defaultIconBasePath = join(dirname(loadTemplate(templatesDir, profiles[0].slug).filePath), "assets", "icons");
@@ -40,11 +52,16 @@ export function createProductionDependencies(
     ? createOpenAICompatibleReviewProvider(config.review, config.limits.requestTimeoutMs)
     : undefined;
   const runStore = new RunStore(config.outputRoot);
+  const deckStore = new DeckStore(config.outputRoot);
+  const planDeckDependencies = createPlanDeckDependencies({ deckStore, profiles });
 
-  const dependencies: PptMcpDependencies = {
+  const dependencies: ProductionDependencies = {
     templatesDir,
     runStore,
     profiles,
+    deckStore,
+    planDeckDependencies,
+    planDeck: (rawInput) => planDeckWorkflow(rawInput, planDeckDependencies),
     normalizeSource,
     buildSlideSpec: async (source, audience, documentType) => {
       const policy = getDocumentTemplatePolicy(documentType ?? "presentation");

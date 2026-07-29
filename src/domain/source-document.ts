@@ -12,11 +12,17 @@ export const qualitySettingsSchema = z.object({
   maxAttempts: z.number().int().min(1).max(3).default(3),
 }).strict().default({ minScore: 85, maxAttempts: 3 });
 
+export const externalAssetInputSchema = z.object({
+  id: z.string().regex(/^(?:img|icon)-\d{3}$/),
+  dataUrl: z.string().min(32).max(20_000_000).regex(/^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/),
+}).strict();
+
 export const generateSlideInputSchema = z.object({
   sourceText: z.string().trim().min(20).max(120_000).optional(),
   sections: z.array(sourceSectionInputSchema).min(1).max(50).optional(),
   templateSlug: z.string().regex(/^[a-z0-9-]+$/).optional(),
   audience: z.string().trim().max(200).optional(),
+  externalAssets: z.array(externalAssetInputSchema).max(6).optional(),
   quality: qualitySettingsSchema,
   requestId: z.string().trim().min(8).max(128).optional(),
 }).strict().superRefine((value, context) => {

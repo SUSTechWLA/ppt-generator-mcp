@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { plannedDeckSchema } from "../../src/domain/deck-plan.js";
+import { hashPlannedDeckFingerprint, plannedDeckSchema } from "../../src/domain/deck-plan.js";
 import { hashCanonical } from "../../src/domain/source-document.js";
 import { evaluateDeckConsistency, type DeckConsistencyPage } from "../../src/services/deck-consistency.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
@@ -26,6 +26,7 @@ async function fixture() {
     pageNumbers: [101, 104],
     documentType: "bid",
     preferredThemeId: "green-infographic-v1",
+    quality: { minScore: 90, maxAttempts: 2 },
   }, createPlanDeckDependencies({ deckStore: new DeckStore(directory), profiles }));
   return { directory, profiles, plannedDeck: plan.plannedDeck };
 }
@@ -36,7 +37,7 @@ function delivery(slide: Awaited<ReturnType<typeof fixture>>["plannedDeck"]["sli
     pageNumber: slide.page.number,
     status: "delivered",
     selectedTemplateSlug: slide.templateSlug,
-    quality: { score: 92, threshold: 90, hardGatePassed: true },
+    quality: { score: 92, threshold: 90, hardGatePassed: true, attempts: 1 },
     render: {
       viewport: { width: 1123, height: 794 },
       pageCount: 1,
@@ -61,7 +62,7 @@ test("persisted nonconsecutive page list passes exactly while reorder, extra, mi
   try {
     const pages = f.plannedDeck.slides.map(delivery);
     assert.equal(evaluateDeckConsistency({ plannedDeck: f.plannedDeck, loadedProfiles: f.profiles, pages }).passed, true);
-    for (const candidate of [[pages[1], pages[0]], pages.slice(0, 1), [...pages, { ...pages[1], pageNumber: 108 }], [{ ...pages[0], status: "best_effort" as const }, pages[1]], [{ ...pages[0], quality: { score: Number.NaN, threshold: 0, hardGatePassed: true } }, pages[1]]]) {
+    for (const candidate of [[pages[1], pages[0]], pages.slice(0, 1), [...pages, { ...pages[1], pageNumber: 108 }], [{ ...pages[0], status: "best_effort" as const }, pages[1]], [{ ...pages[0], quality: { score: Number.NaN, threshold: 0, hardGatePassed: true, attempts: 1 } }, pages[1]]]) {
       assert.equal(evaluateDeckConsistency({ plannedDeck: f.plannedDeck, loadedProfiles: f.profiles, pages: candidate }).passed, false);
     }
   } finally {
@@ -90,6 +91,7 @@ test("theme compatibility is declared and survives slug renaming; slug-like pref
       const selected = slide.templateMatch.candidateScores.find((candidate) => candidate.slug === original)!;
       selected.slug = renamed;
     }
+    renamedPlan.planFingerprint = hashPlannedDeckFingerprint(renamedPlan);
     const renamedPages = renamedPlan.slides.map(delivery);
     assert.equal(evaluateDeckConsistency({ plannedDeck: renamedPlan, loadedProfiles: renamedProfiles, pages: renamedPages }).passed, true);
 
@@ -153,10 +155,28 @@ test("legacy profile snapshots remain parseable but cannot claim a contracted de
       delete slide.templateMatch.profileSnapshot.designContract;
       slide.templateMatch.profileCapabilityHash = hashCanonical(slide.templateMatch.profileSnapshot);
     }
+    legacy.planFingerprint = hashPlannedDeckFingerprint(legacy);
     assert.equal(plannedDeckSchema.safeParse(legacy).success, true, "optional versioned contract must not invalidate an old persisted snapshot");
     const report = evaluateDeckConsistency({ plannedDeck: legacy, loadedProfiles: f.profiles, pages: legacy.slides.map(delivery) });
     assert.equal(report.passed, false);
     assert.ok(report.issues.some((issue) => /contract|snapshot mismatch/i.test(issue)), JSON.stringify(report.issues));
+  } finally {
+    await rm(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("deck consistency trusts only the persisted quality threshold and attempt bound", async () => {
+  const f = await fixture();
+  try {
+    const pages = f.plannedDeck.slides.map(delivery);
+    pages[0].quality = { score: 92, threshold: 70, hardGatePassed: true, attempts: 1 };
+    const substitutedThreshold = evaluateDeckConsistency({ plannedDeck: f.plannedDeck, loadedProfiles: f.profiles, pages });
+    assert.equal(substitutedThreshold.passed, false);
+    assert.ok(substitutedThreshold.issues.some((issue) => /persisted|threshold|quality/i.test(issue)));
+
+    pages[0].quality = { score: 92, threshold: 90, hardGatePassed: true, attempts: 3 };
+    const excessAttempts = evaluateDeckConsistency({ plannedDeck: f.plannedDeck, loadedProfiles: f.profiles, pages });
+    assert.equal(excessAttempts.passed, false);
   } finally {
     await rm(f.directory, { recursive: true, force: true });
   }

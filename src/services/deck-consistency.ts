@@ -8,7 +8,7 @@ export interface DeckConsistencyPage {
   pageNumber: number;
   status: "running" | "delivered" | "best_effort" | "failed";
   selectedTemplateSlug?: string;
-  quality?: { score: number; threshold: number; hardGatePassed: boolean };
+  quality?: { score: number; threshold: number; hardGatePassed: boolean; attempts: number };
   render: Pick<RenderResult, "viewport" | "pageCount" | "structure">;
 }
 
@@ -136,16 +136,26 @@ export function evaluateDeckConsistency(input: DeckConsistencyInput): DeckConsis
       || !Number.isFinite(page.quality.score) || !Number.isFinite(page.quality.threshold)
       || page.quality.score < 0 || page.quality.score > 100
       || page.quality.threshold < 70 || page.quality.threshold > 95
-      || page.quality.score < page.quality.threshold) {
+      || page.quality.threshold !== parsed.data.quality.minScore
+      || !Number.isInteger(page.quality.attempts) || page.quality.attempts < 1
+      || page.quality.attempts > parsed.data.quality.maxAttempts
+      || page.quality.score < parsed.data.quality.minScore) {
       boundedIssue(issues, `Page ${slide.page.number} did not independently pass its hard gates and requested score threshold`);
     }
-    if (page.selectedTemplateSlug !== slide.templateSlug) boundedIssue(issues, `Page ${slide.page.number} selected template does not equal its persisted plan`);
     if (page.render.pageCount !== 1 || page.render.structure.pageNumber !== String(slide.page.number)) boundedIssue(issues, `Page ${slide.page.number} render does not contain exactly its one expected page marker`);
 
     const identity = page.render.structure.profile;
     const snapshot = slide.templateMatch.profileSnapshot;
-    if (!identity || identity.slug !== slide.templateSlug || identity.version !== snapshot.version
-      || identity.themeId !== snapshot.themeId || identity.format !== snapshot.format) {
+    const selectedMatches = input.loadedProfiles.filter((profile) => profile.slug === page.selectedTemplateSlug);
+    const selectedProfile = selectedMatches[0];
+    if (selectedMatches.length !== 1 || !selectedProfile
+      || selectedProfile.themeId !== slide.templateMatch.themeId
+      || selectedProfile.format !== snapshot.format
+      || !selectedProfile.documentCompatibility[parsed.data.documentType]) {
+      boundedIssue(issues, `Page ${slide.page.number} selected repair template is not uniquely approved and compatible with its persisted theme, format, and document policy`);
+    }
+    if (!identity || !selectedProfile || identity.slug !== selectedProfile.slug || identity.version !== selectedProfile.version
+      || identity.themeId !== selectedProfile.themeId || identity.format !== selectedProfile.format) {
       boundedIssue(issues, `Page ${slide.page.number} rendered template identity is not truthful to its profile snapshot`);
     }
     if (slide.templateMatch.themeId !== expectedTheme) boundedIssue(issues, `Page ${slide.page.number} declares an incompatible themeId`);
@@ -153,14 +163,14 @@ export function evaluateDeckConsistency(input: DeckConsistencyInput): DeckConsis
     const canvas = formatCanvas(snapshot.format);
     if (page.render.viewport.width !== canvas.width || page.render.viewport.height !== canvas.height) boundedIssue(issues, `Page ${slide.page.number} canvas does not match ${snapshot.format}`);
 
-    for (const landmark of snapshot.requiredLandmarks) {
+    for (const landmark of selectedProfile?.requiredLandmarks ?? snapshot.requiredLandmarks) {
       if (page.render.structure.landmarkCounts[landmark] !== 1) boundedIssue(issues, `Page ${slide.page.number} required landmark ${landmark} is missing or duplicated`);
     }
     for (const binding of slide.templateMatch.metadataBindings) {
       const actual = page.render.structure.pageFields[binding.field] ?? [];
       if (!stringArrayEqual(actual, binding.values)) boundedIssue(issues, `Page ${slide.page.number} visible metadata ${binding.field} does not match its own plan`);
     }
-    matchesProfileContract(slide.page.number, page.render.structure, page.render.viewport, snapshot, issues);
+    matchesProfileContract(slide.page.number, page.render.structure, page.render.viewport, selectedProfile ?? snapshot, issues);
     if (firstTokens !== undefined && tokenFingerprint(page.render.structure.designTokens) !== firstTokens) boundedIssue(issues, `Page ${slide.page.number} typography, color, spacing, or contrast design tokens are inconsistent`);
     if (firstRhythm !== undefined && rhythmFingerprint(page.render.structure) !== firstRhythm) boundedIssue(issues, `Page ${slide.page.number} heading and footer hierarchy placement rhythm is inconsistent`);
   }

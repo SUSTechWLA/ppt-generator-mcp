@@ -3,13 +3,22 @@ import { join } from "node:path";
 
 import { generateSlideOutputSchema, type GenerateSlideOutput } from "../domain/quality-report.js";
 import type { DocumentType, PageMetadata } from "../domain/document-context.js";
+import type { DisplayPlan } from "../domain/display-plan.js";
 import type { RunManifest, StageRecord, WorkflowStage } from "../domain/run-manifest.js";
-import { generateSlideInputSchema, type GenerateSlideRequest, type SourceDocument } from "../domain/source-document.js";
+import {
+  generateSlideInputSchema,
+  hashCanonical,
+  qualitySettingsSchema,
+  sourceDocumentSchema,
+  type GenerateSlideRequest,
+  type SourceDocument,
+} from "../domain/source-document.js";
 import type { AssetSpec, GeneratedAsset, SlideSpec } from "../domain/slide-spec.js";
-import type { TemplateProfile, TemplateSelection } from "../domain/template-profile.js";
+import { templateProfileSchema, type TemplateProfile, type TemplateSelection } from "../domain/template-profile.js";
 import { asWorkflowError } from "../domain/workflow-error.js";
 import type { ComposeResult } from "../services/slide-composer.js";
 import type { ExternalAsset } from "../services/asset-generator.js";
+import type { DocumentTemplatePolicy } from "../services/template-selector.js";
 import { validateFactReferences } from "../services/slide-spec-builder.js";
 import type { ActiveRun, RunStore } from "./run-store.js";
 import type { QualityLoopResult } from "./quality-loop.js";
@@ -26,6 +35,27 @@ export interface WorkflowQualityInput {
   documentType?: DocumentType;
   preferredThemeId?: string;
   page?: PageMetadata;
+  displayPlan?: DisplayPlan;
+  expectedMetadataBindings?: Array<{ field: string; values: string[] }>;
+  initialProfile?: TemplateProfile;
+  requiredThemeId?: string;
+  documentPolicy?: DocumentTemplatePolicy;
+}
+
+export interface PreparedSlideWorkflowInput {
+  source: SourceDocument;
+  plannedSpec: SlideSpec;
+  selection: TemplateSelection;
+  profile: TemplateProfile;
+  externalAssets: ExternalAsset[];
+  quality: GenerateSlideRequest["quality"];
+  documentType: DocumentType;
+  page: PageMetadata;
+  displayPlan: DisplayPlan;
+  expectedMetadataBindings: Array<{ field: string; values: string[] }>;
+  requiredThemeId: string;
+  documentPolicy: DocumentTemplatePolicy;
+  requestId?: string;
 }
 
 export interface WorkflowDependencies {
@@ -81,22 +111,28 @@ async function runStage<T>(
   }
 }
 
-export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDependencies): Promise<GenerateSlideOutput> {
-  const input = generateSlideInputSchema.parse(rawInput);
-  const run = await deps.runStore.createOrResume({ requestId: input.requestId, canonicalInput: input });
-  if ((run.manifest.status === "delivered" || run.manifest.status === "best_effort") && run.manifest.finalResult) {
-    return outputFromManifest(run.manifest);
-  }
+interface ResolvedSlideWorkflowInput {
+  source: SourceDocument;
+  spec: SlideSpec;
+  selection: TemplateSelection;
+  externalAssets?: ExternalAsset[];
+  quality: GenerateSlideRequest["quality"];
+  documentType?: DocumentType;
+  preferredThemeId?: string;
+  page?: PageMetadata;
+  displayPlan?: DisplayPlan;
+  expectedMetadataBindings?: Array<{ field: string; values: string[] }>;
+  initialProfile?: TemplateProfile;
+  requiredThemeId?: string;
+  documentPolicy?: DocumentTemplatePolicy;
+}
 
-  const source = await runStage(deps.runStore, run, "normalize_input", () => deps.normalizeSource(input));
-  const spec = await runStage(deps.runStore, run, "build_slide_spec", async () => {
-    if (input.plannedSpec) {
-      validateFactReferences(source, input.plannedSpec);
-      return input.plannedSpec;
-    }
-    return deps.buildSlideSpec(source, input.audience, input.documentType);
-  });
-  const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug, input.documentType, input.preferredThemeId));
+async function executeResolvedSlideWorkflow(
+  run: ActiveRun,
+  input: ResolvedSlideWorkflowInput,
+  deps: WorkflowDependencies,
+): Promise<GenerateSlideOutput> {
+  const { source, spec, selection } = input;
   const assets = await runStage(deps.runStore, run, "generate_assets", () => deps.generateAssets(run.runId, spec.assets, input.externalAssets));
   const initialPage = await runStage(deps.runStore, run, "compose_html", () => deps.composeSlide(spec, selection, assets, input.page));
   const profile = deps.profiles.find((candidate) => candidate.slug === selection.slug);
@@ -119,6 +155,11 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
     documentType: input.documentType,
     preferredThemeId: input.preferredThemeId,
     page: input.page,
+    displayPlan: input.displayPlan,
+    expectedMetadataBindings: input.expectedMetadataBindings,
+    initialProfile: input.initialProfile,
+    requiredThemeId: input.requiredThemeId,
+    documentPolicy: input.documentPolicy,
   });
   for (const attempt of loop.attempts) {
     if (!attempt.htmlPath || !attempt.qualityPath) throw new Error(`Attempt ${attempt.attempt} did not persist all artifacts`);
@@ -140,6 +181,11 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
   const selectedTemplateSlug = selected.state.templateSlug;
   const selectedProfile = deps.profiles.find((candidate) => candidate.slug === selectedTemplateSlug);
   if (!selectedProfile) throw new Error(`Selected attempt references an unknown template profile: ${selectedTemplateSlug}`);
+  if (input.requiredThemeId && (selectedProfile.themeId !== input.requiredThemeId
+    || selectedProfile.format !== input.initialProfile?.format
+    || (input.documentType && !selectedProfile.documentCompatibility[input.documentType]))) {
+    throw new Error("Selected repair template is not compatible with the persisted page theme, format, and document policy");
+  }
   const selectedTemplateReason = selectedTemplateSlug === selection.slug
     ? selection.reason
     : "质量修复后切换到通过同一能力策略校验的替代模板。";
@@ -183,4 +229,81 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
     artifacts: { htmlPath: promoted.htmlPath, previewPath: promoted.previewPath, qualityPath: promoted.qualityPath, manifestPath },
   });
   return result;
+}
+
+export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDependencies): Promise<GenerateSlideOutput> {
+  const input = generateSlideInputSchema.parse(rawInput);
+  const run = await deps.runStore.createOrResume({ requestId: input.requestId, canonicalInput: input });
+  if ((run.manifest.status === "delivered" || run.manifest.status === "best_effort") && run.manifest.finalResult) {
+    return outputFromManifest(run.manifest);
+  }
+
+  const source = await runStage(deps.runStore, run, "normalize_input", () => deps.normalizeSource(input));
+  const spec = await runStage(deps.runStore, run, "build_slide_spec", async () => {
+    if (input.plannedSpec) {
+      validateFactReferences(source, input.plannedSpec);
+      return input.plannedSpec;
+    }
+    return deps.buildSlideSpec(source, input.audience, input.documentType);
+  });
+  const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug, input.documentType, input.preferredThemeId));
+  return executeResolvedSlideWorkflow(run, {
+    source,
+    spec,
+    selection,
+    externalAssets: input.externalAssets,
+    quality: input.quality,
+    documentType: input.documentType,
+    preferredThemeId: input.preferredThemeId,
+    page: input.page,
+  }, deps);
+}
+
+export async function generatePreparedSlideWorkflow(
+  rawInput: PreparedSlideWorkflowInput,
+  deps: WorkflowDependencies,
+): Promise<GenerateSlideOutput> {
+  const input = {
+    ...rawInput,
+    source: sourceDocumentSchema.parse(rawInput.source),
+    profile: templateProfileSchema.parse(rawInput.profile),
+    quality: qualitySettingsSchema.parse(rawInput.quality),
+  };
+  const loaded = deps.profiles.filter((profile) => profile.slug === input.profile.slug);
+  if (loaded.length !== 1 || hashCanonical(loaded[0]) !== hashCanonical(input.profile)
+    || input.selection.slug !== input.profile.slug
+    || input.requiredThemeId !== input.profile.themeId
+    || input.documentPolicy.documentType !== input.documentType
+    || !input.profile.documentCompatibility[input.documentType]) {
+    throw new Error("Prepared page profile context does not match the loaded persisted capability snapshot");
+  }
+  const run = await deps.runStore.createOrResume({
+    requestId: input.requestId,
+    canonicalInput: {
+      sourceHash: input.source.sourceHash,
+      plannedSpec: input.plannedSpec,
+      selection: input.selection,
+      page: input.page,
+      quality: input.quality,
+      requiredThemeId: input.requiredThemeId,
+      externalAssetHashes: input.externalAssets.map((asset) => ({ id: asset.id, hash: hashCanonical(asset.dataUrl) })),
+    },
+  });
+  if ((run.manifest.status === "delivered" || run.manifest.status === "best_effort") && run.manifest.finalResult) {
+    return outputFromManifest(run.manifest);
+  }
+  return executeResolvedSlideWorkflow(run, {
+    source: input.source,
+    spec: input.plannedSpec,
+    selection: input.selection,
+    externalAssets: input.externalAssets,
+    quality: input.quality,
+    documentType: input.documentType,
+    page: input.page,
+    displayPlan: input.displayPlan,
+    expectedMetadataBindings: input.expectedMetadataBindings,
+    initialProfile: input.profile,
+    requiredThemeId: input.requiredThemeId,
+    documentPolicy: input.documentPolicy,
+  }, deps);
 }

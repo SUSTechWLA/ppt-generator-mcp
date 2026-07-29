@@ -17,6 +17,11 @@ const sourceChoice = {
   sourceText: z.string().trim().min(20).max(120_000).optional(),
 };
 
+const persistedDeckQualitySchema = z.object({
+  minScore: z.number().int().min(70).max(95),
+  maxAttempts: z.number().int().min(1).max(3),
+}).strict();
+
 export const planDeckInputSchema = z.object({
   ...sourceChoice,
   pageNumbers: z.array(z.number().int().min(1).max(9999)).min(1).max(30),
@@ -350,11 +355,16 @@ export const plannedDeckSchema = z.object({
   version: z.literal(1),
   deckPlanId: z.string().uuid(),
   sourceHash: z.string().length(64),
+  planFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
   documentType: documentTypeSchema,
+  quality: persistedDeckQualitySchema,
   preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
   pageNumbers: z.array(z.number().int().positive()),
   slides: z.array(deckSlidePlanSchema).min(1).max(30),
 }).strict().superRefine((deck, context) => {
+  if (deck.planFingerprint !== hashPlannedDeckFingerprint(deck)) {
+    context.addIssue({ code: "custom", message: "Deck plan fingerprint must bind immutable quality, source, page, and profile evidence", path: ["planFingerprint"] });
+  }
   if (deck.sourceHash !== hashDeckSourceEvidence(deck)) {
     context.addIssue({ code: "custom", message: "Deck source hash must equal canonical persisted source evidence", path: ["sourceHash"] });
   }
@@ -443,6 +453,28 @@ export const plannedDeckSchema = z.object({
     }
   }
 });
+
+export function hashPlannedDeckFingerprint(input: {
+  version: 1;
+  deckPlanId: string;
+  sourceHash: string;
+  documentType: z.infer<typeof documentTypeSchema>;
+  quality: z.infer<typeof persistedDeckQualitySchema>;
+  preferredThemeId?: string;
+  pageNumbers: number[];
+  slides: z.infer<typeof deckSlidePlanSchema>[];
+}): string {
+  return hashCanonical({
+    version: input.version,
+    deckPlanId: input.deckPlanId,
+    sourceHash: input.sourceHash,
+    documentType: input.documentType,
+    quality: input.quality,
+    ...(input.preferredThemeId ? { preferredThemeId: input.preferredThemeId } : {}),
+    pageNumbers: input.pageNumbers,
+    slides: input.slides,
+  });
+}
 
 export const planDeckOutputSchema = z.object({
   plannedDeck: plannedDeckSchema,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { planDeckInputSchema, planDeckOutputSchema, plannedDeckSchema } from "../../src/domain/deck-plan.js";
+import { hashPlannedDeckFingerprint, planDeckInputSchema, planDeckOutputSchema, plannedDeckSchema } from "../../src/domain/deck-plan.js";
 import { WorkflowError } from "../../src/domain/workflow-error.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
 import { DeckStore } from "../../src/workflow/deck-store.js";
@@ -58,11 +58,45 @@ test("plan deck preserves arbitrary explicit page boundaries and persists ground
     assert.ok(result.plannedDeck.slides.every((slide) => slide.originalSourceFacts.length === slide.originalSourceFactIds.length));
     assert.ok(result.plannedDeck.slides.every((slide) => slide.templateMatch.unmatched.length === 0));
     assert.ok(result.plannedDeck.slides.every((slide) => slide.templateMatch.themeId === "green-infographic-v1"));
+    assert.deepEqual(result.plannedDeck.quality, { minScore: 90, maxAttempts: 3 });
+    assert.match(result.plannedDeck.planFingerprint, /^[0-9a-f]{64}$/);
     assert.match(JSON.stringify(result.plannedDeck.slides[1]), /30分钟/);
     assert.match(JSON.stringify(result.plannedDeck.slides[1]), /书面批准/);
 
     const persisted = planDeckOutputSchema.parse(await f.store.getPlan(result.plannedDeck.deckPlanId));
     assert.deepEqual(persisted, result);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("persisted quality is mandatory and fingerprint-bound instead of being default-migrated", async () => {
+  const f = await fixture();
+  try {
+    const valid = await planDeckWorkflow({
+      sourceText: explicitSource,
+      pageNumbers: [17, 23],
+      documentType: "bid",
+      quality: { minScore: 90, maxAttempts: 2 },
+      requestId: "quality-bound-plan",
+    }, f.deps);
+    assert.deepEqual(valid.plannedDeck.quality, { minScore: 90, maxAttempts: 2 });
+
+    const missing = structuredClone(valid.plannedDeck) as Record<string, unknown>;
+    delete missing.quality;
+    assert.equal(plannedDeckSchema.safeParse(missing).success, false, "legacy plans without quality cannot be delivered");
+
+    const defaultSmuggling = structuredClone(valid.plannedDeck);
+    defaultSmuggling.planFingerprint = hashPlannedDeckFingerprint({
+      ...defaultSmuggling,
+      quality: { minScore: 85, maxAttempts: 3 },
+    });
+    delete (defaultSmuggling as Partial<typeof defaultSmuggling>).quality;
+    assert.equal(plannedDeckSchema.safeParse(defaultSmuggling).success, false, "schema defaults must not migrate a legacy plan into formal delivery");
+
+    const forged = structuredClone(valid.plannedDeck);
+    forged.quality.minScore = 70;
+    assert.equal(plannedDeckSchema.safeParse(forged).success, false, "quality changes must invalidate the immutable plan fingerprint");
   } finally {
     await f.cleanup();
   }
@@ -250,6 +284,7 @@ test("loaded-profile validation rejects a coherent but stale persisted capabilit
     match.profileSnapshot.maxRasterAreaRatio = Math.max(0, match.profileSnapshot.maxRasterAreaRatio - 0.01);
     match.maxRasterAreaRatio = match.profileSnapshot.maxRasterAreaRatio;
     match.profileCapabilityHash = hashCanonical(match.profileSnapshot);
+    stale.planFingerprint = hashPlannedDeckFingerprint(stale);
     assert.equal(plannedDeckSchema.safeParse(stale).success, true);
     const validation = validatePlanAgainstProfiles(stale, f.deps.profiles);
     assert.equal(validation.passed, false);

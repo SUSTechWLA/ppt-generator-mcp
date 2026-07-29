@@ -2,6 +2,7 @@ import {
   planDeckInputSchema,
   planDeckOutputSchema,
   plannedDeckSchema,
+  hashPlannedDeckFingerprint,
   type deckTemplateMatchSchema,
 } from "../domain/deck-plan.js";
 import type { PageMetadata } from "../domain/document-context.js";
@@ -395,14 +396,19 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
       templateMatch: templateMatch(candidate),
     };
   });
-  const plannedDeck = plannedDeckSchema.parse({
+  const planEvidence = {
     version: 1,
     deckPlanId: active.deckPlanId,
     sourceHash: hashDeckSourceEvidence({ pageNumbers: input.pageNumbers, slides }),
     documentType: input.documentType,
+    quality: input.quality,
     ...(input.preferredThemeId ? { preferredThemeId: input.preferredThemeId } : {}),
     pageNumbers: input.pageNumbers,
     slides,
+  } as const;
+  const plannedDeck = plannedDeckSchema.parse({
+    ...planEvidence,
+    planFingerprint: hashPlannedDeckFingerprint(planEvidence),
   });
   const profileValidation = validatePlanAgainstProfiles(plannedDeck, deps.profiles);
   if (!profileValidation.passed) {

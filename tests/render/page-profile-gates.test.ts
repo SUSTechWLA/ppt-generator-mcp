@@ -167,7 +167,7 @@ test("real planned composition exposes fact-bearing DOM text and enforces the ex
   try {
     const profiles = loadTemplateProfiles(resolve("templates"));
     const sourceText = `<page 205>\n\u4e00\u7ea7\u6807\u9898\uff1a\u670d\u52a1\u5b9e\u65bd\n\u4e8c\u7ea7\u6807\u9898\uff1a\u5c65\u7ea6\u7ba1\u7406\n\u4e09\u7ea7\u6807\u9898\uff1a\u54cd\u5e94\u673a\u5236\n\u56db\u7ea7\u6807\u9898\uff1a\u7a33\u5b9a\u8fd0\u884c\n\u6b63\u6587\uff1a\n\u56fa\u5b9a\u8d1f\u8d23\u4eba\u914d\u7f6e\u6570\u91cf\u4e3a1\u540d\u3002\n\u89c4\u5b9a\u54cd\u5e94\u65f6\u9650\u4e3a30\u5206\u949f\u3002`;
-    const planned = await planDeckWorkflow({ sourceText, pageNumbers: [205], documentType: "bid" }, createPlanDeckDependencies({ deckStore: new DeckStore(directory), profiles }));
+    const planned = await planDeckWorkflow({ sourceText, pageNumbers: [205], documentType: "bid", quality: { minScore: 90, maxAttempts: 3 } }, createPlanDeckDependencies({ deckStore: new DeckStore(directory), profiles }));
     const slide = planned.plannedDeck.slides[0];
     const composed = await composeSlide({
       spec: slide.plannedSpec,
@@ -196,7 +196,7 @@ test("real planned composition exposes fact-bearing DOM text and enforces the ex
         pageNumber: slide.page.number,
         status: "delivered",
         selectedTemplateSlug: slide.templateSlug,
-        quality: { score: 92, threshold: 90, hardGatePassed: true },
+        quality: { score: 92, threshold: 90, hardGatePassed: true, attempts: 1 },
         render: exact,
       }],
     });

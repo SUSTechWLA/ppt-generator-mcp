@@ -53,7 +53,7 @@ function validateMagic(bytes: Buffer, mimeType: GeneratedAsset["mimeType"]): voi
   if (!valid) throw new Error(`Image bytes do not match ${mimeType}`);
 }
 
-function parseDataUrl(dataUrl: string): { bytes: Buffer; mimeType: GeneratedAsset["mimeType"] } {
+export function parseExternalAssetDataUrl(dataUrl: string): { bytes: Buffer; mimeType: GeneratedAsset["mimeType"] } {
   const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp|svg\+xml));base64,([A-Za-z0-9+/=\s]+)$/);
   if (!match) throw new Error("External asset must be a supported Base64 image data URL");
   const mimeType = match[1] as GeneratedAsset["mimeType"];
@@ -132,7 +132,7 @@ export async function generateAssets(input: GenerateAssetsInput): Promise<Genera
 
     const supplied = external.get(spec.id);
     if (supplied) {
-      const parsed = parseDataUrl(supplied);
+      const parsed = parseExternalAssetDataUrl(supplied);
       if (parsed.bytes.length > input.maxBytes) throw new Error("External asset exceeds maximum byte size");
       results.push(await persistAsset(input.outputDir, spec, hash, parsed.bytes, parsed.mimeType));
       continue;

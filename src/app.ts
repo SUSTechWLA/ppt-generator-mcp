@@ -28,11 +28,19 @@ import {
   planDeckWorkflow,
   type PlanDeckDependencies,
 } from "./workflow/plan-deck.js";
+import {
+  createGenerateDeckDependencies,
+  generateDeckWorkflow,
+  type GenerateDeckDependencies,
+} from "./workflow/generate-deck.js";
+import { generatePreparedSlideWorkflow } from "./workflow/generate-slide.js";
 
 export interface ProductionDependencies extends PptMcpDependencies {
   deckStore: DeckStore;
   planDeckDependencies: PlanDeckDependencies;
   planDeck(rawInput: unknown): ReturnType<typeof planDeckWorkflow>;
+  generateDeckDependencies: GenerateDeckDependencies;
+  generateDeck(rawInput: unknown): ReturnType<typeof generateDeckWorkflow>;
 }
 
 export function createProductionDependencies(
@@ -55,7 +63,7 @@ export function createProductionDependencies(
   const deckStore = new DeckStore(config.outputRoot);
   const planDeckDependencies = createPlanDeckDependencies({ deckStore, profiles });
 
-  const dependencies: ProductionDependencies = {
+  const baseDependencies: Omit<ProductionDependencies, "generateDeckDependencies" | "generateDeck"> = {
     templatesDir,
     runStore,
     profiles,
@@ -109,6 +117,11 @@ export function createProductionDependencies(
           const qualityPath = join(directory, "quality.json");
           const profile = profiles.find((candidate) => candidate.slug === state.templateSlug);
           if (!profile) throw new Error(`Approved profile not found: ${state.templateSlug}`);
+          if (workflowInput.requiredThemeId && (profile.themeId !== workflowInput.requiredThemeId
+            || profile.format !== workflowInput.initialProfile?.format
+            || (workflowInput.documentType && !profile.documentCompatibility[workflowInput.documentType]))) {
+            throw new Error("Repair template is incompatible with the persisted theme, format, or document policy");
+          }
           const composed = attempt === 1 && state.templateSlug === workflowInput.selection.slug
             ? workflowInput.initialPage
             : await composeSlide({
@@ -133,7 +146,7 @@ export function createProductionDependencies(
           if (!render) throw new Error(`Render result missing for attempt ${attempt}`);
           const profile = profiles.find((candidate) => candidate.slug === state.templateSlug);
           if (!profile) throw new Error(`Approved profile not found: ${state.templateSlug}`);
-          const policy = getDocumentTemplatePolicy(workflowInput.documentType ?? "presentation");
+          const policy = workflowInput.documentPolicy ?? getDocumentTemplatePolicy(workflowInput.documentType ?? "presentation");
           const deterministic = evaluateDeterministic(render, {
             maxRasterAreaRatio: Math.min(profile.maxRasterAreaRatio, policy.maxRasterAreaRatio),
             maximumRasterAssets: policy.maxImageAssets,
@@ -141,6 +154,8 @@ export function createProductionDependencies(
             profile,
             documentPolicy: policy,
             ...(workflowInput.page ? { expectedPageNumber: workflowInput.page.number } : {}),
+            ...(workflowInput.expectedMetadataBindings ? { expectedMetadataBindings: workflowInput.expectedMetadataBindings } : {}),
+            ...(workflowInput.displayPlan ? { displayPlan: workflowInput.displayPlan, plannedSpec: workflowInput.spec } : {}),
           });
           const quality = await evaluateSlide({
             source: workflowInput.source,
@@ -158,7 +173,18 @@ export function createProductionDependencies(
           actions,
           source: workflowInput.source,
           switchTemplate: async (current) => {
-            const selection = selectTemplate(current.spec, profiles, undefined, workflowInput.documentType, workflowInput.preferredThemeId);
+            const compatibleProfiles = workflowInput.requiredThemeId
+              ? profiles.filter((profile) => profile.themeId === workflowInput.requiredThemeId
+                && profile.format === workflowInput.initialProfile?.format
+                && (!workflowInput.documentType || profile.documentCompatibility[workflowInput.documentType]))
+              : profiles;
+            const selection = selectTemplate(
+              current.spec,
+              compatibleProfiles,
+              undefined,
+              workflowInput.documentType,
+              workflowInput.requiredThemeId ?? workflowInput.preferredThemeId,
+            );
             return selection.candidates.find((candidate) => candidate.slug !== current.templateSlug)?.slug ?? current.templateSlug;
           },
           regenerateAsset: async (assetId, current) => {
@@ -180,5 +206,46 @@ export function createProductionDependencies(
       });
     },
   };
-  return dependencies;
+  const generateDeckDependencies = createGenerateDeckDependencies({
+    deckStore,
+    profiles,
+    generatePage: (input) => generatePreparedSlideWorkflow({
+      source: input.source,
+      plannedSpec: input.plannedSpec,
+      selection: input.selection,
+      profile: input.profile,
+      externalAssets: input.externalAssets,
+      quality: input.quality,
+      documentType: input.documentPolicy.documentType,
+      page: input.page,
+      displayPlan: input.displayPlan,
+      expectedMetadataBindings: input.expectedMetadataBindings,
+      requiredThemeId: input.themeId,
+      documentPolicy: input.documentPolicy,
+      requestId: input.requestId,
+    }, baseDependencies),
+    inspectDeliveredPage: async (input, result) => {
+      const selectedProfile = profiles.find((profile) => profile.slug === result.selectedTemplate.slug);
+      if (!selectedProfile) throw new Error("Delivered page references an unknown approved profile");
+      const artifact = await runStore.getArtifact(result.runId, "final.html");
+      if (!artifact.text) throw new Error("Delivered page HTML is unavailable for consistency inspection");
+      const render = await renderPage({
+        html: artifact.text,
+        screenshotPath: join(runStore.runDir(result.runId), "final.png"),
+        validatedOverlapPairs: selectedProfile.overlapExemptions,
+      });
+      return {
+        pageNumber: input.page.number,
+        status: result.status,
+        selectedTemplateSlug: result.selectedTemplate.slug,
+        quality: result.quality,
+        render,
+      };
+    },
+  });
+  return {
+    ...baseDependencies,
+    generateDeckDependencies,
+    generateDeck: (rawInput) => generateDeckWorkflow(rawInput, generateDeckDependencies),
+  };
 }

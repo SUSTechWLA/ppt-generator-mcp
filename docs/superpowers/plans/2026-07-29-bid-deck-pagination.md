@@ -356,32 +356,25 @@ git commit -m "feat: paginate bid source by semantic boundaries"
 
 ---
 
-### Task 3: Generic page-blueprint planning and semantic slot solving
+### Task 3: Generic template-independent page-blueprint planning
 
 **Files:**
 - Create: `src/domain/page-blueprint.ts`
 - Create: `src/services/page-blueprint-builder.ts`
-- Create: `src/services/template-slot-solver.ts`
-- Modify: `src/services/slide-content-mapper.ts`
-- Modify: `src/services/slide-composer.ts`
 - Test: `tests/unit/page-blueprint-builder.test.ts`
-- Test: `tests/unit/template-slot-solver.test.ts`
-- Test: `tests/unit/slide-composer.test.ts`
 
 **Interfaces:**
 - Consumes: a `PagePartition`, locally normalized `SourceDocument`, `DocumentType`, and optional audience.
 - Produces a template-independent `PageBlueprint` containing semantic roles (`headline | conclusion | fact | metric | process | comparison | evidence | visual`), ordered content groups, density, visual need, source references, and page-scoped asset intents.
-- Produces `solveTemplateSlots(blueprint, profile)` with explicit assignments, transformations, capacity use, and unmatched-role diagnostics; the solver knows profile capabilities and slot IDs but not template slugs.
-- Produces `materializeSlideSpec(blueprint, solution): SlideSpec` and page-aware `mapSlideContent(...)` without row-number-specific binding.
+- Produces `materializeSlideSpec(blueprint): SlideSpec` as the existing workflow compatibility representation while retaining semantic roles and all source fact references.
 
-- [ ] **Step 1: Write failing generic blueprint and solver tests**
+- [ ] **Step 1: Write failing generic blueprint tests**
 
 ```ts
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeSource } from "../../src/services/content-normalizer.js";
 import { buildPageBlueprint } from "../../src/services/page-blueprint-builder.js";
-import { solveTemplateSlots } from "../../src/services/template-slot-solver.js";
 
 test("planner derives semantic roles and keeps every source fact", () => {
   const source = normalizeSource({ sourceText: "# 应急响应\n重点区域覆盖8个项目。指令后30分钟启动，1小时到场。\n## 闭环\n每日记录，每周协调，每月优化。" });
@@ -392,51 +385,44 @@ test("planner derives semantic roles and keeps every source fact", () => {
   assert.ok(blueprint.groups.length >= 2);
 });
 
-test("equivalent profiles produce the same assignment after slug rename", () => {
-  const a = makeProfile({ slug: "alpha-layout" });
-  const b = makeProfile({ slug: "renamed-layout" });
-  const first = solveTemplateSlots(makeBlueprint(), a);
-  const second = solveTemplateSlots(makeBlueprint(), b);
-  assert.deepEqual(first.assignments, second.assignments);
-  assert.equal(first.unmatched.length, 0);
+test("planner is domain and page-number independent", () => {
+  const source = normalizeSource({ sourceText: "# 产品路线图\n第一阶段完成调研。第二阶段上线内测。第三阶段覆盖50家客户。" });
+  const blueprint = buildPageBlueprint(source, { pageNumber: 3, title: "产品路线图", documentType: "presentation" });
+  assert.equal(blueprint.pageNumber, 3);
+  assert.ok(blueprint.groups.some((group) => group.role === "process"));
 });
 ```
 
-Add a cross-domain test using a product roadmap document with non-59 page numbers, and a composer assertion:
+Add a cross-domain test using a product roadmap document with non-59 page numbers.
 
 ```ts
-assert.match(result.html, />17<\/span>/);
-assert.match(result.html, /30分钟/);
-assert.doesNotMatch(result.html, />1<\/span>/);
+assert.equal(blueprint.pageNumber, 17);
+assert.match(JSON.stringify(blueprint), /30分钟/);
 ```
 
-- [ ] **Step 2: Run blueprint, solver, and composer tests to verify failure**
+- [ ] **Step 2: Run blueprint tests to verify failure**
 
-Run: `node --import tsx --test tests/unit/page-blueprint-builder.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts`
+Run: `node --import tsx --test tests/unit/page-blueprint-builder.test.ts`
 
-Expected: FAIL because the blueprint and slot solver do not exist.
+Expected: FAIL because the blueprint builder does not exist.
 
-- [ ] **Step 3: Implement fact-preserving semantic planning and slot solving**
+- [ ] **Step 3: Implement fact-preserving semantic planning**
 
 The builder must cluster facts by source section, discourse markers, repeated subject, metric/process cues, and dependency links. Group count is determined by content and configurable bounds, never a constant. Every group carries source fact IDs. Create zero or one visual intent only when it adds explanatory value; prompts use document/page context and source facts, never a hard-coded industry, theme color, or page number narrative.
 
-The solver performs deterministic constrained matching: hard capacity and required-role checks first, then weighted role compatibility, density use, visual-ratio fit, and source-order preservation. It may merge adjacent compatible groups or compress copy within recorded limits, but must return an error if any source fact would become unrepresented.
+`materializeSlideSpec` converts semantic groups into the existing block types without changing order or facts. Extend the compatibility schema only where necessary to retain group roles; existing single-slide callers must continue to parse.
 
-In `slide-content-mapper.ts`, bind through profile-declared slot selectors/roles. The same mapper must work after slug renaming and for a fixture template whose slot IDs/order differ from the current green templates.
+- [ ] **Step 4: Run generic planning and fact-reference tests**
 
-Pass the optional page metadata from `generateSlideWorkflow` through `WorkflowQualityInput`, `composeSlide`, and every repair composition so the page number never resets during retries.
-
-- [ ] **Step 4: Run generic planning, mapping, composer, and fact-reference tests**
-
-Run: `node --import tsx --test tests/unit/page-blueprint-builder.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts tests/unit/slide-spec-builder.test.ts`
+Run: `node --import tsx --test tests/unit/page-blueprint-builder.test.ts tests/unit/slide-spec-builder.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit bid page planning and mapping**
 
 ```bash
-git add src/domain/page-blueprint.ts src/services/page-blueprint-builder.ts src/services/template-slot-solver.ts src/services/slide-content-mapper.ts src/services/slide-composer.ts src/workflow/generate-slide.ts src/app.ts tests/unit/page-blueprint-builder.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts
-git commit -m "feat: map semantic page blueprints into template slots"
+git add src/domain/page-blueprint.ts src/services/page-blueprint-builder.ts src/domain/slide-spec.ts tests/unit/page-blueprint-builder.test.ts
+git commit -m "feat: plan template-independent page blueprints"
 ```
 
 ---
@@ -446,13 +432,19 @@ git commit -m "feat: map semantic page blueprints into template slots"
 **Files:**
 - Modify: `src/domain/template-profile.ts`
 - Modify: `templates/green-infographic/template-profiles.json`
+- Create: `src/services/template-slot-solver.ts`
 - Modify: `src/services/template-selector.ts`
+- Modify: `src/services/slide-content-mapper.ts`
+- Modify: `src/services/slide-composer.ts`
 - Modify: `src/app.ts`
 - Test: `tests/unit/template-selector.test.ts`
+- Test: `tests/unit/template-slot-solver.test.ts`
+- Test: `tests/unit/slide-composer.test.ts`
 
 **Interfaces:**
 - Consumes: `PageBlueprint`/`SlideSpec`, approved capability profiles, optional forced slug, and a generic document policy derived from `DocumentType`.
 - Produces: `selectTemplate(...)` whose compatibility, policy filtering, scoring, and repair candidates depend only on declared capabilities. The selected slug is an output identifier, never an input to business scoring.
+- Produces `solveTemplateSlots(blueprint, profile)` with explicit assignments, transformations, capacity use, and unmatched-role diagnostics; page-aware mapping binds through profile-declared slot selectors/roles, not row positions.
 
 - [ ] **Step 1: Add failing capability and rename-invariance tests**
 
@@ -466,6 +458,12 @@ test("renaming every slug does not change capability ranking", () => {
   const original = selectTemplate(makeSlideSpec(), profiles, undefined, "proposal");
   const renamed = selectTemplate(makeSlideSpec(), renameProfiles(profiles), undefined, "proposal");
   assert.deepEqual(original.candidates.map((x) => x.score), renamed.candidates.map((x) => x.score));
+});
+
+test("equivalent profiles produce the same slot assignment after slug rename", () => {
+  const first = solveTemplateSlots(makeBlueprint(), makeProfile({ slug: "alpha-layout" }));
+  const second = solveTemplateSlots(makeBlueprint(), makeProfile({ slug: "renamed-layout" }));
+  assert.deepEqual(first.assignments, second.assignments);
 });
 
 test("forced template still must satisfy document policy", () => {
@@ -486,6 +484,8 @@ Expected: FAIL because `selectTemplate` does not apply document policies.
 
 Extend profiles with stable slot IDs/selectors/roles/capacities, `themeId`, `pageIntents`, `requiredLandmarks`, `maxRasterAreaRatio`, and document compatibility. Migrate every existing profile explicitly; do not infer business capability from filenames. The selector must hard-filter impossible capacity/policy matches, then score semantic role coverage, density fit, visual fit, page intent, and theme continuity. Stable tie-breaking may use catalog order, not slug lexicography. In `app.ts`, apply the same policy and candidate set during repair.
 
+The solver performs deterministic constrained matching: hard capacity and required-role checks first, then weighted role compatibility, density use, visual-ratio fit, and source-order preservation. It may merge adjacent compatible groups or compress copy within recorded limits, but must return an error if any source fact would become unrepresented. `slide-content-mapper.ts` binds content through declared selectors/roles. Pass page metadata through initial and repair compositions so page numbers never reset. The same mapper must work for a fixture template whose slot IDs/order differ from the current templates.
+
 - [ ] **Step 4: Run selector and quality-loop tests**
 
 Run: `node --import tsx --test tests/unit/template-selector.test.ts tests/unit/quality-loop.test.ts`
@@ -495,7 +495,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit template policy**
 
 ```bash
-git add src/domain/template-profile.ts templates/green-infographic/template-profiles.json src/services/template-selector.ts src/app.ts tests/unit/template-selector.test.ts
+git add src/domain/template-profile.ts templates/green-infographic/template-profiles.json src/services/template-slot-solver.ts src/services/template-selector.ts src/services/slide-content-mapper.ts src/services/slide-composer.ts src/workflow/generate-slide.ts src/app.ts tests/unit/template-selector.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts
 git commit -m "feat: select templates by declared capabilities"
 ```
 

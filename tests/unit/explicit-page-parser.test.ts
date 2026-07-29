@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { resolve } from "node:path";
 
 import { WorkflowError } from "../../src/domain/workflow-error.js";
 import {
@@ -27,16 +25,21 @@ test("parser maps four arbitrary full-line markers and preserves exact source ra
   assert.ok(parsed.pages.every((chunk, index) => index === 0 || chunk.sourceStart === parsed.pages[index - 1].sourceEnd));
 });
 
-test("canonical upstream fixture yields declared pages, heading metadata, and page-local facts only", () => {
-  const sourceText = readFileSync(resolve(process.cwd(), "../../test.md"), "utf8");
+test("synthetic upstream fixture yields declared pages, heading metadata, and page-local facts only", () => {
+  const sourceText = [
+    page(59, "第一页记录年度计划和月度检查结果。"),
+    page(60, "第二页明确每日1次巡查和30分钟响应要求。"),
+    page(61, "第三页核对3项设备并形成可追溯台账。", "一、现场运行特征分析"),
+    page(62, "第四页在每个作业面完成后独立复核。", "二、客户交付特征分析"),
+  ].join("\n\n");
 
   const partitions = partitionDeckSource({ sourceText, pageNumbers: [59, 60, 61, 62] });
 
   assert.deepEqual(partitions.map((partition) => partition.pageNumber), [59, 60, 61, 62]);
-  assert.equal(partitions[0].headingMetadata.level1, "第一分节：优势与有利条件分析");
-  assert.equal(partitions[0].headingMetadata.level3, "2.1.1 项目背景与采购需求解读");
-  assert.equal(partitions[2].headingMetadata.level4, "一、建筑业总部（3,000㎡）绿化特征分析");
-  assert.equal(partitions[3].title, "二、商务中心（2,239.56㎡）绿化特征分析");
+  assert.equal(partitions[0].headingMetadata.level1, "通用方案");
+  assert.equal(partitions[0].headingMetadata.level3, "实施要求");
+  assert.equal(partitions[2].headingMetadata.level4, "一、现场运行特征分析");
+  assert.equal(partitions[3].title, "二、客户交付特征分析");
   assert.ok(partitions.every((partition) => partition.normalizedSource.facts.length > 0));
   assert.equal(
     new Set(partitions.flatMap((partition) => partition.originalSourceFactIds)).size,
@@ -156,4 +159,49 @@ test("parser rejects an empty explicit page body", () => {
       && /Page 51 body is empty/.test(error.message)
       && Boolean(error.recovery),
   );
+});
+
+for (const scenario of [
+  {
+    name: "a duplicate body label after LF body content",
+    suffix: "\n第一段内容。\n正文：\n第二段内容。",
+    message: /Page 71 contains a duplicate 正文： label after body content/,
+  },
+  {
+    name: "an indented duplicate body label after CRLF body content",
+    suffix: "\r\n第一段内容。\r\n  正文: 第二段内容。",
+    message: /Page 71 contains a duplicate 正文： label after body content/,
+  },
+  {
+    name: "a late structural heading label after LF body content",
+    suffix: "\n第一段内容。\n四级标题：迟到的小节\n第二段内容。",
+    message: /Page 71 contains 四级标题： after the body has started/,
+  },
+  {
+    name: "an indented late structural heading label after CRLF body content",
+    suffix: "\r\n第一段内容。\r\n\t一级标题: 迟到的章节\r\n第二段内容。",
+    message: /Page 71 contains 一级标题： after the body has started/,
+  },
+] as const) {
+  test(`parser rejects ${scenario.name}`, () => {
+    const sourceText = page(71, "").replace(/\n$/, "") + scenario.suffix;
+
+    assert.throws(
+      () => parseExplicitPages(sourceText),
+      (error: unknown) => error instanceof WorkflowError
+        && error.stage === "parse_explicit_pages"
+        && scenario.message.test(error.message)
+        && Boolean(error.recovery?.includes("one heading block")),
+    );
+  });
+}
+
+test("parser allows ordinary colon-bearing prose lines after the body starts", () => {
+  const sourceText = `<page 72>\r\n一级标题：通用方案\r\n二级标题：运行管理\r\n三级标题：实施要求\r\n正文：\r\n处理说明：负责人每日复核1次。\r\n章节编号：2.1.2。\r\n普通正文中可以引用“正文：”和“一级标题：”字样。`;
+
+  const parsed = parseExplicitPages(sourceText);
+
+  assert.equal(parsed.mode, "explicit");
+  assert.match(parsed.pages[0].body, /处理说明：/);
+  assert.match(parsed.pages[0].body, /普通正文中可以引用/);
 });

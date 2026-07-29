@@ -144,6 +144,7 @@ function parseChunk(
 ): ExplicitPageChunk {
   const metadata: ExplicitHeadingMetadata = { additionalLabels: [] };
   let bodyLabelLine: SourceLine | undefined;
+  let bodyLabelLineIndex = -1;
 
   for (let index = marker.lineIndex + 1; index < lines.length && lines[index].start < sourceEnd; index += 1) {
     const line = lines[index];
@@ -152,6 +153,7 @@ function parseChunk(
 
     if (BODY_LABEL.test(line.text)) {
       bodyLabelLine = line;
+      bodyLabelLineIndex = index;
       break;
     }
 
@@ -190,6 +192,25 @@ function parseChunk(
       `Page ${marker.pageNumber} is missing the 正文： label`,
       "Add a full labeled 正文： line after the page headings.",
     );
+  }
+
+  for (let index = bodyLabelLineIndex + 1; index < lines.length && lines[index].start < sourceEnd; index += 1) {
+    const line = lines[index];
+    if (BODY_LABEL.test(line.text)) {
+      explicitPageError(
+        `Page ${marker.pageNumber} contains a duplicate 正文： label after body content`,
+        "Keep one heading block and one 正文： label before the page body.",
+      );
+    }
+
+    const labelMatch = line.text.trim().match(HEADING_LABEL);
+    const levelKey = labelMatch ? LEVEL_LABELS.get(labelMatch[1].trim()) : undefined;
+    if (levelKey) {
+      explicitPageError(
+        `Page ${marker.pageNumber} contains ${labelMatch?.[1].trim()}： after the body has started`,
+        "Keep one heading block before 正文： and move all body prose after it.",
+      );
+    }
   }
 
   const colonIndex = bodyLabelLine.text.search(/[：:]/u);

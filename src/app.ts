@@ -60,7 +60,11 @@ export function createProductionDependencies(
   const reviewProvider = config.review
     ? createOpenAICompatibleReviewProvider(config.review, config.limits.requestTimeoutMs)
     : undefined;
-  const runStore = new RunStore(config.outputRoot);
+  const runStore = new RunStore(config.outputRoot, {
+    maxImageBytes: config.limits.maxImageBytes,
+    maxAssets: config.limits.maxAssets,
+    maxInputChars: config.limits.maxInputChars,
+  });
   const deckStore = new DeckStore(config.outputRoot);
   const planDeckDependencies = createPlanDeckDependencies({ deckStore, profiles });
 
@@ -229,8 +233,7 @@ export function createProductionDependencies(
     inspectDeliveredPage: async (input, result) => {
       const selectedProfile = profiles.find((profile) => profile.slug === result.selectedTemplate.slug);
       if (!selectedProfile) throw new Error("Delivered page references an unknown approved profile");
-      const artifact = await runStore.getArtifact(result.runId, "final.html");
-      if (!artifact.text) throw new Error("Delivered page HTML is unavailable for consistency inspection");
+      const artifact = await runStore.readFinalHtmlForConsistency(result.runId, input.plannedSpec.assets.length);
       const render = await renderPage({
         html: artifact.text,
         screenshotPath: join(runStore.runDir(result.runId), "final.png"),

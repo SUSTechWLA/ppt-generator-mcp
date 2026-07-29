@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,6 +91,102 @@ test("artifact lookup rejects a symlinked run directory and non-regular artifact
   await mkdir(runDirectory);
   await mkdir(join(runDirectory, "final.html"));
   await assert.rejects(() => store.getArtifact(run.runId, "final.html"), /artifact.*unavailable/i);
+});
+
+test("internal consistency read accepts bounded large HTML while public artifact text remains capped", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ppt-runs-internal-large-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new RunStore(root, {
+    maxImageBytes: 600 * 1024,
+    maxAssets: 2,
+    maxInputChars: 2_000,
+  });
+  const run = await store.createOrResume({ canonicalInput });
+  const largeHtml = `<html><body>${"x".repeat(700 * 1024)}</body></html>`;
+  await writeFile(join(store.runDir(run.runId), "final.html"), largeHtml, "utf8");
+
+  const publicArtifact = await store.getArtifact(run.runId, "final.html");
+  assert.ok(publicArtifact.size > 512 * 1024);
+  assert.equal(publicArtifact.text, undefined);
+
+  const internalArtifact = await store.readFinalHtmlForConsistency(run.runId, 1);
+  assert.equal(internalArtifact.size, Buffer.byteLength(largeHtml));
+  assert.equal(internalArtifact.text, largeHtml);
+  assert.equal("path" in internalArtifact, false, "internal consumers must not receive physical storage paths");
+});
+
+test("internal consistency read fails closed for over-budget, symlink, directory and escaped storage", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ppt-runs-internal-unsafe-"));
+  const outside = await mkdtemp(join(tmpdir(), "ppt-runs-internal-secret-"));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+  const store = new RunStore(root, {
+    maxImageBytes: 1_024,
+    maxAssets: 1,
+    maxInputChars: 100,
+  });
+  const overBudget = await store.createOrResume({ canonicalInput: { kind: "over-budget" } });
+  const overBudgetCanary = "OVER_BUDGET_PRIVATE_CONTENT";
+  await writeFile(
+    join(store.runDir(overBudget.runId), "final.html"),
+    `<html>${overBudgetCanary}${"x".repeat(20 * 1024 * 1024)}</html>`,
+    "utf8",
+  );
+  await assert.rejects(
+    () => store.readFinalHtmlForConsistency(overBudget.runId, 1),
+    (error: Error) => {
+      assert.match(error.message, /artifact.*unavailable/i);
+      assert.doesNotMatch(error.message, new RegExp(`${overBudgetCanary}|${root}|${outside}`));
+      return true;
+    },
+  );
+
+  const symlinkRun = await store.createOrResume({ canonicalInput: { kind: "symlink" } });
+  const symlinkCanary = "SYMLINK_PRIVATE_CONTENT";
+  const outsideFile = join(outside, "secret.html");
+  await writeFile(outsideFile, symlinkCanary, "utf8");
+  await symlink(outsideFile, join(store.runDir(symlinkRun.runId), "final.html"), "file");
+  await assert.rejects(
+    () => store.readFinalHtmlForConsistency(symlinkRun.runId, 1),
+    (error: Error) => {
+      assert.match(error.message, /artifact.*unavailable/i);
+      assert.doesNotMatch(error.message, new RegExp(`${symlinkCanary}|${root}|${outside}`));
+      return true;
+    },
+  );
+
+  const directoryRun = await store.createOrResume({ canonicalInput: { kind: "directory" } });
+  await mkdir(join(store.runDir(directoryRun.runId), "final.html"));
+  await assert.rejects(
+    () => store.readFinalHtmlForConsistency(directoryRun.runId, 0),
+    /artifact.*unavailable/i,
+  );
+
+  const rootLink = join(tmpdir(), `ppt-runs-internal-root-link-${Date.now()}`);
+  const realRoot = await mkdtemp(join(tmpdir(), "ppt-runs-internal-root-real-"));
+  t.after(async () => {
+    await rm(rootLink, { recursive: true, force: true });
+    await rm(realRoot, { recursive: true, force: true });
+  });
+  const rootStore = new RunStore(realRoot, {
+    maxImageBytes: 1_024,
+    maxAssets: 1,
+    maxInputChars: 100,
+  });
+  const rootRun = await rootStore.createOrResume({ canonicalInput: { kind: "root-link" } });
+  await writeFile(join(rootStore.runDir(rootRun.runId), "final.html"), "ROOT_LINK_PRIVATE_CONTENT", "utf8");
+  await rename(realRoot, rootLink);
+  await symlink(rootLink, realRoot, "dir");
+  await assert.rejects(
+    () => rootStore.readFinalHtmlForConsistency(rootRun.runId, 0),
+    (error: Error) => {
+      assert.match(error.message, /artifact.*unavailable/i);
+      assert.doesNotMatch(error.message, /ROOT_LINK_PRIVATE_CONTENT|ppt-runs-internal-root/i);
+      return true;
+    },
+  );
 });
 
 test("normalizes quality diagnostics before RunStore writes the first attempt artifact", async () => {

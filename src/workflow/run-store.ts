@@ -15,6 +15,17 @@ interface RequestIndexEntry {
   fingerprint: string;
 }
 
+export interface InternalArtifactReadLimits {
+  maxImageBytes: number;
+  maxAssets: number;
+  maxInputChars: number;
+}
+
+interface VerifiedArtifact {
+  path: string;
+  size: number;
+}
+
 type RequestIndex = Record<string, RequestIndexEntry>;
 
 export interface ActiveRun {
@@ -26,6 +37,10 @@ export interface ActiveRun {
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ARTIFACTS = new Set<ArtifactName>(["manifest.json", "final.html", "final.png", "quality.json"]);
+const PUBLIC_TEXT_ARTIFACT_MAX_BYTES = 512 * 1024;
+const CONSISTENCY_MARKUP_OVERHEAD_BYTES = 2 * 1024 * 1024;
+const DATA_URL_MARKUP_OVERHEAD_BYTES = 128;
+const MAX_UTF8_BYTES_PER_INPUT_CHARACTER = 4;
 
 class UnsafeArtifactEntryError extends Error {}
 
@@ -55,9 +70,18 @@ async function readJson<T>(path: string, fallback?: T): Promise<T> {
 
 export class RunStore {
   readonly root: string;
+  readonly #internalReadLimits?: Readonly<InternalArtifactReadLimits>;
 
-  constructor(root: string) {
+  constructor(root: string, internalReadLimits?: InternalArtifactReadLimits) {
     this.root = resolve(root);
+    if (internalReadLimits) {
+      if (!Number.isSafeInteger(internalReadLimits.maxImageBytes) || internalReadLimits.maxImageBytes <= 0
+        || !Number.isSafeInteger(internalReadLimits.maxAssets) || internalReadLimits.maxAssets < 0
+        || !Number.isSafeInteger(internalReadLimits.maxInputChars) || internalReadLimits.maxInputChars <= 0) {
+        throw new Error("Invalid internal artifact read limits");
+      }
+      this.#internalReadLimits = Object.freeze({ ...internalReadLimits });
+    }
   }
 
   runDir(runId: string): string {
@@ -188,7 +212,7 @@ export class RunStore {
     return this.writeManifest(manifest);
   }
 
-  async getArtifact(runId: string, artifactName: ArtifactName): Promise<{ path: string; size: number; text?: string }> {
+  private async resolveVerifiedArtifact(runId: string, artifactName: ArtifactName): Promise<VerifiedArtifact> {
     const directory = this.runDir(runId);
     if (!ARTIFACTS.has(artifactName)) throw new Error(`Invalid artifact name: ${artifactName}`);
     const path = artifactName === "manifest.json" ? this.manifestPath(runId) : join(directory, artifactName);
@@ -215,15 +239,50 @@ export class RunStore {
 
       const metadata = await stat(path);
       if (!metadata.isFile()) throw new UnsafeArtifactEntryError();
-      const result: { path: string; size: number; text?: string } = { path, size: metadata.size };
-      if (metadata.size <= 512 * 1024 && artifactName !== "final.png") result.text = await readFile(path, "utf8");
-      return result;
+      return { path, size: metadata.size };
     } catch (error) {
       if (isErrno(error, "ENOENT")) throw new Error(`Artifact not found (${artifactName})`);
       if (error instanceof UnsafeArtifactEntryError || isErrno(error, "ELOOP")) {
         throw new Error(`Artifact unavailable (${artifactName}): unsafe storage entry`);
       }
       throw new Error(`Unable to read artifact (${artifactName})`);
+    }
+  }
+
+  async getArtifact(runId: string, artifactName: ArtifactName): Promise<{ path: string; size: number; text?: string }> {
+    const artifact = await this.resolveVerifiedArtifact(runId, artifactName);
+    const result: { path: string; size: number; text?: string } = { ...artifact };
+    if (artifact.size <= PUBLIC_TEXT_ARTIFACT_MAX_BYTES && artifactName !== "final.png") {
+      try {
+        result.text = await readFile(artifact.path, "utf8");
+      } catch {
+        throw new Error(`Unable to read artifact (${artifactName})`);
+      }
+    }
+    return result;
+  }
+
+  async readFinalHtmlForConsistency(runId: string, plannedAssetCount: number): Promise<{ size: number; text: string }> {
+    const limits = this.#internalReadLimits;
+    if (!limits
+      || !Number.isSafeInteger(plannedAssetCount)
+      || plannedAssetCount < 0
+      || plannedAssetCount > limits.maxAssets) {
+      throw new Error("Artifact unavailable (final.html)");
+    }
+    const base64BytesPerAsset = 4 * Math.ceil(limits.maxImageBytes / 3);
+    const markupBytes = CONSISTENCY_MARKUP_OVERHEAD_BYTES
+      + limits.maxInputChars * MAX_UTF8_BYTES_PER_INPUT_CHARACTER;
+    const maxBytes = markupBytes
+      + plannedAssetCount * (base64BytesPerAsset + DATA_URL_MARKUP_OVERHEAD_BYTES);
+    if (!Number.isSafeInteger(maxBytes)) throw new Error("Artifact unavailable (final.html)");
+
+    const artifact = await this.resolveVerifiedArtifact(runId, "final.html");
+    if (artifact.size > maxBytes) throw new Error("Artifact unavailable (final.html)");
+    try {
+      return { size: artifact.size, text: await readFile(artifact.path, "utf8") };
+    } catch {
+      throw new Error("Artifact unavailable (final.html)");
     }
   }
 }

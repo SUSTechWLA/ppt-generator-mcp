@@ -54,6 +54,51 @@ function formatCanvas(format: TemplateProfile["format"]): { width: number; heigh
   return { width: 0, height: 0 };
 }
 
+function inRange(value: number, range: [number, number], tolerance = 0.0005): boolean {
+  return Number.isFinite(value) && value >= range[0] - tolerance && value <= range[1] + tolerance;
+}
+
+function matchesProfileContract(
+  pageNumber: number,
+  structure: RenderStructure,
+  viewport: { width: number; height: number },
+  snapshot: TemplateProfile,
+  issues: string[],
+): void {
+  const contract = snapshot.designContract;
+  if (!contract) {
+    boundedIssue(issues, `Page ${pageNumber} approved profile snapshot has no persisted design contract`);
+    return;
+  }
+  const tokens = structure.designTokens;
+  if (!contract.tokens.fontFamilies.includes(tokens.fontFamily)
+    || !contract.tokens.textColors.includes(tokens.textColor)
+    || !contract.tokens.backgroundColors.includes(tokens.backgroundColor)) {
+    boundedIssue(issues, `Page ${pageNumber} rendered typography or color tokens do not match its persisted approved profile contract`);
+  }
+  const fontScale = Number.parseFloat(tokens.fontScale);
+  const spacingScale = Number.parseFloat(tokens.spacingScale);
+  if (!inRange(fontScale, contract.tokens.fontScaleRange)
+    || !inRange(spacingScale, contract.tokens.spacingScaleRange)
+    || !contract.tokens.contrastModes.includes(tokens.contrastMode)) {
+    boundedIssue(issues, `Page ${pageNumber} rendered scale or contrast tokens do not match its persisted approved profile contract`);
+  }
+  for (const landmark of snapshot.requiredLandmarks) {
+    const range = contract.landmarkRanges[landmark];
+    const rects = structure.landmarkRects[landmark] ?? [];
+    if (!range || rects.length !== 1 || viewport.width <= 0 || viewport.height <= 0) {
+      boundedIssue(issues, `Page ${pageNumber} landmark ${landmark} has no unique approved geometry contract measurement`);
+      continue;
+    }
+    const rect = rects[0];
+    const matches = inRange(rect.x / viewport.width, range.xRatio)
+      && inRange(rect.y / viewport.height, range.yRatio)
+      && inRange(rect.width / viewport.width, range.widthRatio)
+      && inRange(rect.height / viewport.height, range.heightRatio);
+    if (!matches) boundedIssue(issues, `Page ${pageNumber} landmark ${landmark} geometry does not match its persisted approved profile contract`);
+  }
+}
+
 function boundedIssue(issues: string[], value: string): void {
   if (issues.length < 100) issues.push(value.slice(0, 500));
 }
@@ -115,6 +160,7 @@ export function evaluateDeckConsistency(input: DeckConsistencyInput): DeckConsis
       const actual = page.render.structure.pageFields[binding.field] ?? [];
       if (!stringArrayEqual(actual, binding.values)) boundedIssue(issues, `Page ${slide.page.number} visible metadata ${binding.field} does not match its own plan`);
     }
+    matchesProfileContract(slide.page.number, page.render.structure, page.render.viewport, snapshot, issues);
     if (firstTokens !== undefined && tokenFingerprint(page.render.structure.designTokens) !== firstTokens) boundedIssue(issues, `Page ${slide.page.number} typography, color, spacing, or contrast design tokens are inconsistent`);
     if (firstRhythm !== undefined && rhythmFingerprint(page.render.structure) !== firstRhythm) boundedIssue(issues, `Page ${slide.page.number} heading and footer hierarchy placement rhythm is inconsistent`);
   }

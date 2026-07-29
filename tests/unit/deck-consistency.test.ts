@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { plannedDeckSchema } from "../../src/domain/deck-plan.js";
 import { hashCanonical } from "../../src/domain/source-document.js";
 import { evaluateDeckConsistency, type DeckConsistencyPage } from "../../src/services/deck-consistency.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
@@ -42,12 +43,13 @@ function delivery(slide: Awaited<ReturnType<typeof fixture>>["plannedDeck"]["sli
       structure: {
         pageNumber: String(slide.page.number),
         profile: { slug: slide.templateSlug, version: slide.templateMatch.profileVersion, themeId: slide.templateMatch.themeId, format: slide.templateMatch.profileSnapshot.format },
-        designTokens: { fontFamily: "Arial", textColor: "rgb(23, 53, 42)", backgroundColor: "rgb(255, 255, 255)", fontScale: "1", spacingScale: "1", contrastMode: "normal" },
+        designTokens: { fontFamily: '"Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif', textColor: "rgb(23, 26, 24)", backgroundColor: "rgb(255, 255, 255)", fontScale: "1", spacingScale: "1", contrastMode: "normal" },
         landmarkCounts: { "page-header": 1, "chapter-band": 1, "subsection-title": 1, "summary-band": 1, "page-footer": 1 },
-        landmarkRects: { "page-header": [{ x: 24, y: 24, width: 1075, height: 42 }], "chapter-band": [{ x: 24, y: 69, width: 1075, height: 42 }], "subsection-title": [{ x: 24, y: 114, width: 1075, height: 42 }], "summary-band": [{ x: 24, y: 680, width: 1075, height: 42 }], "page-footer": [{ x: 24, y: 725, width: 1075, height: 42 }] },
+        landmarkRects: { "page-header": [{ x: 0, y: 0, width: 1123, height: 53 }], "chapter-band": [{ x: 8, y: 53, width: 1107, height: 45 }], "subsection-title": [{ x: 0, y: 98, width: 1123, height: 30 }], "summary-band": [{ x: 8, y: 680, width: 1107, height: 42 }], "page-footer": [{ x: 0, y: 764, width: 1123, height: 30 }] },
         pageFields: fields,
         semanticItems: [],
         blankComponents: [],
+        protectedGeneratedText: [],
       },
     },
   };
@@ -112,6 +114,48 @@ test("per-page heading text may change but must match its own persisted metadata
     const wrongMetadata = structuredClone(pages);
     wrongMetadata[1].render.structure.pageFields.subsectionTitle = ["\u4f2a\u9020\u5c0f\u8282"];
     assert.equal(evaluateDeckConsistency({ plannedDeck: f.plannedDeck, loadedProfiles: f.profiles, pages: wrongMetadata }).passed, false);
+  } finally {
+    await rm(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("a synchronized forged style and 1x1 landmark rhythm cannot define its own deck baseline", async () => {
+  const f = await fixture();
+  try {
+    const pages = f.plannedDeck.slides.map(delivery);
+    for (const page of pages) {
+      page.render.structure.designTokens = {
+        fontFamily: "Times New Roman",
+        textColor: "rgb(1, 1, 1)",
+        backgroundColor: "rgb(2, 2, 2)",
+        fontScale: "0.5",
+        spacingScale: "0.5",
+        contrastMode: "normal",
+      };
+      for (const landmark of Object.keys(page.render.structure.landmarkRects)) {
+        page.render.structure.landmarkRects[landmark as keyof typeof page.render.structure.landmarkRects] = [{ x: 1, y: 1, width: 1, height: 1 }];
+      }
+    }
+    const report = evaluateDeckConsistency({ plannedDeck: f.plannedDeck, loadedProfiles: f.profiles, pages });
+    assert.equal(report.passed, false, "deck consistency must compare every page to the persisted approved profile contract");
+    assert.ok(report.issues.some((issue) => /profile|contract|token|landmark|rhythm/i.test(issue)), JSON.stringify(report.issues));
+  } finally {
+    await rm(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy profile snapshots remain parseable but cannot claim a contracted delivery baseline", async () => {
+  const f = await fixture();
+  try {
+    const legacy = structuredClone(f.plannedDeck);
+    for (const slide of legacy.slides) {
+      delete slide.templateMatch.profileSnapshot.designContract;
+      slide.templateMatch.profileCapabilityHash = hashCanonical(slide.templateMatch.profileSnapshot);
+    }
+    assert.equal(plannedDeckSchema.safeParse(legacy).success, true, "optional versioned contract must not invalidate an old persisted snapshot");
+    const report = evaluateDeckConsistency({ plannedDeck: legacy, loadedProfiles: f.profiles, pages: legacy.slides.map(delivery) });
+    assert.equal(report.passed, false);
+    assert.ok(report.issues.some((issue) => /contract|snapshot mismatch/i.test(issue)), JSON.stringify(report.issues));
   } finally {
     await rm(f.directory, { recursive: true, force: true });
   }

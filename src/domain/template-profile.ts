@@ -13,6 +13,27 @@ export const semanticLandmarkSchema = z.enum([
   "page-footer",
 ]);
 
+const normalizedRangeSchema = z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)])
+  .refine(([minimum, maximum]) => minimum <= maximum, "Normalized range must be ordered");
+
+export const profileDesignContractSchema = z.object({
+  version: z.literal(1),
+  tokens: z.object({
+    fontFamilies: z.array(z.string().trim().min(1)).min(1),
+    textColors: z.array(z.string().trim().min(1)).min(1),
+    backgroundColors: z.array(z.string().trim().min(1)).min(1),
+    fontScaleRange: normalizedRangeSchema,
+    spacingScaleRange: normalizedRangeSchema,
+    contrastModes: z.array(z.enum(["normal", "high"])).min(1),
+  }).strict(),
+  landmarkRanges: z.record(semanticLandmarkSchema, z.object({
+    xRatio: normalizedRangeSchema,
+    yRatio: normalizedRangeSchema,
+    widthRatio: normalizedRangeSchema,
+    heightRatio: normalizedRangeSchema,
+  }).strict()),
+}).strict();
+
 const placeholderTagSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
 
 export const slotBindingsSchema = z.object({
@@ -119,6 +140,7 @@ export const templateProfileSchema = z.object({
   maxRasterAreaRatio: z.number().min(0).max(1),
   minimumBodyFontPt: z.number().min(8).max(24),
   requiredLandmarks: z.array(semanticLandmarkSchema).min(1),
+  designContract: profileDesignContractSchema.optional(),
   documentCompatibility: z.object({
     bid: z.boolean(),
     proposal: z.boolean(),

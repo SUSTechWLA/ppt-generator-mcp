@@ -53,8 +53,13 @@ export interface RenderStructure {
     factText: string;
     factTextOwnerCount: number;
     visibleFactTextOwnerCount: number;
+    titleText: string;
+    titleTextOwnerCount: number;
+    visibleTitleTextOwnerCount: number;
+    bindingTexts: Array<{ field: string; valueIndex: number; text: string; visible: boolean }>;
   }>;
   blankComponents: string[];
+  protectedGeneratedText: Array<{ zone: "semantic" | "page-field"; owner: string; text: string }>;
 }
 
 export interface RenderResult {
@@ -155,11 +160,36 @@ export async function renderPage(input: {
         return { color: [255, 255, 255], measurable: true };
       };
 
+      const fullyClippedByInset = (element: Element, clipPath: string): boolean => {
+        const match = clipPath.match(/^inset\(([^)]*)\)/i);
+        if (!match) return false;
+        const rect = element.getBoundingClientRect();
+        const tokens = match[1].trim().split(/\s+/u);
+        if (tokens.length < 1 || tokens.length > 4 || tokens.some((token) => /^round$/i.test(token))) return false;
+        const expanded = tokens.length === 1 ? [tokens[0], tokens[0], tokens[0], tokens[0]]
+          : tokens.length === 2 ? [tokens[0], tokens[1], tokens[0], tokens[1]]
+            : tokens.length === 3 ? [tokens[0], tokens[1], tokens[2], tokens[1]]
+              : tokens;
+        const pixels = (token: string, length: number): number | undefined => {
+          if (/^-?[\d.]+%$/.test(token)) return Number.parseFloat(token) * length / 100;
+          if (/^-?[\d.]+px$/.test(token)) return Number.parseFloat(token);
+          if (token === "0") return 0;
+          return undefined;
+        };
+        const top = pixels(expanded[0], rect.height);
+        const right = pixels(expanded[1], rect.width);
+        const bottom = pixels(expanded[2], rect.height);
+        const left = pixels(expanded[3], rect.width);
+        return top !== undefined && right !== undefined && bottom !== undefined && left !== undefined
+          && (top + bottom >= rect.height - 0.5 || left + right >= rect.width - 0.5);
+      };
+
       const isCssVisible = (element: Element): boolean => {
         let current: Element | null = element;
         while (current) {
           const style = getComputedStyle(current);
           if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity || "1") <= 0.001) return false;
+          if (fullyClippedByInset(current, style.clipPath)) return false;
           current = current.parentElement;
         }
         const rect = element.getBoundingClientRect();
@@ -422,6 +452,18 @@ export async function renderPage(input: {
         .map((element) => {
           const owners = Array.from(element.querySelectorAll<HTMLElement>("[data-fact-text-owner]"));
           const visibleOwners = owners.filter(isCssVisible);
+          const titleOwners = Array.from(element.querySelectorAll<HTMLElement>("[data-semantic-title-owner]"));
+          const visibleTitleOwners = titleOwners.filter(isCssVisible);
+          const bindingTexts = Array.from(element.querySelectorAll<HTMLElement>("[data-semantic-binding-field][data-semantic-binding-index]"))
+            .map((owner) => {
+              const visible = isCssVisible(owner);
+              return {
+                field: owner.getAttribute("data-semantic-binding-field") ?? "",
+                valueIndex: Number.parseInt(owner.getAttribute("data-semantic-binding-index") ?? "-1", 10),
+                text: visible ? owner.innerText.trim() : "",
+                visible,
+              };
+            });
           return {
             blockId: element.getAttribute("data-block-id") ?? "",
             slotId: element.getAttribute("data-semantic-slot") ?? "",
@@ -430,8 +472,33 @@ export async function renderPage(input: {
             factText: visibleOwners.map((owner) => owner.innerText.trim()).filter(Boolean).join("\n"),
             factTextOwnerCount: owners.length,
             visibleFactTextOwnerCount: visibleOwners.length,
+            titleText: visibleTitleOwners.map((owner) => owner.innerText.trim()).filter(Boolean).join("\n"),
+            titleTextOwnerCount: titleOwners.length,
+            visibleTitleTextOwnerCount: visibleTitleOwners.length,
+            bindingTexts,
           };
         });
+      const decodeGeneratedContent = (raw: string): string => {
+        const value = raw.trim();
+        if (!value || value === "none" || value === "normal" || value === '""' || value === "''") return "";
+        const quoted = value.match(/^(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')$/s);
+        return quoted ? (quoted[1] ?? quoted[2] ?? "").replace(/\\([\\"'])/g, "$1") : value;
+      };
+      const protectedGeneratedText: Array<{ zone: "semantic" | "page-field"; owner: string; text: string }> = [];
+      const protectedRoots = Array.from(document.querySelectorAll<HTMLElement>("[data-semantic-slot], [data-page-field]"));
+      for (const root of protectedRoots) {
+        const zone = root.hasAttribute("data-page-field") ? "page-field" as const : "semantic" as const;
+        const owner = root.getAttribute("data-block-id") || root.getAttribute("data-page-field") || root.tagName.toLowerCase();
+        for (const element of [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))]) {
+          if (!isCssVisible(element)) continue;
+          for (const pseudo of ["::before", "::after"] as const) {
+            const style = getComputedStyle(element, pseudo);
+            if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity || "1") <= 0.001) continue;
+            const text = decodeGeneratedContent(style.content);
+            if (/[\p{L}\p{N}]/u.test(text)) protectedGeneratedText.push({ zone, owner, text });
+          }
+        }
+      }
       const blankComponents = Array.from(document.querySelectorAll<HTMLElement>("[data-component]"))
         .filter(isCssVisible)
         .filter((component) => {
@@ -475,6 +542,7 @@ export async function renderPage(input: {
           pageFields,
           semanticItems,
           blankComponents,
+          protectedGeneratedText,
         },
         layout: { containmentViolations, collisions },
       };

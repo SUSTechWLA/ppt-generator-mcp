@@ -83,6 +83,7 @@ test("loads one approved profile for every repository template", () => {
   const templates = listTemplates(resolve("templates"));
   assert.equal(profiles.length, 6);
   assert.equal(profiles.length, templates.length);
+  assert.ok(profiles.every((profile) => profile.designContract?.version === 1));
   assert.equal(new Set(profiles.map((profile) => profile.slug)).size, 6);
   assert.deepEqual(
     profiles.map((profile) => profile.slug).sort(),

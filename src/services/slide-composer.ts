@@ -224,19 +224,31 @@ function prepareTemplateHtml(template: ParsedTemplate, profile: TemplateProfile,
       else {
         element.setAttribute("data-block-id", assignment.groupId);
         element.setAttribute("data-source-fact-ids", assignment.sourceFactIds.join(","));
-        const factTag = slot.bindings[slot.factBearingBinding];
-        const factPlaceholders = factTag ? Array.from(element.querySelectorAll(factTag)) : [];
-        const factPlaceholder = factPlaceholders[slot.factBearingValueIndex];
-        if (!factPlaceholder) throw new Error(`Semantic slot ${slot.id}[${index}] has no declared fact-bearing placeholder`);
-        const factOwner = factPlaceholder.parentElement;
-        if (!factOwner) throw new Error(`Semantic slot ${slot.id}[${index}] has no stable fact-bearing text owner`);
-        if (factOwner === element) {
-          const marker = doc.createElement("span");
-          marker.setAttribute("data-fact-text-owner", "true");
-          factPlaceholder.replaceWith(marker);
-          marker.append(factPlaceholder);
-        } else {
-          factOwner.setAttribute("data-fact-text-owner", "true");
+        for (const [field, tag] of Object.entries(slot.bindings)) {
+          const expansion = slot.bindingExpansion[field] ?? 1;
+          const placeholders = Array.from(element.querySelectorAll(tag));
+          if (placeholders.length !== expansion) {
+            throw new Error(`Semantic slot ${slot.id}[${index}] binding ${field} has ${placeholders.length} placeholders; expected ${expansion}`);
+          }
+          placeholders.forEach((placeholder, valueIndex) => {
+            const marker = doc.createElement("span");
+            marker.setAttribute("data-semantic-binding-field", field);
+            marker.setAttribute("data-semantic-binding-index", String(valueIndex));
+            if (["title", "shortTitle", "figureRef"].includes(field) || (field === "tableCell" && valueIndex === 0)) {
+              marker.setAttribute("data-semantic-title-owner", "true");
+            }
+            if (field === slot.factBearingBinding && valueIndex === slot.factBearingValueIndex) {
+              marker.setAttribute("data-fact-text-owner", "true");
+            }
+            placeholder.replaceWith(marker);
+            marker.append(placeholder);
+          });
+        }
+        if (!element.querySelector(`[data-semantic-binding-field="${slot.factBearingBinding}"][data-semantic-binding-index="${slot.factBearingValueIndex}"][data-fact-text-owner]`)) {
+          throw new Error(`Semantic slot ${slot.id}[${index}] has no declared fact-bearing placeholder`);
+        }
+        if (!element.querySelector("[data-semantic-title-owner]")) {
+          throw new Error(`Semantic slot ${slot.id}[${index}] has no title-bearing binding`);
         }
       }
     });

@@ -1,7 +1,9 @@
 import type { DisplayPlan } from "../domain/display-plan.js";
 import type { QualityIssue } from "../domain/quality-report.js";
+import type { SlideSpec } from "../domain/slide-spec.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
 import type { RenderResult } from "./page-renderer.js";
+import { semanticBindingValues, type BindingField } from "./slide-content-mapper.js";
 import type { DocumentTemplatePolicy } from "./template-selector.js";
 
 export interface DeterministicReport {
@@ -19,6 +21,7 @@ export interface DeterministicEvaluationPolicy {
   expectedPageNumber?: number;
   expectedMetadataBindings?: Array<{ field: string; values: string[] }>;
   displayPlan?: DisplayPlan;
+  plannedSpec?: SlideSpec;
 }
 
 function strictMinimum(values: Array<number | undefined>, fallback: number): number {
@@ -83,6 +86,9 @@ export function evaluateDeterministic(render: RenderResult, policy: Deterministi
     const wanted = expected.values.map(normalizedVisibleText).filter(Boolean);
     if (!orderedEqual(actual, wanted)) issue({ severity: "error", category: "structure", targetId: expected.field, evidence: `\u53ef\u89c1\u9875\u5143\u6570\u636e ${expected.field} \u4e0e\u5f53\u9875\u6301\u4e45\u5316\u8ba1\u5212\u4e0d\u4e00\u81f4`, suggestedAction: "\u6309\u5f53\u9875 metadata binding \u91cd\u65b0\u586b\u5145" });
   }
+  for (const generated of render.structure.protectedGeneratedText ?? []) {
+    issue({ severity: "error", category: "fidelity", targetId: generated.owner, evidence: `${generated.zone} \u53d7\u4fdd\u62a4\u6587\u672c\u533a\u4f7f\u7528\u672a\u7eb3\u5165 DOM \u8bed\u4e49\u6d4b\u91cf\u7684\u4f2a\u5143\u7d20\u8bcd\u6cd5\u5185\u5bb9`, suggestedAction: "\u5c06\u5e94\u5c55\u793a\u7684\u8bcd\u6cd5\u5185\u5bb9\u4f5c\u4e3a\u53ef\u5f52\u56e0 DOM \u6587\u672c\u586b\u5145\uff1b\u4f2a\u5143\u7d20\u4ec5\u7528\u4e8e\u65e0\u6587\u5b57\u88c5\u9970" });
+  }
   if (policy.displayPlan) {
     const expectedItems = policy.displayPlan.items;
     const actualItems = render.structure.semanticItems;
@@ -95,7 +101,36 @@ export function evaluateDeterministic(render: RenderResult, policy: Deterministi
         continue;
       }
       if (actual.factTextOwnerCount !== 1 || actual.visibleFactTextOwnerCount !== 1) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u5fc5\u987b\u6709\u4e14\u4ec5\u6709\u4e00\u4e2a\u53ef\u89c1 fact-bearing text owner`, suggestedAction: "\u79fb\u9664\u9690\u85cf\u6216\u91cd\u590d\u4e8b\u5b9e\u6587\u672c\u5bb9\u5668" });
+      if (actual.titleTextOwnerCount !== 1 || actual.visibleTitleTextOwnerCount !== 1) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u5fc5\u987b\u6709\u4e14\u4ec5\u6709\u4e00\u4e2a\u53ef\u89c1 title-bearing text owner`, suggestedAction: "\u6062\u590d profile \u58f0\u660e\u7684\u6807\u9898\u6587\u672c\u5bb9\u5668" });
+      if (normalizedVisibleText(actual.titleText) !== normalizedVisibleText(expected.title)) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u53ef\u89c1\u6807\u9898\u4e0d\u7b49\u4e8e grounded display title\uff0c\u53ef\u80fd\u542b\u672a\u5f52\u56e0\u6570\u5b57\u6216\u540d\u79f0`, suggestedAction: "\u4ec5\u6e32\u67d3 displayPlan \u7684\u8bed\u4e49\u6807\u9898" });
       if (normalizedVisibleText(actual.factText) !== normalizedVisibleText(expected.body)) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u53ef\u89c1\u4e8b\u5b9e\u6587\u672c\u4e0d\u7b49\u4e8e grounded display text\uff0c\u53ef\u80fd\u7f3a\u5931\u5173\u952e\u9528\u70b9\u6216\u542b\u672a\u5f52\u56e0\u6570\u5b57/\u540d\u79f0`, suggestedAction: "\u4ec5\u6e32\u67d3 displayPlan \u7684\u62bd\u53d6\u5f0f\u6587\u672c" });
+      const slot = policy.profile?.semanticSlots.find((candidate) => candidate.id === actual.slotId);
+      const plannedBlock = policy.plannedSpec?.blocks.find((candidate) => candidate.id === expected.id);
+      const expectedBindingKeys = Object.entries(slot?.bindingExpansion ?? {}).flatMap(([field, count]) => (
+        Array.from({ length: count }, (_, valueIndex) => `${field}:${valueIndex}`)
+      )).sort();
+      const actualBindingKeys = actual.bindingTexts.map((binding) => `${binding.field}:${binding.valueIndex}`).sort();
+      if (expectedBindingKeys.length > 0 && !orderedEqual(actualBindingKeys, expectedBindingKeys)) {
+        issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u53ef\u89c1\u7ed1\u5b9a owner \u4e0d\u7b49\u4e8e profile \u58f0\u660e`, suggestedAction: "\u6309 profile binding expansion \u91cd\u65b0\u7ec4\u88c5\u8bed\u4e49\u9879" });
+      }
+      const expectedWholeParts: string[] = [];
+      for (const binding of actual.bindingTexts) {
+        let expectedValue: string | undefined;
+        if (plannedBlock) {
+          expectedValue = semanticBindingValues(binding.field as BindingField, plannedBlock, expected.role, budget?.itemIndex ?? index)[binding.valueIndex];
+        } else if (["title", "shortTitle", "figureRef"].includes(binding.field) || (binding.field === "tableCell" && binding.valueIndex === 0)) {
+          expectedValue = expected.title;
+        } else if (["body", "narrativeBody"].includes(binding.field) || (binding.field === "tableCell" && binding.valueIndex === 1)) {
+          expectedValue = expected.body;
+        }
+        if (!binding.visible || expectedValue === undefined || normalizedVisibleText(binding.text) !== normalizedVisibleText(expectedValue)) {
+          issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684 ${binding.field}[${binding.valueIndex}] \u53ef\u89c1\u7ed1\u5b9a\u6587\u672c\u4e0e\u6301\u4e45\u5316\u8ba1\u5212\u4e0d\u4e00\u81f4`, suggestedAction: "\u4ec5\u4f7f\u7528\u786e\u5b9a\u6027\u8bed\u4e49\u7ed1\u5b9a\u503c" });
+        }
+        if (expectedValue !== undefined) expectedWholeParts.push(expectedValue);
+      }
+      if (expectedWholeParts.length > 0 && normalizedVisibleText(actual.visibleText) !== normalizedVisibleText(expectedWholeParts.join(""))) {
+        issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u6574\u4e2a\u53ef\u89c1\u6587\u672c\u4e0d\u7b49\u4e8e profile-driven \u7ed1\u5b9a\u6295\u5f71`, suggestedAction: "\u79fb\u9664\u672a\u7ed1\u5b9a\u6216\u672a\u5f52\u56e0\u7684\u8bed\u4e49\u9879\u6587\u672c" });
+      }
       for (const factId of expected.sourceFactIds) {
         const coverage = policy.displayPlan.factCoverages.find((candidate) => candidate.factId === factId);
         for (const anchor of coverage?.criticalAnchors ?? []) {

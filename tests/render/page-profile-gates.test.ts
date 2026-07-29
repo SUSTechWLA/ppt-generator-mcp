@@ -3,10 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { JSDOM } from "jsdom";
 
 import { extractCanonicalAnchors } from "../../src/domain/critical-anchor.js";
 import { displayPlanSchema, type DisplayPlan } from "../../src/domain/display-plan.js";
 import { evaluateDeterministic } from "../../src/services/deterministic-evaluator.js";
+import { evaluateDeckConsistency } from "../../src/services/deck-consistency.js";
 import { renderPage } from "../../src/services/page-renderer.js";
 import { getDocumentTemplatePolicy } from "../../src/services/template-selector.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
@@ -73,7 +75,7 @@ function pageHtml(options: {
   const landmarks = ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"];
   const landmark = (name: string, contents: string) => options.omitLandmark === name ? "" : `<div data-page-landmark="${name}">${contents}</div>`;
   const factBody = options.factBody ?? "\u5fc5\u987b\u572830\u5206\u949f\u5185\u54cd\u5e94\u3002";
-  const owner = (suffix = "") => `<section data-component="fact-card" data-semantic-slot="main" data-block-id="group-1${suffix}" data-source-fact-ids="fact-1"><h4>\u91cf\u5316\u6307\u6807</h4><p data-fact-text-owner${options.hiddenFactBody ? ' style="display:none"' : ""}>${factBody}</p></section>`;
+  const owner = (suffix = "") => `<section data-component="fact-card" data-semantic-slot="main" data-block-id="group-1${suffix}" data-source-fact-ids="fact-1"><h4><span data-semantic-binding-field="title" data-semantic-binding-index="0" data-semantic-title-owner>\u91cf\u5316\u6307\u6807</span></h4><p><span data-semantic-binding-field="body" data-semantic-binding-index="0" data-fact-text-owner${options.hiddenFactBody ? ' style="display:none"' : ""}>${factBody}</span></p></section>`;
   const fields = Object.fromEntries(metadataBindings.map((entry) => [entry.field, entry.values[0]]));
   return `<!doctype html><html style="--workflow-font-scale:1;--workflow-spacing-scale:1"><head><style>
     *{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}article{padding:24px;font-family:Arial,sans-serif;color:#17352a;background:#fff}
@@ -182,9 +184,46 @@ test("real planned composition exposes fact-bearing DOM text and enforces the ex
       expectedPageNumber: slide.page.number,
       expectedMetadataBindings: slide.templateMatch.metadataBindings,
       displayPlan: slide.displayPlan,
+      plannedSpec: slide.plannedSpec,
     };
     const exact = await renderPage({ html: composed.html, screenshotPath: join(directory, "exact.png") });
     assert.equal(evaluateDeterministic(exact, context).hardGatePassed, true, JSON.stringify(evaluateDeterministic(exact, context).issues, null, 2));
+    const deckConsistency = evaluateDeckConsistency({
+      plannedDeck: planned.plannedDeck,
+      loadedProfiles: profiles,
+      pages: [{
+        pageNumber: slide.page.number,
+        status: "delivered",
+        selectedTemplateSlug: slide.templateSlug,
+        quality: { score: 92, threshold: 90, hardGatePassed: true },
+        render: exact,
+      }],
+    });
+    assert.equal(deckConsistency.passed, true, JSON.stringify({ issues: deckConsistency.issues, landmarks: exact.structure.landmarkRects }, null, 2));
+
+    const mutatedTitleDom = new JSDOM(composed.html);
+    const expectedTitle = slide.displayPlan.items[0].title;
+    const titleOwner = mutatedTitleDom.window.document.querySelector("[data-semantic-slot] [data-semantic-title-owner]");
+    assert.ok(titleOwner, `expected a visible semantic title owner for ${expectedTitle}`);
+    assert.equal(titleOwner.textContent?.trim(), expectedTitle);
+    titleOwner.textContent = "微软99亿元";
+    const mutatedTitle = await renderPage({ html: mutatedTitleDom.serialize(), screenshotPath: join(directory, "mutated-title.png") });
+    assert.equal(evaluateDeterministic(mutatedTitle, context).hardGatePassed, false, "an ungrounded semantic title must fail even when fact body remains exact");
+
+    for (const [label, css] of [
+      ["clipped-fact", "[data-fact-text-owner]{clip-path:inset(100%)!important}"],
+      ["clipped-page-field", '[data-page-field="subsectionTitle"]{clip-path:inset(100%)!important}'],
+      ["generated-semantic-text", '[data-fact-text-owner]::after{content:"微软99亿元"}'],
+    ] as const) {
+      const html = composed.html.replace("</head>", `<style>${css}</style></head>`);
+      const rendered = await renderPage({ html, screenshotPath: join(directory, `${label}.png`) });
+      const report = evaluateDeterministic(rendered, context);
+      assert.equal(report.hardGatePassed, false, `${label} must not cross the painted-text trust boundary`);
+    }
+
+    const decorativePseudoHtml = composed.html.replace("</head>", '<style>[data-semantic-slot]::before{content:"◆"}</style></head>');
+    const decorativePseudo = await renderPage({ html: decorativePseudoHtml, screenshotPath: join(directory, "decorative-pseudo.png") });
+    assert.equal(evaluateDeterministic(decorativePseudo, context).hardGatePassed, true, "punctuation-only decorative pseudo content must remain allowed");
 
     const belowHtml = composed.html.replace("</head>", "<style>[data-fact-text-owner]{font-size:8.49pt!important}</style></head>");
     const below = await renderPage({ html: belowHtml, screenshotPath: join(directory, "below.png") });

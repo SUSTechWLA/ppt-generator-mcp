@@ -8,7 +8,7 @@ import { projectOptionalImages } from "./optional-image-projection.js";
 
 export type FillContent = Record<string, string | string[]>;
 
-type BindingField = keyof TemplateProfile["semanticSlots"][number]["bindings"];
+export type BindingField = keyof TemplateProfile["semanticSlots"][number]["bindings"];
 
 const DEFAULT_PAGE_BINDINGS: TemplateProfile["pageBindings"] = {
   pageTitle: "page-title",
@@ -47,7 +47,7 @@ function metricText(block: SlideBlock): string {
   return block.metrics.map((metric) => `${metric.label}：${metric.value}`).join("；");
 }
 
-function valuesForItem(field: BindingField, block: SlideBlock, role: SemanticRole, index: number): string[] {
+export function semanticBindingValues(field: BindingField, block: SlideBlock, role: SemanticRole, index: number): string[] {
   if (field === "title" || field === "figureRef") return [block.title];
   if (field === "body" || field === "narrativeBody") return [[block.body, ...block.bullets].filter(Boolean).join("；")];
   if (field === "shortTitle") return [shortTitle(block)];
@@ -64,7 +64,7 @@ function valuesForItem(field: BindingField, block: SlideBlock, role: SemanticRol
 function valuesFor(field: BindingField, blocks: SlideBlock[], roles: SemanticRole[], valuesPerItem = 1): string[] {
   if (field === "tableHeader") return ["语义主题", "原文事实", "量化信息", "内容类型"];
   return blocks.flatMap((block, index) => {
-    const values = valuesForItem(field, block, roles[index], index);
+    const values = semanticBindingValues(field, block, roles[index], index);
     return [...values.slice(0, valuesPerItem), ...Array.from({ length: Math.max(0, valuesPerItem - values.length) }, () => "")];
   });
 }

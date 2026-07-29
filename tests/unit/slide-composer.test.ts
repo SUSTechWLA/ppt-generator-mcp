@@ -65,3 +65,34 @@ test("caller page metadata survives initial and repair compositions", async () =
     assert.match(result.html, /data-slide-page="17"/);
   }
 });
+
+test("removes an unused optional figure instead of requiring or fabricating an image", async () => {
+  const optionalTemplateSlug = "green-infographic-bid-a4-landscape";
+  const optionalTemplate = loadTemplate(templatesDir, optionalTemplateSlug);
+  const optionalProfile = {
+    ...loadTemplateProfiles(templatesDir).find((item) => item.slug === optionalTemplateSlug)!,
+    imageSlots: { placeholderTag: "figures", placeholderCount: 1, minAssets: 0, maxAssets: 1, unusedPolicy: "remove-container", containerSelector: "figure" },
+  } as unknown as typeof profile;
+  const noImageSpec = makeSlideSpec({ assetCount: 0 });
+  const result = await composeSlide({ spec: noImageSpec, template: optionalTemplate, profile: optionalProfile, assets: [] });
+  assert.doesNotMatch(result.html, /<figures|data-asset-id=/);
+});
+
+test("four-figure template requires exact cardinality and never reuses an asset", async () => {
+  const exactProfile = {
+    ...profile,
+    imageSlots: { placeholderTag: "figures", placeholderCount: 4, minAssets: 4, maxAssets: 4, unusedPolicy: "remove-container", containerSelector: "figure" },
+  } as unknown as typeof profile;
+  const fourSpec = makeSlideSpec({ blockTypes: ["image", "image", "image", "image"], assetCount: 4 });
+  const fourAssets = makeGeneratedAssets(fourSpec.assets);
+  const delivered = await composeSlide({ spec: fourSpec, template, profile: exactProfile, assets: fourAssets });
+  for (const asset of fourAssets) {
+    assert.equal((delivered.html.match(new RegExp(`data-asset-id="${asset.id}"`, "g")) ?? []).length, 1);
+  }
+
+  const threeSpec = makeSlideSpec({ blockTypes: ["image", "image", "image", "image"], assetCount: 3 });
+  await assert.rejects(
+    () => composeSlide({ spec: threeSpec, template, profile: exactProfile, assets: makeGeneratedAssets(threeSpec.assets) }),
+    /requires exactly 4 image assets/,
+  );
+});

@@ -43,6 +43,13 @@ export const semanticSlotSchema = z.object({
   maxCharsPerItem: z.number().int().min(1).max(500),
   acceptedRoles: z.array(semanticRoleSchema).min(1),
   bindings: slotBindingsSchema,
+  factBearingBinding: z.enum(["body", "narrativeBody", "tableCell"]),
+  bindingExpansion: z.record(z.string(), z.number().int().min(1).max(8)),
+}).strict();
+
+export const auxiliaryCapacitySchema = z.object({
+  itemCapacity: z.number().int().min(1).max(24),
+  valuesPerItem: z.number().int().min(1).max(8),
 }).strict();
 
 export const pageBindingsSchema = z.object({
@@ -59,6 +66,25 @@ export const pageBindingsSchema = z.object({
   figureRef: placeholderTagSchema.optional(),
 }).strict();
 
+export const imageSlotsSchema = z.object({
+  placeholderTag: placeholderTagSchema,
+  placeholderCount: z.number().int().min(0).max(12),
+  minAssets: z.number().int().min(0).max(12),
+  maxAssets: z.number().int().min(0).max(12),
+  unusedPolicy: z.enum(["remove-container", "remove-placeholder"]),
+  containerSelector: z.string().trim().min(1).max(120).optional(),
+}).strict().superRefine((slots, context) => {
+  if (slots.minAssets > slots.maxAssets) {
+    context.addIssue({ code: "custom", message: "minAssets cannot exceed maxAssets", path: ["minAssets"] });
+  }
+  if (slots.maxAssets !== slots.placeholderCount) {
+    context.addIssue({ code: "custom", message: "maxAssets must equal placeholderCount", path: ["maxAssets"] });
+  }
+  if (slots.unusedPolicy === "remove-container" && !slots.containerSelector) {
+    context.addIssue({ code: "custom", message: "remove-container requires containerSelector", path: ["containerSelector"] });
+  }
+});
+
 export const templateProfileSchema = z.object({
   slug: z.string().regex(/^[a-z0-9-]+$/),
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
@@ -67,10 +93,11 @@ export const templateProfileSchema = z.object({
   supportedRoles: z.array(semanticRoleSchema).min(1),
   semanticSlots: z.array(semanticSlotSchema).min(1).max(12),
   auxiliaryBindings: slotBindingsSchema.optional(),
+  auxiliaryCapacities: z.record(z.string(), auxiliaryCapacitySchema).optional(),
   pageBindings: pageBindingsSchema,
   blockCapacity: z.number().int().min(1).max(12),
   supportedBlocks: z.array(slideBlockTypeSchema).min(1),
-  imageSlots: z.number().int().min(0).max(12),
+  imageSlots: imageSlotsSchema,
   densityRange: z.tuple([templateDensitySchema, templateDensitySchema]),
   maxCharsBySlot: z.record(z.string(), z.number().int().positive()),
   maxRasterAreaRatio: z.number().min(0).max(1),
@@ -94,6 +121,21 @@ export const templateProfileSchema = z.object({
   const declaredCapacity = profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
   if (declaredCapacity < profile.blockCapacity) {
     context.addIssue({ code: "custom", message: "Semantic slot capacity must cover blockCapacity", path: ["semanticSlots"] });
+  }
+  for (const [index, slot] of profile.semanticSlots.entries()) {
+    const bindingFields = Object.keys(slot.bindings).sort();
+    const expansionFields = Object.keys(slot.bindingExpansion).sort();
+    if (bindingFields.join("|") !== expansionFields.join("|")) {
+      context.addIssue({ code: "custom", message: "Every semantic binding must declare expansion arity", path: ["semanticSlots", index, "bindingExpansion"] });
+    }
+    if (!(slot.factBearingBinding in slot.bindings)) {
+      context.addIssue({ code: "custom", message: "factBearingBinding must reference a declared lossless binding", path: ["semanticSlots", index, "factBearingBinding"] });
+    }
+  }
+  const auxiliaryFields = Object.keys(profile.auxiliaryBindings ?? {}).sort();
+  const auxiliaryCapacityFields = Object.keys(profile.auxiliaryCapacities ?? {}).sort();
+  if (auxiliaryFields.join("|") !== auxiliaryCapacityFields.join("|")) {
+    context.addIssue({ code: "custom", message: "Every auxiliary binding must declare cardinality and expansion", path: ["auxiliaryCapacities"] });
   }
 });
 

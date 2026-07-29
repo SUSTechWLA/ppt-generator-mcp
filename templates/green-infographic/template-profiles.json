@@ -13,7 +13,9 @@
         "itemCapacity": 5,
         "maxCharsPerItem": 150,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
-        "bindings": { "title": "component-title", "body": "paragraph" }
+        "bindings": { "title": "component-title", "body": "paragraph" },
+        "factBearingBinding": "body",
+        "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
     "auxiliaryBindings": {
@@ -23,6 +25,14 @@
       "itemLabel": "item-label",
       "nodeLabel": "node-label",
       "bullet": "bullet"
+    },
+    "auxiliaryCapacities": {
+      "stepLabel": { "itemCapacity": 5, "valuesPerItem": 1 },
+      "stageLabel": { "itemCapacity": 4, "valuesPerItem": 1 },
+      "stageNumber": { "itemCapacity": 4, "valuesPerItem": 1 },
+      "itemLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
+      "nodeLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
+      "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
     "pageBindings": {
       "pageTitle": "page-title",
@@ -39,9 +49,9 @@
     },
     "blockCapacity": 5,
     "supportedBlocks": ["text", "image", "table", "process", "metric"],
-    "imageSlots": 1,
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 0, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["medium", "high"],
-    "maxCharsBySlot": { "title": 40, "body": 150, "summary": 120 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 120, "image-caption": 120, "figure-ref": 30, "component-title": 30, "paragraph": 150, "step-label": 8, "stage-label": 8, "stage-number": 4, "item-label": 8, "node-label": 8, "bullet": 80 },
     "maxRasterAreaRatio": 0.18,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
@@ -62,10 +72,13 @@
         "itemCapacity": 4,
         "maxCharsPerItem": 145,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
-        "bindings": { "title": "component-title", "body": "paragraph" }
+        "bindings": { "title": "component-title", "body": "paragraph" },
+        "factBearingBinding": "body",
+        "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
     "auxiliaryBindings": { "bullet": "bullet" },
+    "auxiliaryCapacities": { "bullet": { "itemCapacity": 3, "valuesPerItem": 1 } },
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -81,9 +94,9 @@
     },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "image", "process", "metric"],
-    "imageSlots": 4,
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 4, "minAssets": 4, "maxAssets": 4, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["low", "high"],
-    "maxCharsBySlot": { "title": 40, "body": 145, "summary": 110 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 110, "image-caption": 120, "figure-ref": 30, "component-title": 30, "paragraph": 145, "bullet": 80 },
     "maxRasterAreaRatio": 0.45,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
@@ -104,10 +117,16 @@
         "itemCapacity": 3,
         "maxCharsPerItem": 100,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
-        "bindings": { "title": "component-title", "body": "paragraph" }
+        "bindings": { "title": "component-title", "body": "paragraph" },
+        "factBearingBinding": "body",
+        "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
     "auxiliaryBindings": { "stepLabel": "step-label", "bullet": "bullet" },
+    "auxiliaryCapacities": {
+      "stepLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
+      "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
+    },
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -122,9 +141,9 @@
     },
     "blockCapacity": 3,
     "supportedBlocks": ["text", "image", "process", "metric"],
-    "imageSlots": 1,
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 1, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["low", "medium"],
-    "maxCharsBySlot": { "title": 40, "body": 100, "summary": 100 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 100, "image-caption": 120, "component-title": 30, "paragraph": 100, "step-label": 8, "bullet": 80 },
     "maxRasterAreaRatio": 0.55,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
@@ -145,10 +164,17 @@
         "itemCapacity": 2,
         "maxCharsPerItem": 180,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
-        "bindings": { "title": "component-title", "body": "paragraph" }
+        "bindings": { "title": "component-title", "body": "paragraph" },
+        "factBearingBinding": "body",
+        "bindingExpansion": { "title": 1, "body": 1 }
       }
     ],
     "auxiliaryBindings": { "tableHeader": "table-header", "tableCell": "table-cell", "bullet": "bullet" },
+    "auxiliaryCapacities": {
+      "tableHeader": { "itemCapacity": 1, "valuesPerItem": 4 },
+      "tableCell": { "itemCapacity": 6, "valuesPerItem": 4 },
+      "bullet": { "itemCapacity": 7, "valuesPerItem": 1 }
+    },
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -162,9 +188,9 @@
     },
     "blockCapacity": 2,
     "supportedBlocks": ["text", "table", "metric"],
-    "imageSlots": 0,
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 0, "minAssets": 0, "maxAssets": 0, "unusedPolicy": "remove-placeholder" },
     "densityRange": ["medium", "high"],
-    "maxCharsBySlot": { "title": 40, "body": 180, "table-cell": 24, "summary": 110 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 110, "component-title": 30, "paragraph": 180, "table-header": 20, "table-cell": 24, "bullet": 80 },
     "maxRasterAreaRatio": 0,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
@@ -182,10 +208,12 @@
         "id": "matrix-content",
         "priority": 10,
         "required": true,
-        "itemCapacity": 4,
+        "itemCapacity": 6,
         "maxCharsPerItem": 130,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
-        "bindings": { "body": "table-cell" }
+        "bindings": { "tableCell": "table-cell" },
+        "factBearingBinding": "tableCell",
+        "bindingExpansion": { "tableCell": 4 }
       }
     ],
     "auxiliaryBindings": {
@@ -195,6 +223,14 @@
       "stageLabel": "stage-label",
       "stageNumber": "stage-number",
       "bullet": "bullet"
+    },
+    "auxiliaryCapacities": {
+      "title": { "itemCapacity": 2, "valuesPerItem": 1 },
+      "narrativeBody": { "itemCapacity": 2, "valuesPerItem": 1 },
+      "tableHeader": { "itemCapacity": 1, "valuesPerItem": 4 },
+      "stageLabel": { "itemCapacity": 4, "valuesPerItem": 1 },
+      "stageNumber": { "itemCapacity": 4, "valuesPerItem": 1 },
+      "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
     "pageBindings": {
       "pageTitle": "page-title",
@@ -210,9 +246,9 @@
     },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "table", "image", "process", "metric"],
-    "imageSlots": 1,
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 1, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["medium", "high"],
-    "maxCharsBySlot": { "title": 40, "body": 130, "table-cell": 24, "summary": 110 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 110, "image-caption": 120, "component-title": 30, "paragraph": 130, "table-header": 20, "table-cell": 24, "stage-label": 8, "stage-number": 4, "bullet": 80 },
     "maxRasterAreaRatio": 0.18,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
@@ -230,10 +266,12 @@
         "id": "compact-matrix-content",
         "priority": 10,
         "required": true,
-        "itemCapacity": 4,
+        "itemCapacity": 6,
         "maxCharsPerItem": 125,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence", "visual"],
-        "bindings": { "body": "table-cell" }
+        "bindings": { "tableCell": "table-cell" },
+        "factBearingBinding": "tableCell",
+        "bindingExpansion": { "tableCell": 2 }
       }
     ],
     "auxiliaryBindings": {
@@ -242,6 +280,13 @@
       "tableHeader": "table-header",
       "itemLabel": "item-label",
       "bullet": "bullet"
+    },
+    "auxiliaryCapacities": {
+      "title": { "itemCapacity": 2, "valuesPerItem": 1 },
+      "narrativeBody": { "itemCapacity": 2, "valuesPerItem": 1 },
+      "tableHeader": { "itemCapacity": 1, "valuesPerItem": 2 },
+      "itemLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
+      "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
     "pageBindings": {
       "pageTitle": "page-title",
@@ -258,9 +303,9 @@
     },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "table", "image", "metric"],
-    "imageSlots": 1,
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 1, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["medium", "high"],
-    "maxCharsBySlot": { "title": 40, "body": 125, "table-cell": 22, "summary": 100 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 160, "summary-text": 100, "image-caption": 120, "figure-ref": 30, "component-title": 30, "paragraph": 125, "table-header": 20, "table-cell": 22, "item-label": 8, "bullet": 80 },
     "maxRasterAreaRatio": 0.18,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },

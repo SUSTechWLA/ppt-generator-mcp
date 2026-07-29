@@ -59,15 +59,36 @@ async function inlineIcons(doc: Document, templatePath: string): Promise<void> {
   }
 }
 
-function injectAssets(doc: Document, spec: SlideSpec, assets: GeneratedAsset[]): void {
+function injectAssets(doc: Document, spec: SlideSpec, profile: TemplateProfile, assets: GeneratedAsset[]): void {
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
   for (const declared of spec.assets) {
     if (!byId.has(declared.id)) throw new Error(`Missing generated asset: ${declared.id}`);
   }
-  const figures = Array.from(doc.querySelectorAll("figures"));
-  if (figures.length > 0 && assets.length === 0) throw new Error("Template requires imagery but SlideSpec contains no assets");
+  const declaredImages = spec.assets.filter((asset) => asset.type === "image");
+  if (new Set(declaredImages.map((asset) => asset.id)).size !== declaredImages.length) throw new Error("SlideSpec image asset IDs must be unique");
+  const imageSlots = profile.imageSlots;
+  const figures = Array.from(doc.querySelectorAll(imageSlots.placeholderTag));
+  if (figures.length !== imageSlots.placeholderCount) {
+    throw new Error(`Template contains ${figures.length} image placeholders but profile declares ${imageSlots.placeholderCount}`);
+  }
+  if (declaredImages.length < imageSlots.minAssets || declaredImages.length > imageSlots.maxAssets) {
+    const expectation = imageSlots.minAssets === imageSlots.maxAssets
+      ? `exactly ${imageSlots.minAssets}`
+      : `between ${imageSlots.minAssets} and ${imageSlots.maxAssets}`;
+    throw new Error(`Template requires ${expectation} image assets; received ${declaredImages.length}`);
+  }
   figures.forEach((slot, index) => {
-    const declared = spec.assets[index % spec.assets.length];
+    const declared = declaredImages[index];
+    if (!declared) {
+      if (imageSlots.unusedPolicy === "remove-container") {
+        const container = imageSlots.containerSelector ? slot.closest(imageSlots.containerSelector) : null;
+        if (!container) throw new Error(`Unused image slot has no container matching ${imageSlots.containerSelector}`);
+        container.remove();
+      } else {
+        slot.remove();
+      }
+      return;
+    }
     const asset = byId.get(declared.id)!;
     const image = doc.createElement("img");
     image.setAttribute("src", asset.dataUrl);
@@ -109,7 +130,7 @@ export async function composeSlide(input: ComposeSlideInput): Promise<ComposeRes
   doc.querySelectorAll("script, noscript").forEach((element) => element.remove());
   await inlineCss(doc, input.template.filePath);
   await inlineIcons(doc, input.template.filePath);
-  injectAssets(doc, input.spec, input.assets);
+  injectAssets(doc, input.spec, input.profile, input.assets);
   applyMarkersAndTokens(doc, input);
   const html = dom.serialize().replace(/<!--([\s\S]*?)-->/g, "");
   return { html, warnings: [...filled.warnings, ...scanResiduals(html)] };

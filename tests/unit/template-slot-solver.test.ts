@@ -46,9 +46,26 @@ function profile(overrides: Record<string, unknown> = {}): TemplateProfile {
     }],
     blockCapacity: 3,
     supportedBlocks: ["text", "image", "table", "process", "metric"],
-    imageSlots: 0,
+    imageSlots: { placeholderTag: "figures", placeholderCount: 0, minAssets: 0, maxAssets: 0, unusedPolicy: "remove-placeholder" },
     densityRange: ["low", "high"],
-    maxCharsBySlot: { body: 120, summary: 120 },
+    maxCharsBySlot: {
+      "component-title": 60,
+      paragraph: 120,
+      "fact-title": 60,
+      "fact-body": 120,
+      "process-title": 60,
+      "process-body": 120,
+      "item-label": 60,
+      "page-title": 100,
+      "page-number": 4,
+      "section-title": 100,
+      "part-number": 20,
+      "part-label": 40,
+      "chapter-label": 100,
+      "topic-title": 100,
+      "subsection-title": 160,
+      "summary-text": 160,
+    },
     maxRasterAreaRatio: 0.18,
     requiredLandmarks: ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     documentCompatibility: { bid: true, proposal: true, presentation: true },
@@ -98,6 +115,30 @@ test("slot order and IDs do not change mapped semantic content", () => {
   assert.deepEqual(mapSlideContent(spec, template, profileA), mapSlideContent(spec, template, profileB));
 });
 
+test("semantic binding expansion fills each declared table row without dropping the fact body", () => {
+  const page = blueprint([
+    { role: "fact", title: "履约要求", body: "完整保留要求正文。" },
+    { role: "metric", title: "考核指标", body: "完整保留指标正文。" },
+  ]);
+  const tableProfile = profile({
+    blockCapacity: 2,
+    semanticSlots: [{
+      id: "table-rows",
+      priority: 1,
+      required: true,
+      itemCapacity: 2,
+      maxCharsPerItem: 120,
+      acceptedRoles: ["fact", "metric"],
+      bindings: { tableCell: "table-cell" },
+      factBearingBinding: "tableCell",
+      bindingExpansion: { tableCell: 2 },
+    }],
+    maxCharsBySlot: { ...profile().maxCharsBySlot, "table-cell": 120 },
+  });
+  const mapped = mapSlideContent(materializeSlideSpec(page), parsedTemplate({ "table-cell": 4 }), tableProfile);
+  assert.deepEqual(mapped["table-cell"], ["履约要求", "完整保留要求正文。", "考核指标", "完整保留指标正文。"]);
+});
+
 test("unmatched roles and facts return explicit diagnostics", () => {
   const page = blueprint([{ role: "comparison", title: "方案对比", body: "A方案优于B方案。" }]);
   const result = solveTemplateSlots(page, profile({
@@ -136,4 +177,20 @@ test("role-specific slots cannot reorder groups against source order", () => {
   assert.equal(result.feasible, false);
   assert.deepEqual(result.unrepresentedFactIds, ["fact-2"]);
   assert.match(result.unmatched[0]?.reason ?? "", /源顺序/);
+});
+
+test("short-title-only slots cannot claim source facts are represented", () => {
+  const page = blueprint([{ role: "fact", title: "履约要求", body: "每个事实必须完整展示。" }]);
+  const result = solveTemplateSlots(page, profile({ semanticSlots: [{
+    id: "labels-only",
+    priority: 1,
+    required: true,
+    itemCapacity: 1,
+    maxCharsPerItem: 120,
+    acceptedRoles: ["fact"],
+    bindings: { shortTitle: "item-label" },
+  }] }));
+  assert.equal(result.feasible, false);
+  assert.deepEqual(result.unrepresentedFactIds, ["fact-1"]);
+  assert.match(result.unmatched[0]?.reason ?? "", /无损事实/);
 });

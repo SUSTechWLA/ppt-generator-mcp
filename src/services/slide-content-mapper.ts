@@ -39,30 +39,33 @@ function count(template: ParsedTemplate, tag: string): number {
 }
 
 function shortTitle(block: SlideBlock): string {
-  return Array.from(block.title.trim()).slice(0, 8).join("");
+  return block.title.trim();
 }
 
 function metricText(block: SlideBlock): string {
   return block.metrics.map((metric) => `${metric.label}：${metric.value}`).join("；");
 }
 
-function valuesFor(field: BindingField, blocks: SlideBlock[], roles: SemanticRole[]): string[] {
-  if (field === "title" || field === "figureRef") return blocks.map((block) => block.title);
-  if (field === "body" || field === "narrativeBody") return blocks.map((block) => [block.body, ...block.bullets].filter(Boolean).join("；"));
-  if (["shortTitle", "label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return blocks.map(shortTitle);
-  if (["sequence", "stepNumber", "stageNumber"].includes(field)) return blocks.map((_, index) => String(index + 1).padStart(2, "0"));
-  if (field === "bullet") return blocks.map((block) => block.bullets[0] ?? block.title);
-  if (field === "metric") return blocks.map((block) => metricText(block) || block.title);
-  if (field === "tableHeader") return ["语义主题", "原文事实", "量化信息", "内容类型"];
+function valuesForItem(field: BindingField, block: SlideBlock, role: SemanticRole, index: number): string[] {
+  if (field === "title" || field === "figureRef") return [block.title];
+  if (field === "body" || field === "narrativeBody") return [[block.body, ...block.bullets].filter(Boolean).join("；")];
+  if (field === "shortTitle") return [shortTitle(block)];
+  if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return [ROLE_LABELS[role]];
+  if (["sequence", "stepNumber", "stageNumber"].includes(field)) return [String(index + 1).padStart(2, "0")];
+  if (field === "bullet") return [block.bullets[0] ?? block.title];
+  if (field === "metric") return [metricText(block) || block.title];
   if (field === "tableCell") {
-    return blocks.flatMap((block, index) => [
-      block.title,
-      [block.body, ...block.bullets].filter(Boolean).join("；"),
-      metricText(block) || "—",
-      ROLE_LABELS[roles[index]],
-    ]);
+    return [block.title, [block.body, ...block.bullets].filter(Boolean).join("；"), metricText(block) || "—", ROLE_LABELS[role]];
   }
   return [];
+}
+
+function valuesFor(field: BindingField, blocks: SlideBlock[], roles: SemanticRole[], valuesPerItem = 1): string[] {
+  if (field === "tableHeader") return ["语义主题", "原文事实", "量化信息", "内容类型"];
+  return blocks.flatMap((block, index) => {
+    const values = valuesForItem(field, block, roles[index], index);
+    return [...values.slice(0, valuesPerItem), ...Array.from({ length: Math.max(0, valuesPerItem - values.length) }, () => "")];
+  });
 }
 
 function append(output: Map<string, string[]>, tag: string | undefined, values: string[]): void {
@@ -93,7 +96,7 @@ function pageContent(spec: SlideSpec, page: PageMetadata | undefined, profile: T
     [bindings.summaryText]: spec.conclusion,
   };
   if (bindings.imageCaption && count(template, bindings.imageCaption) > 0) {
-    const captions = spec.assets.map((asset) => asset.alt);
+    const captions = spec.assets.filter((asset) => asset.type === "image").map((asset) => asset.alt);
     values[bindings.imageCaption] = exactValues(template, bindings.imageCaption, captions.length > 0 ? captions : ["方案场景示意图"]);
   }
   if (bindings.figureRef && count(template, bindings.figureRef) > 0) {
@@ -130,7 +133,7 @@ export function mapSlideContent(
     const blocks = assignments.map((assignment) => blockById.get(assignment.groupId)).filter((block): block is SlideBlock => Boolean(block));
     const roles = assignments.map((assignment) => assignment.role);
     for (const [field, tag] of Object.entries(slot.bindings) as Array<[BindingField, string]>) {
-      append(mapped, tag, valuesFor(field, blocks, roles));
+      append(mapped, tag, valuesFor(field, blocks, roles, slot.bindingExpansion?.[field] ?? 1));
     }
   }
 
@@ -139,14 +142,25 @@ export function mapSlideContent(
     const blocks = assignments.map((assignment) => blockById.get(assignment.groupId)).filter((block): block is SlideBlock => Boolean(block));
     const roles = assignments.map((assignment) => assignment.role);
     for (const [field, tag] of Object.entries(profile.auxiliaryBindings) as Array<[BindingField, string]>) {
+      const cardinality = profile.auxiliaryCapacities?.[field];
+      if (!cardinality) throw new Error(`Auxiliary binding ${field} has no declared cardinality`);
+      const maximum = cardinality.itemCapacity * cardinality.valuesPerItem;
       const available = count(template, tag);
-      if (available > 0) append(mapped, tag, valuesFor(field, blocks, roles).slice(0, available));
+      if (available > 0) append(mapped, tag, valuesFor(field, blocks.slice(0, cardinality.itemCapacity), roles.slice(0, cardinality.itemCapacity), cardinality.valuesPerItem).slice(0, maximum));
     }
   }
 
   const direct = pageContent(spec, page, profile, template);
   for (const [tag, values] of mapped) {
     if (count(template, tag) > 0) direct[tag] = exactValues(template, tag, values);
+  }
+  for (const [tag, rawValues] of Object.entries(direct)) {
+    const limit = profile.maxCharsBySlot[tag];
+    if (!limit) throw new Error(`Bound placeholder ${tag} has no declared character capacity`);
+    const values = Array.isArray(rawValues) ? rawValues : [rawValues];
+    for (const value of values) {
+      if (Array.from(value).length > limit) throw new Error(`Bound placeholder ${tag} value exceeds character capacity ${limit}`);
+    }
   }
   return direct;
 }

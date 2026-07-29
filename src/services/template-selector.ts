@@ -75,6 +75,16 @@ function declaredPlaceholderTags(profile: TemplateProfile): string[] {
   ].filter((tag): tag is string => Boolean(tag));
 }
 
+function rawTagCount(html: string, tag: string): number {
+  const withoutComments = html.replace(/<!--[\s\S]*?-->/g, "");
+  return (withoutComments.match(new RegExp(`<${tag}(?:\\s|>)`, "gi")) ?? []).length;
+}
+
+function actualPlaceholderCount(template: ReturnType<typeof loadTemplate>, tag: string): number {
+  if (tag === "page-title") return rawTagCount(template.html, tag);
+  return template.placeholders.find((placeholder) => placeholder.tag === tag)?.count ?? 0;
+}
+
 export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   const catalogs = findProfileCatalogs(templatesDir);
   if (catalogs.length === 0) {
@@ -99,9 +109,41 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   for (const profile of profiles) {
     if (!actual.has(profile.slug)) throw new Error(`Template profile has no matching HTML: ${profile.slug}`);
     const template = loadTemplate(templatesDir, profile.slug);
-    const available = new Set(template.placeholders.map((placeholder) => placeholder.tag));
-    const missing = declaredPlaceholderTags(profile).filter((tag) => tag !== "page-title" && !available.has(tag));
+    const declaredTags = [...new Set(declaredPlaceholderTags(profile))];
+    const missing = declaredTags.filter((tag) => actualPlaceholderCount(template, tag) === 0);
     if (missing.length > 0) throw new Error(`Template profile ${profile.slug} declares missing placeholders: ${[...new Set(missing)].join(", ")}`);
+    const undeclared = template.placeholders
+      .map((placeholder) => placeholder.tag)
+      .filter((tag) => !["figures", "icon"].includes(tag) && !declaredTags.includes(tag));
+    if (undeclared.length > 0) throw new Error(`Template profile ${profile.slug} has undeclared placeholders: ${[...new Set(undeclared)].join(", ")}`);
+    for (const tag of declaredTags) {
+      if (!profile.maxCharsBySlot[tag]) throw new Error(`Template profile ${profile.slug} has no character capacity for bound placeholder ${tag}`);
+    }
+    for (const slot of profile.semanticSlots) {
+      for (const [field, tag] of Object.entries(slot.bindings)) {
+        const expansion = slot.bindingExpansion[field];
+        const actual = actualPlaceholderCount(template, tag);
+        if (slot.itemCapacity * expansion !== actual) {
+          throw new Error(`Template profile ${profile.slug} semantic binding ${tag} cardinality ${slot.itemCapacity}x${expansion} does not match placeholder count ${actual}`);
+        }
+      }
+    }
+    for (const [field, tag] of Object.entries(profile.auxiliaryBindings ?? {})) {
+      const cardinality = profile.auxiliaryCapacities?.[field];
+      const actual = actualPlaceholderCount(template, tag);
+      if (!cardinality || cardinality.itemCapacity * cardinality.valuesPerItem !== actual) {
+        throw new Error(`Template profile ${profile.slug} auxiliary binding ${tag} cardinality does not match placeholder count ${actual}`);
+      }
+    }
+    for (const [field, tag] of Object.entries(profile.pageBindings)) {
+      const expected = field === "imageCaption" || field === "figureRef" ? profile.imageSlots.placeholderCount : 1;
+      const actual = actualPlaceholderCount(template, tag);
+      if (actual !== expected) throw new Error(`Template profile ${profile.slug} page binding ${tag} cardinality ${actual} does not match ${expected}`);
+    }
+    const actualImageSlots = template.placeholders.find((placeholder) => placeholder.tag === profile.imageSlots.placeholderTag)?.count ?? 0;
+    if (actualImageSlots !== profile.imageSlots.placeholderCount || profile.imageSlots.maxAssets !== actualImageSlots) {
+      throw new Error(`Template profile ${profile.slug} image slot capacity ${profile.imageSlots.placeholderCount} does not match HTML count ${actualImageSlots}`);
+    }
   }
   for (const slug of actual) {
     if (!slugs.includes(slug)) throw new Error(`HTML template has no approved profile: ${slug}`);
@@ -163,6 +205,53 @@ function contentCapabilities(content: PageBlueprint | SlideSpec): ContentCapabil
   };
 }
 
+function emittedCapacityErrors(content: PageBlueprint | SlideSpec, profile: TemplateProfile): string[] {
+  const errors: string[] = [];
+  const check = (tag: string | undefined, value: string): void => {
+    if (!tag) return;
+    const limit = profile.maxCharsBySlot[tag];
+    if (!limit || Array.from(value).length > limit) errors.push(`绑定 ${tag} 超出字符容量 ${limit ?? 0}`);
+  };
+  if (profile.pageBindings) {
+    check(profile.pageBindings.pageTitle, content.title);
+    if (!("version" in content)) check(profile.pageBindings.summaryText, content.conclusion);
+  }
+  const items = "version" in content
+    ? content.groups.map((group) => ({ title: group.title, body: group.body, role: group.role, bullets: [] as string[], metrics: [] as string[] }))
+    : content.blocks.map((block) => ({
+        title: block.title,
+        body: [block.body, ...block.bullets].filter(Boolean).join("；"),
+        role: roleForBlock(block.type, block.semanticRole),
+        bullets: block.bullets,
+        metrics: block.metrics.map((metric) => `${metric.label}：${metric.value}`),
+      }));
+  const roleLabels: Record<SemanticRole, string> = {
+    headline: "页面主题", conclusion: "核心结论", fact: "事实要点", metric: "量化指标",
+    process: "实施流程", comparison: "对比分析", evidence: "事实依据", visual: "视觉说明",
+  };
+  for (const [field, tag] of Object.entries(profile.auxiliaryBindings ?? {})) {
+    const cardinality = profile.auxiliaryCapacities?.[field];
+    const itemLimit = cardinality?.itemCapacity ?? items.length;
+    const expansion = cardinality?.valuesPerItem ?? 1;
+    if (field === "tableHeader") {
+      for (const value of ["语义主题", "原文事实", "量化信息", "内容类型"].slice(0, expansion)) check(tag, value);
+      continue;
+    }
+    for (const [index, item] of items.slice(0, itemLimit).entries()) {
+      let values: string[];
+      if (field === "body" || field === "narrativeBody") values = [item.body];
+      else if (field === "tableCell") values = [item.title, item.body, item.metrics.join("；") || "—", roleLabels[item.role]];
+      else if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) values = [roleLabels[item.role]];
+      else if (field === "metric") values = [item.metrics.join("；") || item.title];
+      else if (field === "bullet") values = [item.bullets[0] ?? item.title];
+      else if (["sequence", "stepNumber", "stageNumber"].includes(field)) values = [String(index + 1).padStart(2, "0")];
+      else values = [item.title];
+      for (const value of values.slice(0, expansion)) check(tag, value);
+    }
+  }
+  return [...new Set(errors)];
+}
+
 function compatibility(
   content: PageBlueprint | SlideSpec,
   profile: TemplateProfile,
@@ -173,6 +262,7 @@ function compatibility(
   const errors: string[] = [];
   if (!profile.documentCompatibility[documentType]) errors.push(`不支持 ${documentType} 文档`);
   if (profile.maxRasterAreaRatio > policy.maxRasterAreaRatio) errors.push(`位图面积上限 ${profile.maxRasterAreaRatio} 超过策略 ${policy.maxRasterAreaRatio}`);
+  if (requested.visualRatio > profile.maxRasterAreaRatio) errors.push(`请求视觉占比 ${requested.visualRatio} 超过模板位图容量 ${profile.maxRasterAreaRatio}`);
   const missingLandmarks = policy.requiredLandmarks.filter((landmark) => !profile.requiredLandmarks.includes(landmark));
   if (missingLandmarks.length > 0) errors.push(`缺少必需语义结构：${missingLandmarks.join("、")}`);
   const missingPolicyRoles = policy.requiredSupportedRoles.filter((role) => !profile.supportedRoles.includes(role));
@@ -184,11 +274,13 @@ function compatibility(
   if (unsupportedBlocks.length > 0) errors.push(`不支持模块类型：${unsupportedBlocks.join("、")}`);
   const unsupportedRoles = [...new Set(requested.roles.filter((role) => !profile.supportedRoles.includes(role)))];
   if (unsupportedRoles.length > 0) errors.push(`不支持语义角色：${unsupportedRoles.join("、")}`);
-  if (requested.imageCount > profile.imageSlots) errors.push("图片槽位不足");
+  if (requested.imageCount < profile.imageSlots.minAssets) errors.push(`图片资产少于模板必需数 ${profile.imageSlots.minAssets}`);
+  if (requested.imageCount > profile.imageSlots.maxAssets) errors.push(`图片资产超过模板实际槽位数 ${profile.imageSlots.maxAssets}`);
   if (!profile.pageIntents.includes(requested.pageIntent)) errors.push(`不支持页面意图：${requested.pageIntent}`);
   const solution = solveTemplateSlots(content, profile);
   if (!solution.feasible) errors.push(...solution.unmatched.map((item) => item.reason));
   if (solution.unrepresentedFactIds.length > 0) errors.push(`未覆盖事实：${solution.unrepresentedFactIds.join("、")}`);
+  errors.push(...emittedCapacityErrors(content, profile));
   return [...new Set(errors)];
 }
 
@@ -209,8 +301,8 @@ function scoreProfile(content: PageBlueprint | SlideSpec, profile: TemplateProfi
   const capacityScore = Math.max(0, 100 - Math.abs(1 - capacityUse) * 55);
   const densityScore = Math.max(0, 100 - rangeDistance(requested.density, profile) * 45);
   const imageUse = requested.imageCount === 0
-    ? (profile.imageSlots === 0 ? 100 : 85)
-    : Math.min(100, requested.imageCount / Math.max(1, profile.imageSlots) * 100);
+    ? (profile.imageSlots.maxAssets === 0 ? 100 : 85)
+    : Math.min(100, requested.imageCount / Math.max(1, profile.imageSlots.maxAssets) * 100);
   const ratioScore = Math.max(0, 100 - Math.abs(requested.visualRatio - Math.min(requested.visualRatio, profile.maxRasterAreaRatio)) * 100);
   const visualScore = (imageUse + ratioScore) / 2;
   const intentScore = profile.pageIntents.includes(requested.pageIntent) ? 100 : 0;
@@ -254,7 +346,7 @@ export function selectTemplate(
   return {
     slug: winner.profile.slug,
     score: winner.score,
-    reason: `语义角色 ${[...new Set(requested.roles)].join("、")}，容量 ${requested.blockCount}/${winner.profile.blockCapacity}，图片槽位 ${requested.imageCount}/${winner.profile.imageSlots}，位图上限 ${winner.profile.maxRasterAreaRatio}，内容密度 ${requested.density}`,
+    reason: `语义角色 ${[...new Set(requested.roles)].join("、")}，容量 ${requested.blockCount}/${winner.profile.blockCapacity}，图片槽位 ${requested.imageCount}/${winner.profile.imageSlots.maxAssets}，位图上限 ${winner.profile.maxRasterAreaRatio}，内容密度 ${requested.density}`,
     candidates: candidates.map((candidate) => ({ slug: candidate.profile.slug, score: candidate.score })),
   };
 }

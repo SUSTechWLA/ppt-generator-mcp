@@ -9,6 +9,8 @@ interface SemanticItem {
   title: string;
   body: string;
   sourceFactIds: string[];
+  bullets: string[];
+  metrics: string[];
 }
 
 export interface SlotAssignment {
@@ -41,7 +43,7 @@ export interface TemplateSlotSolution {
   feasible: boolean;
   assignments: SlotAssignment[];
   capacityUse: SlotCapacityUse[];
-  transformations: Array<{ type: "merge" | "compress"; groupIds: string[]; detail: string }>;
+  transformations: Array<{ type: "merge" | "compress" | "project-decorative"; groupIds: string[]; detail: string }>;
   unmatched: SlotDiagnostic[];
   representedFactIds: string[];
   unrepresentedFactIds: string[];
@@ -67,6 +69,8 @@ function semanticItems(content: PageBlueprint | SlideSpec): { items: SemanticIte
         title: group.title,
         body: group.body,
         sourceFactIds: group.sourceFactIds,
+        bullets: [],
+        metrics: [],
       })),
       sourceFactIds: blueprint.sourceFactIds,
     };
@@ -78,8 +82,10 @@ function semanticItems(content: PageBlueprint | SlideSpec): { items: SemanticIte
       order: index,
       role: roleForBlock(block),
       title: block.title,
-      body: [block.body, ...block.bullets].filter(Boolean).join("；"),
+      body: block.body,
       sourceFactIds: block.sourceFactIds,
+      bullets: block.bullets,
+      metrics: block.metrics.map((metric) => `${metric.label}：${metric.value}`),
     })),
     sourceFactIds: spec.sourceFactIds,
   };
@@ -90,6 +96,46 @@ function orderedSlots(profile: TemplateProfile): SemanticSlot[] {
     .map((slot, catalogIndex) => ({ slot, catalogIndex }))
     .sort((left, right) => left.slot.priority - right.slot.priority || left.catalogIndex - right.catalogIndex)
     .map(({ slot }) => slot);
+}
+
+function hasLosslessFactBinding(slot: SemanticSlot): boolean {
+  const declared = slot.factBearingBinding;
+  if (declared) return declared in slot.bindings;
+  return ["body", "narrativeBody", "tableCell"].some((field) => field in slot.bindings);
+}
+
+const ROLE_LABELS: Record<SemanticRole, string> = {
+  headline: "页面主题",
+  conclusion: "核心结论",
+  fact: "事实要点",
+  metric: "量化指标",
+  process: "实施流程",
+  comparison: "对比分析",
+  evidence: "事实依据",
+  visual: "视觉说明",
+};
+
+function fieldValues(field: string, item: SemanticItem): string[] {
+  if (field === "body" || field === "narrativeBody") return [[item.body, ...item.bullets].filter(Boolean).join("；")];
+  if (field === "tableCell") return [item.title, [item.body, ...item.bullets].filter(Boolean).join("；"), item.metrics.join("；") || "—", ROLE_LABELS[item.role]];
+  if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return [ROLE_LABELS[item.role]];
+  if (["sequence", "stepNumber", "stageNumber"].includes(field)) return [String(item.order + 1).padStart(2, "0")];
+  if (field === "metric") return [item.metrics.join("；") || item.title];
+  if (field === "bullet") return [item.bullets[0] ?? item.title];
+  return [item.title];
+}
+
+function bindingValuesFit(item: SemanticItem, slot: SemanticSlot, profile: TemplateProfile): boolean {
+  const factBearing = slot.factBearingBinding
+    ?? (["body", "narrativeBody", "tableCell"].find((field) => field in slot.bindings) as SemanticSlot["factBearingBinding"] | undefined);
+  return Object.entries(slot.bindings).every(([field, tag]) => {
+    const limit = profile.maxCharsBySlot[tag];
+    if (!limit) return false;
+    const expansion = slot.bindingExpansion?.[field] ?? 1;
+    const emittedFit = fieldValues(field, item).slice(0, expansion).every((value) => Array.from(value).length <= limit);
+    const factFits = field === factBearing ? Array.from(item.body).length <= limit : true;
+    return emittedFit && factFits;
+  });
 }
 
 function reasonFor(item: SemanticItem, compatible: SemanticSlot[], lengthCompatible: SemanticSlot[], blockedByOrder: boolean): string {
@@ -112,10 +158,20 @@ export function solveTemplateSlots(content: PageBlueprint | SlideSpec, profile: 
   const unmatched: SlotDiagnostic[] = [];
 
   for (const item of [...items].sort((left, right) => left.order - right.order)) {
-    const roleCompatible = profile.supportedRoles.includes(item.role)
+    const roleSlots = profile.supportedRoles.includes(item.role)
       ? slots.filter((slot) => slot.acceptedRoles.includes(item.role))
       : [];
-    const lengthCompatible = roleCompatible.filter((slot) => Array.from(item.body).length <= slot.maxCharsPerItem);
+    const roleCompatible = roleSlots.filter(hasLosslessFactBinding);
+    if (roleSlots.length > 0 && roleCompatible.length === 0) {
+      unmatched.push({
+        groupId: item.id,
+        role: item.role,
+        sourceFactIds: item.sourceFactIds,
+        reason: "可兼容槽位没有声明无损事实承载绑定",
+      });
+      continue;
+    }
+    const lengthCompatible = roleCompatible.filter((slot) => Array.from(item.body).length <= slot.maxCharsPerItem && bindingValuesFit(item, slot, profile));
     const compatibleIds = new Set(lengthCompatible.map((slot) => slot.id));
     const positionIndex = positions.findIndex(({ slot }, index) => index > lastPosition && compatibleIds.has(slot.id));
     const position = positionIndex >= 0 ? positions[positionIndex] : undefined;
@@ -168,7 +224,15 @@ export function solveTemplateSlots(content: PageBlueprint | SlideSpec, profile: 
         characterCapacity: slot.itemCapacity * slot.maxCharsPerItem,
       };
     }),
-    transformations: [],
+    transformations: Object.entries(profile.auxiliaryBindings ?? {}).flatMap(([field]) => {
+      const capacity = profile.auxiliaryCapacities?.[field]?.itemCapacity;
+      if (!capacity || assignments.length <= capacity || field === "tableHeader") return [];
+      return [{
+        type: "project-decorative" as const,
+        groupIds: assignments.slice(capacity).map((assignment) => assignment.groupId),
+        detail: `Decorative binding ${field} projects ${capacity} items while facts remain in lossless bindings.`,
+      }];
+    }),
     unmatched,
     representedFactIds,
     unrepresentedFactIds,

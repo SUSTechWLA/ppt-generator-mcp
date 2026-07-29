@@ -13,7 +13,7 @@ export const workflowInput = {
   quality: { minScore: 85, maxAttempts: 3 },
 };
 
-async function writeFakeAttempts(runDir: string, scores: number[], hardGates: boolean[]): Promise<QualityLoopResult> {
+async function writeFakeAttempts(runDir: string, scores: number[], hardGates: boolean[], templateSlugs: string[] = []): Promise<QualityLoopResult> {
   const spec = makeSlideSpec({ assetCount: 1 });
   const state = {
     spec,
@@ -43,7 +43,20 @@ async function writeFakeAttempts(runDir: string, scores: number[], hardGates: bo
       writeFile(screenshotPath, Buffer.from("iVBORw0KGgo=", "base64")),
       writeFile(qualityPath, JSON.stringify(quality, null, 2)),
     ]);
-    attempts.push({ attempt, html, htmlPath, screenshotPath, qualityPath, quality, actions: [], state });
+    attempts.push({
+      attempt,
+      html,
+      htmlPath,
+      screenshotPath,
+      qualityPath,
+      quality,
+      actions: [],
+      state: {
+        ...state,
+        templateSlug: templateSlugs[index] ?? state.templateSlug,
+        templateSwitched: index > 0 && (templateSlugs[index] ?? state.templateSlug) !== (templateSlugs[0] ?? state.templateSlug),
+      },
+    });
   }
   const selected = [...attempts].sort((left, right) => right.quality.score - left.quality.score)[0];
   return {
@@ -53,7 +66,7 @@ async function writeFakeAttempts(runDir: string, scores: number[], hardGates: bo
   };
 }
 
-export async function makeWorkflowDependencies(options: { scores: number[]; hardGates: boolean[] }) {
+export async function makeWorkflowDependencies(options: { scores: number[]; hardGates: boolean[]; templateSlugs?: string[] }) {
   const root = await mkdtemp(join(tmpdir(), "ppt-workflow-"));
   const counters = { imageCalls: 0 };
   const source = makeSourceDocument();
@@ -68,7 +81,7 @@ export async function makeWorkflowDependencies(options: { scores: number[]; hard
     selectTemplate: () => ({ slug: "green-infographic-bid-a4-landscape-text-image", reason: "图片槽位与内容匹配", score: 95, candidates: [] }),
     generateAssets: async () => { counters.imageCalls += 1; return assets; },
     composeSlide: async () => ({ html: '<html><body><article data-slide-page="1"><img src="data:image/png;base64,iVBORw0KGgo="></article></body></html>', warnings: [] }),
-    runQualityLoop: async (input) => writeFakeAttempts(input.runDir, options.scores, options.hardGates),
+    runQualityLoop: async (input) => writeFakeAttempts(input.runDir, options.scores, options.hardGates, options.templateSlugs),
   };
   return dependencies;
 }

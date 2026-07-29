@@ -135,6 +135,15 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
   const selectedNumber = loop.selectedAttempt ?? loop.attempts.at(-1)?.attempt;
   const selected = loop.attempts.find((attempt) => attempt.attempt === selectedNumber);
   if (!selected || !selected.htmlPath || !selected.qualityPath) throw new Error("Quality loop produced no selectable artifact");
+  const selectedTemplateSlug = selected.state.templateSlug;
+  const selectedProfile = deps.profiles.find((candidate) => candidate.slug === selectedTemplateSlug);
+  if (!selectedProfile) throw new Error(`Selected attempt references an unknown template profile: ${selectedTemplateSlug}`);
+  const selectedTemplateReason = selectedTemplateSlug === selection.slug
+    ? selection.reason
+    : "质量修复后切换到通过同一能力策略校验的替代模板。";
+  await deps.runStore.updateWorkflowData(run.runId, {
+    template: { slug: selectedTemplateSlug, version: selectedProfile.version, reason: selectedTemplateReason },
+  });
   const promoted = await deps.runStore.promoteAttempt(run.runId, {
     attempt: selected.attempt,
     htmlPath: selected.htmlPath,
@@ -149,7 +158,7 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
   const result = generateSlideOutputSchema.parse({
     runId: run.runId,
     status: loop.status,
-    selectedTemplate: { slug: selection.slug, reason: selection.reason },
+    selectedTemplate: { slug: selectedTemplateSlug, reason: selectedTemplateReason },
     artifacts: { htmlPath: promoted.htmlPath, previewPath: promoted.previewPath, manifestPath },
     quality: {
       score: selected.quality.score,

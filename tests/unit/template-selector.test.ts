@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolve } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { loadTemplate } from "../../src/lib/template-parser.js";
 import { loadTemplateProfiles, selectTemplate } from "../../src/services/template-selector.js";
 import type { TemplateProfile } from "../../src/domain/template-profile.js";
 import { makeSlideSpec, makeTemplateProfiles } from "../helpers/domain-fixtures.js";
@@ -24,9 +28,9 @@ function capabilityProfile(overrides: Record<string, unknown> = {}): TemplatePro
     }],
     blockCapacity: 6,
     supportedBlocks: ["text", "image", "table", "process", "metric"],
-    imageSlots: 1,
+    imageSlots: { placeholderTag: "figures", placeholderCount: 1, minAssets: 0, maxAssets: 1, unusedPolicy: "remove-container", containerSelector: "figure" },
     densityRange: ["low", "high"],
-    maxCharsBySlot: { body: 240, summary: 120 },
+    maxCharsBySlot: { "component-title": 60, paragraph: 240, "page-title": 100, "summary-text": 160 },
     maxRasterAreaRatio: 0.18,
     requiredLandmarks: ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
     documentCompatibility: { bid: true, proposal: true, presentation: true },
@@ -36,9 +40,25 @@ function capabilityProfile(overrides: Record<string, unknown> = {}): TemplatePro
   } as unknown as TemplateProfile;
 }
 
+function withImageSlots(profile: TemplateProfile, minimum: number, count: number): TemplateProfile {
+  return {
+    ...profile,
+    imageSlots: {
+      placeholderTag: "figures",
+      placeholderCount: count,
+      minAssets: minimum,
+      maxAssets: count,
+      unusedPolicy: "remove-container",
+      containerSelector: "figure",
+    },
+  } as unknown as TemplateProfile;
+}
+
 test("prefers a text-image template for four image-backed blocks", () => {
+  const spec = makeSlideSpec({ blockTypes: ["image", "image", "image", "image"], assetCount: 4 });
+  spec.designIntent.visualRatio = 0.45;
   const selection = selectTemplate(
-    makeSlideSpec({ blockTypes: ["image", "image", "image", "image"], assetCount: 4 }),
+    spec,
     makeTemplateProfiles(),
   );
   assert.equal(selection.slug, "green-infographic-bid-a4-landscape-text-image");
@@ -72,13 +92,17 @@ test("forced unknown templates fail with an actionable message", () => {
 test("renaming every slug does not change capability ranking", () => {
   const profiles = loadTemplateProfiles(resolve("templates"));
   const renamed = profiles.map((profile, index) => ({ ...profile, slug: `renamed-${index + 1}` }));
-  const original = selectTemplate(makeSlideSpec({ assetCount: 1 }), profiles, undefined, "proposal");
-  const changed = selectTemplate(makeSlideSpec({ assetCount: 1 }), renamed, undefined, "proposal");
+  const spec = makeSlideSpec({ assetCount: 1 });
+  spec.designIntent.visualRatio = 0.18;
+  const original = selectTemplate(spec, profiles, undefined, "proposal");
+  const changed = selectTemplate(spec, renamed, undefined, "proposal");
   assert.deepEqual(original.candidates.map((candidate) => candidate.score), changed.candidates.map((candidate) => candidate.score));
 });
 
 test("bid raster policy depends on declared capability rather than slug wording", () => {
-  const selection = selectTemplate(makeSlideSpec({ assetCount: 1 }), [
+  const spec = makeSlideSpec({ assetCount: 1 });
+  spec.designIntent.visualRatio = 0.18;
+  const selection = selectTemplate(spec, [
     capabilityProfile({ slug: "layout-alpha", maxRasterAreaRatio: 0.55 }),
     capabilityProfile({ slug: "visual-layout", maxRasterAreaRatio: 0.18 }),
   ], undefined, "bid");
@@ -106,4 +130,113 @@ test("bid policy requires minimum fact, evidence, metric, and process capabiliti
     })], undefined, "bid"),
     /没有.*文档策略兼容/,
   );
+});
+
+test("requested visual ratio cannot exceed a bid profile raster capacity", () => {
+  const spec = makeSlideSpec({ assetCount: 1 });
+  spec.designIntent.visualRatio = 0.9;
+  assert.throws(
+    () => selectTemplate(spec, [capabilityProfile({ maxRasterAreaRatio: 0.18 })], undefined, "bid"),
+    /没有.*文档策略兼容/,
+  );
+});
+
+test("requested visual ratio is enforced for non-bid and forced selection", () => {
+  const spec = makeSlideSpec({ assetCount: 1 });
+  spec.designIntent.visualRatio = 0.9;
+  assert.throws(
+    () => selectTemplate(spec, [capabilityProfile({ slug: "limited-layout", maxRasterAreaRatio: 0.18 })], undefined, "presentation"),
+    /没有.*文档策略兼容/,
+  );
+  assert.throws(
+    () => selectTemplate(spec, [capabilityProfile({ slug: "limited-layout", maxRasterAreaRatio: 0.18 })], "limited-layout", "presentation"),
+    /不兼容/,
+  );
+});
+
+test("selector enforces declared minimum and actual image slot count", () => {
+  const profile = withImageSlots(capabilityProfile({ maxRasterAreaRatio: 0.55 }), 1, 1);
+  const noImage = makeSlideSpec({ assetCount: 0 });
+  const tooMany = makeSlideSpec({ assetCount: 2 });
+  tooMany.designIntent.visualRatio = 0.5;
+  assert.throws(() => selectTemplate(noImage, [profile], undefined, "presentation"), /没有.*兼容/);
+  assert.throws(() => selectTemplate(tooMany, [profile], undefined, "presentation"), /没有.*兼容/);
+});
+
+test("selector rejects emitted table-cell text above the declared tag capacity", () => {
+  const spec = makeSlideSpec({ blockTypes: ["table", "table", "table"], assetCount: 0 });
+  spec.blocks[0].body = "一".repeat(40);
+  const profile = withImageSlots(capabilityProfile({
+    semanticSlots: [{
+      id: "matrix",
+      priority: 1,
+      required: true,
+      itemCapacity: 6,
+      maxCharsPerItem: 120,
+      acceptedRoles: ["comparison"],
+      bindings: { tableCell: "table-cell" },
+    }],
+    maxCharsBySlot: { "table-cell": 24 },
+  }), 0, 0);
+  assert.throws(() => selectTemplate(spec, [profile], undefined, "presentation"), /没有.*兼容/);
+});
+
+async function temporaryCatalog(
+  mutate: (profile: TemplateProfile, html: string) => { profile: TemplateProfile; html: string },
+): Promise<{ directory: string; cleanup(): Promise<void> }> {
+  const directory = await mkdtemp(join(tmpdir(), "template-profile-test-"));
+  const sourceProfile = structuredClone(loadTemplateProfiles(resolve("templates"))[0]);
+  const sourceTemplate = loadTemplate(resolve("templates"), sourceProfile.slug);
+  const changed = mutate(sourceProfile, sourceTemplate.html);
+  await writeFile(join(directory, "fixture.html"), changed.html);
+  await writeFile(join(directory, "template-profiles.json"), JSON.stringify([changed.profile]));
+  return { directory, cleanup: () => rm(directory, { recursive: true, force: true }) };
+}
+
+test("loader rejects a profile whose raw page-title binding is absent", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile,
+    html: html.replace(/<page-title>[\s\S]*?<\/page-title>/, "Static title"),
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /missing placeholders: page-title/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects semantic binding cardinality above actual placeholders", async () => {
+  const fixture = await temporaryCatalog((profile, html) => {
+    profile.semanticSlots[0].itemCapacity += 1;
+    return { profile, html };
+  });
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /cardinality|placeholder count/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects semantic HTML placeholders above declared binding cardinality", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile,
+    html: html.replace("</body>", "<component-title>extra</component-title></body>"),
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /cardinality|placeholder count/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects a bound placeholder without a declared character capacity", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile: { ...profile, maxCharsBySlot: {} },
+    html,
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /character capacity/i);
+  } finally {
+    await fixture.cleanup();
+  }
 });

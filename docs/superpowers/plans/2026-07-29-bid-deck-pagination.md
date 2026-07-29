@@ -1,10 +1,10 @@
-# Bid Deck Pagination Implementation Plan
+# Generic Content-to-HTML Deck MCP Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 MCP 从一份连续中文标书正文稳定规划、生成并逐页验收第 59–62 页四个自包含 HTML 页面，只把 MCP 返回的图片提示词交给外部 `imagegen`。
+**Goal:** 让 MCP 从连续 Markdown/正文稳定规划、生成并逐页验收高质量自包含 HTML 展示页，同时能将优秀 HTML 或展示页/PPT 图片沉淀为可复用模板知识。`test.md` 的 59–62 页只是最终验收样本，图片资产由外部 `imagegen` 回注。
 
-**Architecture:** 在现有单页 `generateSlideWorkflow` 之上增加 deck domain、语义分页器、deck store 和 `plan_deck → generate_deck → get_deck` 编排层。每个 deck 页面保存独立 source sections、page metadata、SlideSpec、模板和单页 runId，生成时继续复用现有单页渲染与最多三次质量循环；deck 级检查只负责跨页一致性，不替代逐页 QA。
+**Architecture:** 在现有单页 `generateSlideWorkflow` 之上增加 deck domain、语义分页器、模板无关 `PageBlueprint`、能力型 `TemplateProfile`、通用槽位求解器、模板知识库、deck store 和 `plan_deck → generate_deck → get_deck` 编排层。每页保存独立源引用、蓝图、模板匹配证据和 runId；生成复用单页渲染与质量循环，deck 检查只负责跨页一致性。
 
 **Tech Stack:** TypeScript ESM、Zod v4、Model Context Protocol SDK、Playwright Chromium、Node.js test runner、JSDOM、现有 HTML/CSS 模板系统。
 
@@ -12,8 +12,10 @@
 
 - 本轮目标页码固定为 `59, 60, 61, 62`，但 domain 必须支持其他连续正整数页码。
 - 正式交付仅包含自包含 HTML；PNG、quality 和 manifest 是 QA 证据，不生成 PPTX。
-- `documentType="bid"` 自动选择时不得选择 `green-infographic-bid-a4-landscape-visual`。
-- 标书叙述页优先 `green-infographic-bid-a4-landscape`；只有容量或表格事实要求时才选择同主题表格模板。
+- 生产代码不得对页码 59–62、`test.md` 内容、当前模板 slug、某个章节标题或固定“五行”结构建立分支。
+- 模板选择只使用能力画像：语义槽位、容量、密度、视觉占比、必需结构、页面意图和文档类型策略。slug 只是标识符。
+- `test.md` 和当前模板只存在于 fixture、acceptance 和最终交付脚本。必须增加 slug 重命名与跨行业泛化测试。
+- 参考模板工作流必须把“多模态分析”与“确定性 HTML 编译/清洗/QA/入库”分层；无 provider 时返回 `needs_analysis` 而不伪造视觉理解。
 - 每页最多一张位图，位图面积不得超过页面面积的 18%。
 - 每页必须独立达到 `minScore=90`、通过全部硬门禁，并且最多尝试 3 次、最多切换一次模板。
 - 页面正文最小字号不得低于 8.5pt；不得通过删除事实或降低字号解决溢出。
@@ -354,165 +356,122 @@ git commit -m "feat: paginate bid source by semantic boundaries"
 
 ---
 
-### Task 3: Deterministic bid-page planning and template-slot semantics
+### Task 3: Generic page-blueprint planning and semantic slot solving
 
 **Files:**
-- Create: `src/services/bid-slide-spec.ts`
+- Create: `src/domain/page-blueprint.ts`
+- Create: `src/services/page-blueprint-builder.ts`
+- Create: `src/services/template-slot-solver.ts`
 - Modify: `src/services/slide-content-mapper.ts`
 - Modify: `src/services/slide-composer.ts`
-- Test: `tests/unit/bid-slide-spec.test.ts`
+- Test: `tests/unit/page-blueprint-builder.test.ts`
+- Test: `tests/unit/template-slot-solver.test.ts`
 - Test: `tests/unit/slide-composer.test.ts`
 
 **Interfaces:**
-- Consumes: a `PagePartition`, its locally normalized `SourceDocument`, and `documentType="bid"`.
-- Produces: `buildBidSlideSpec(source, pageNumber, pageTitle): SlideSpec` with five ordered blocks, at most one page-scoped image asset, and source fact references on every block.
-- Produces page-aware `mapSlideContent(spec, template, profile, page?)` that fills real page numbers and row-specific visual labels.
+- Consumes: a `PagePartition`, locally normalized `SourceDocument`, `DocumentType`, and optional audience.
+- Produces a template-independent `PageBlueprint` containing semantic roles (`headline | conclusion | fact | metric | process | comparison | evidence | visual`), ordered content groups, density, visual need, source references, and page-scoped asset intents.
+- Produces `solveTemplateSlots(blueprint, profile)` with explicit assignments, transformations, capacity use, and unmatched-role diagnostics; the solver knows profile capabilities and slot IDs but not template slugs.
+- Produces `materializeSlideSpec(blueprint, solution): SlideSpec` and page-aware `mapSlideContent(...)` without row-number-specific binding.
 
-- [ ] **Step 1: Write failing bid planning tests**
+- [ ] **Step 1: Write failing generic blueprint and solver tests**
 
 ```ts
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeSource } from "../../src/services/content-normalizer.js";
-import { buildBidSlideSpec } from "../../src/services/bid-slide-spec.js";
+import { buildPageBlueprint } from "../../src/services/page-blueprint-builder.js";
+import { solveTemplateSlots } from "../../src/services/template-slot-solver.js";
 
-test("bid planner creates five dense fact-linked rows and one page-scoped image", () => {
-  const source = normalizeSource({ sourceText: "# 动态调配\n基础配置覆盖8个项目。季节性调整人员。临时任务30分钟内启动，1小时内到场。每日编制方案，每周协调，每月优化。" });
-  const spec = buildBidSlideSpec(source, 61, "八项目动态调配机制");
-  assert.equal(spec.blocks.length, 5);
-  assert.equal(spec.assets.length, 1);
-  assert.equal(spec.assets[0].id, "p61-img-001");
-  assert.equal(spec.designIntent.density, "high");
-  for (const block of spec.blocks) assert.ok(block.sourceFactIds.length > 0);
+test("planner derives semantic roles and keeps every source fact", () => {
+  const source = normalizeSource({ sourceText: "# 应急响应\n重点区域覆盖8个项目。指令后30分钟启动，1小时到场。\n## 闭环\n每日记录，每周协调，每月优化。" });
+  const blueprint = buildPageBlueprint(source, { pageNumber: 17, title: "应急响应", documentType: "bid" });
+  assert.ok(blueprint.groups.some((group) => group.role === "metric"));
+  assert.ok(blueprint.groups.some((group) => group.role === "process"));
+  assert.deepEqual(new Set(blueprint.sourceFactIds), new Set(source.facts.map((fact) => fact.id)));
+  assert.ok(blueprint.groups.length >= 2);
 });
 
-test("bid planner preserves response time values", () => {
-  const source = normalizeSource({ sourceText: "# 响应\n项目对接人员将在30分钟内启动人员调配，确保1小时内到达现场。" });
-  const spec = buildBidSlideSpec(source, 61, "快速响应机制");
-  const copy = JSON.stringify(spec);
-  assert.match(copy, /30分钟/);
-  assert.match(copy, /1小时/);
+test("equivalent profiles produce the same assignment after slug rename", () => {
+  const a = makeProfile({ slug: "alpha-layout" });
+  const b = makeProfile({ slug: "renamed-layout" });
+  const first = solveTemplateSlots(makeBlueprint(), a);
+  const second = solveTemplateSlots(makeBlueprint(), b);
+  assert.deepEqual(first.assignments, second.assignments);
+  assert.equal(first.unmatched.length, 0);
 });
 ```
 
-Add a composer assertion:
+Add a cross-domain test using a product roadmap document with non-59 page numbers, and a composer assertion:
 
 ```ts
-assert.match(result.html, />61<\/span>/);
+assert.match(result.html, />17<\/span>/);
 assert.match(result.html, /30分钟/);
 assert.doesNotMatch(result.html, />1<\/span>/);
 ```
 
-- [ ] **Step 2: Run the bid planner and composer tests to verify failure**
+- [ ] **Step 2: Run blueprint, solver, and composer tests to verify failure**
 
-Run: `node --import tsx --test tests/unit/bid-slide-spec.test.ts tests/unit/slide-composer.test.ts`
+Run: `node --import tsx --test tests/unit/page-blueprint-builder.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts`
 
-Expected: FAIL because `buildBidSlideSpec` and page-aware mapping do not exist.
+Expected: FAIL because the blueprint and slot solver do not exist.
 
-- [ ] **Step 3: Implement fact-preserving five-row planning**
+- [ ] **Step 3: Implement fact-preserving semantic planning and slot solving**
 
-```ts
-// src/services/bid-slide-spec.ts
-import type { SourceDocument, SourceFact } from "../domain/source-document.js";
-import { slideSpecSchema, type SlideBlock, type SlideSpec } from "../domain/slide-spec.js";
+The builder must cluster facts by source section, discourse markers, repeated subject, metric/process cues, and dependency links. Group count is determined by content and configurable bounds, never a constant. Every group carries source fact IDs. Create zero or one visual intent only when it adds explanatory value; prompts use document/page context and source facts, never a hard-coded industry, theme color, or page number narrative.
 
-function distributeFacts(facts: SourceFact[]): SourceFact[][] {
-  const buckets = Array.from({ length: 5 }, () => [] as SourceFact[]);
-  facts.forEach((fact, index) => buckets[Math.min(4, Math.floor(index * 5 / Math.max(1, facts.length)))].push(fact));
-  for (let index = 0; index < buckets.length; index += 1) {
-    if (buckets[index].length === 0) buckets[index].push(facts[Math.min(index, facts.length - 1)]);
-  }
-  return buckets;
-}
+The solver performs deterministic constrained matching: hard capacity and required-role checks first, then weighted role compatibility, density use, visual-ratio fit, and source-order preservation. It may merge adjacent compatible groups or compress copy within recorded limits, but must return an error if any source fact would become unrepresented.
 
-export function buildBidSlideSpec(source: SourceDocument, pageNumber: number, pageTitle: string): SlideSpec {
-  if (source.facts.length === 0) throw new Error("Source document contains no facts for bid planning");
-  const factGroups = distributeFacts(source.facts);
-  const blocks: SlideBlock[] = factGroups.map((facts, index) => ({
-    id: `block-${index + 1}`,
-    type: index === 0 || index === 4 ? "process" : index === 2 ? "metric" : "text",
-    title: ["响应要求", "职责落实", "配置依据", "调配机制", "交付证据"][index],
-    body: facts.map((fact) => fact.text).join(" ").slice(0, 500),
-    bullets: facts.slice(0, index === 0 ? 5 : index === 2 ? 4 : 3).map((fact) => fact.text.replace(/[。；]$/u, "").slice(0, 80)),
-    metrics: facts.flatMap((fact) => [...fact.text.matchAll(/\d[\d,.]*(?:㎡|分钟|小时|个工作日|个|名|年)/g)].map((match) => ({ label: "关键指标", value: match[0] }))).slice(0, 6),
-    sourceFactIds: facts.map((fact) => fact.id),
-  }));
-  return slideSpecSchema.parse({
-    title: pageTitle,
-    eyebrow: "人员配置与履约保障",
-    conclusion: `本页围绕${pageTitle}形成可执行、可检查、可追溯的响应机制。`,
-    blocks,
-    assets: [{
-      id: `p${pageNumber}-img-001`,
-      type: "image",
-      blockId: "block-2",
-      prompt: `用于中国园林养护服务标书第${pageNumber}页的支持性写实照片：${pageTitle}。内容依据：${blocks[1].body.slice(0, 160)}。横向构图，主体位于画面中部，专业可信，自然光，绿色商务色调，无文字、无数字、无标识、无水印`,
-      alt: `${pageTitle}工作场景示意图（AI生成，非项目实景）`,
-      sourceFactIds: blocks[1].sourceFactIds,
-      width: 1792,
-      height: 1024,
-    }],
-    sourceFactIds: [...new Set(blocks.flatMap((block) => block.sourceFactIds))],
-    designIntent: { tone: "professional", density: "high", visualRatio: 0.12 },
-  });
-}
-```
-
-In `slide-content-mapper.ts`, fill page header fields from `pageMetadataSchema` and bind visual labels by row:
-
-- `step-label` from `blocks[0].bullets`.
-- `stage-label` from `blocks[2].bullets`.
-- `item-label` from `blocks[3].bullets`.
-- `node-label` from `blocks[4].bullets`.
-- Fall back to the existing block-title repetition only when the expected row has no bullets.
+In `slide-content-mapper.ts`, bind through profile-declared slot selectors/roles. The same mapper must work after slug renaming and for a fixture template whose slot IDs/order differ from the current green templates.
 
 Pass the optional page metadata from `generateSlideWorkflow` through `WorkflowQualityInput`, `composeSlide`, and every repair composition so the page number never resets during retries.
 
-- [ ] **Step 4: Run bid planning, composer, and fact-reference tests**
+- [ ] **Step 4: Run generic planning, mapping, composer, and fact-reference tests**
 
-Run: `node --import tsx --test tests/unit/bid-slide-spec.test.ts tests/unit/slide-composer.test.ts tests/unit/slide-spec-builder.test.ts`
+Run: `node --import tsx --test tests/unit/page-blueprint-builder.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts tests/unit/slide-spec-builder.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit bid page planning and mapping**
 
 ```bash
-git add src/services/bid-slide-spec.ts src/services/slide-content-mapper.ts src/services/slide-composer.ts src/workflow/generate-slide.ts src/app.ts tests/unit/bid-slide-spec.test.ts tests/unit/slide-composer.test.ts
-git commit -m "feat: map bid facts into standard template rows"
+git add src/domain/page-blueprint.ts src/services/page-blueprint-builder.ts src/services/template-slot-solver.ts src/services/slide-content-mapper.ts src/services/slide-composer.ts src/workflow/generate-slide.ts src/app.ts tests/unit/page-blueprint-builder.test.ts tests/unit/template-slot-solver.test.ts tests/unit/slide-composer.test.ts
+git commit -m "feat: map semantic page blueprints into template slots"
 ```
 
 ---
 
-### Task 4: Document-type-aware template selection and repair whitelist
+### Task 4: Capability-driven template profiles, selection, and repair
 
 **Files:**
+- Modify: `src/domain/template-profile.ts`
+- Modify: `templates/green-infographic/template-profiles.json`
 - Modify: `src/services/template-selector.ts`
 - Modify: `src/app.ts`
 - Test: `tests/unit/template-selector.test.ts`
 
 **Interfaces:**
-- Consumes: existing `SlideSpec`, approved profiles, optional forced slug, and `DocumentType`.
-- Produces: `selectTemplate(spec, profiles, forcedSlug?, documentType?)` where bid auto-selection excludes visual templates and bid repairs use the same filtered candidate list.
+- Consumes: `PageBlueprint`/`SlideSpec`, approved capability profiles, optional forced slug, and a generic document policy derived from `DocumentType`.
+- Produces: `selectTemplate(...)` whose compatibility, policy filtering, scoring, and repair candidates depend only on declared capabilities. The selected slug is an output identifier, never an input to business scoring.
 
-- [ ] **Step 1: Add failing bid-selection tests**
+- [ ] **Step 1: Add failing capability and rename-invariance tests**
 
 ```ts
-test("bid mode excludes visual templates and prefers the base bid skeleton", () => {
+test("bid policy excludes profiles whose declared visual ratio exceeds policy", () => {
   const selection = selectTemplate(makeSlideSpec(), makeTemplateProfiles(), undefined, "bid");
-  assert.equal(selection.slug, "green-infographic-bid-a4-landscape");
-  assert.equal(selection.candidates.some((item) => item.slug.endsWith("-visual")), false);
+  assert.equal(selection.candidates.every((item) => profile(item).maxRasterAreaRatio <= 0.18), true);
 });
 
-test("presentation mode may still select a visual template", () => {
-  const spec = makeSlideSpec({ blockCount: 3, imageCount: 1, density: "low" });
-  const selection = selectTemplate(spec, makeTemplateProfiles(), undefined, "presentation");
-  assert.ok(selection.candidates.some((item) => item.slug.endsWith("-visual")));
+test("renaming every slug does not change capability ranking", () => {
+  const original = selectTemplate(makeSlideSpec(), profiles, undefined, "proposal");
+  const renamed = selectTemplate(makeSlideSpec(), renameProfiles(profiles), undefined, "proposal");
+  assert.deepEqual(original.candidates.map((x) => x.score), renamed.candidates.map((x) => x.score));
 });
 
-test("bid mode rejects a forced visual template", () => {
+test("forced template still must satisfy document policy", () => {
   assert.throws(
-    () => selectTemplate(makeSlideSpec(), makeTemplateProfiles(), "green-infographic-bid-a4-landscape-visual", "bid"),
-    /标书模式不允许视觉型模板/,
+    () => selectTemplate(makeSlideSpec(), [makeProfile({ slug: "any-name", maxRasterAreaRatio: 0.55 })], "any-name", "bid"),
+    /不满足.*文档策略/,
   );
 });
 ```
@@ -523,23 +482,9 @@ Run: `node --import tsx --test tests/unit/template-selector.test.ts`
 
 Expected: FAIL because `selectTemplate` does not apply document policies.
 
-- [ ] **Step 3: Implement policy filtering and deterministic base-template preference**
+- [ ] **Step 3: Implement generic capability profiles and document policies**
 
-```ts
-function allowedForDocument(profile: TemplateProfile, documentType: DocumentType): boolean {
-  if (documentType !== "bid") return true;
-  return !profile.slug.endsWith("-visual");
-}
-
-function documentBonus(profile: TemplateProfile, documentType: DocumentType): number {
-  if (documentType !== "bid") return 0;
-  if (profile.slug === "green-infographic-bid-a4-landscape") return 35;
-  if (profile.slug.includes("table")) return 8;
-  return 0;
-}
-```
-
-Apply the filter before compatibility scoring, add the bonus only after all capacity checks pass, and include `标书模板白名单` in the reason. In `app.ts`, pass `documentType` both for initial selection and repair-time alternative selection.
+Extend profiles with stable slot IDs/selectors/roles/capacities, `themeId`, `pageIntents`, `requiredLandmarks`, `maxRasterAreaRatio`, and document compatibility. Migrate every existing profile explicitly; do not infer business capability from filenames. The selector must hard-filter impossible capacity/policy matches, then score semantic role coverage, density fit, visual fit, page intent, and theme continuity. Stable tie-breaking may use catalog order, not slug lexicography. In `app.ts`, apply the same policy and candidate set during repair.
 
 - [ ] **Step 4: Run selector and quality-loop tests**
 
@@ -550,8 +495,60 @@ Expected: PASS.
 - [ ] **Step 5: Commit template policy**
 
 ```bash
-git add src/services/template-selector.ts src/app.ts tests/unit/template-selector.test.ts
-git commit -m "feat: enforce bid template selection policy"
+git add src/domain/template-profile.ts templates/green-infographic/template-profiles.json src/services/template-selector.ts src/app.ts tests/unit/template-selector.test.ts
+git commit -m "feat: select templates by declared capabilities"
+```
+
+---
+
+### Task 4B: Reference-to-template knowledge workflow
+
+**Files:**
+- Create: `src/domain/template-blueprint.ts`
+- Create: `src/services/template-inspector.ts`
+- Create: `src/services/template-blueprint-compiler.ts`
+- Create: `src/workflow/template-knowledge-store.ts`
+- Create: `src/workflow/create-template-from-reference.ts`
+- Test: `tests/unit/template-inspector.test.ts`
+- Test: `tests/unit/template-blueprint-compiler.test.ts`
+- Test: `tests/e2e/template-knowledge-workflow.test.ts`
+
+**Interfaces:**
+- `inspectTemplateHtml(html)` returns a normalized blueprint/profile draft: canvas, grid, slots, semantic roles, component hierarchy, typography, palette, spacing, visual ratios, and sanitization findings.
+- `createTemplateFromReference(input, deps)` accepts exactly one of `referenceHtml`, `referenceImageDataUrl`, or `blueprint`. HTML is inspected deterministically. Image input uses an optional multimodal `analyzeReferenceImage`; without it the result is `needs_analysis` with a stable prompt and JSON schema. A supplied/analyzed blueprint is compiled, sanitized, rendered, quality-checked, and only then saved as `approved` knowledge.
+- `TemplateKnowledgeStore` persists immutable versioned records with source type/hash, blueprint, compiled HTML/profile paths, QA report, and created timestamp. It never stores API keys or arbitrary remote URLs.
+
+- [ ] **Step 1: Write failing HTML-inspection, image-handoff, compiler, and store tests**
+
+Tests must prove:
+
+1. An arbitrary safe HTML reference produces roles and design tokens without depending on current template tags or filenames.
+2. An image data URL without a provider returns `needs_analysis`, a JSON schema, and no approved template files.
+3. The same image with a fake provider returns a blueprint, compiles a self-contained A4 HTML template, passes Chromium hard gates, and creates an immutable knowledge record.
+4. `<script>`, event handlers, remote resources, path traversal slugs, duplicate slot IDs, inaccessible contrast, or missing required roles are rejected before approval.
+5. Repeating the same request ID and source hash is idempotent; changing the hash under the same request ID is rejected.
+
+- [ ] **Step 2: Run focused tests and verify RED**
+
+Run: `node --import tsx --test tests/unit/template-inspector.test.ts tests/unit/template-blueprint-compiler.test.ts tests/e2e/template-knowledge-workflow.test.ts`
+
+Expected: FAIL because the template knowledge workflow does not exist.
+
+- [ ] **Step 3: Implement analysis boundary, deterministic compiler, QA, and persistence**
+
+The image-analysis prompt asks only for layout structure and design tokens; it must instruct the model not to transcribe visible body copy, logos, or watermarks. The compiler uses owned generic HTML/CSS components and semantic placeholders, not the reference image as a full-page background. All generated CSS values are range-checked, every content-bearing region becomes a declared slot, and output has no script or network dependency. Approval requires static validation plus a real Chromium render and a capability/profile consistency check.
+
+- [ ] **Step 4: Run focused tests, typecheck, and full regression**
+
+Run: `npm run typecheck && node --import tsx --test tests/unit/template-*.test.ts tests/e2e/template-knowledge-workflow.test.ts && npm test`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit template knowledge workflow**
+
+```bash
+git add src/domain/template-blueprint.ts src/services/template-inspector.ts src/services/template-blueprint-compiler.ts src/workflow/template-knowledge-store.ts src/workflow/create-template-from-reference.ts tests/unit/template-inspector.test.ts tests/unit/template-blueprint-compiler.test.ts tests/e2e/template-knowledge-workflow.test.ts
+git commit -m "feat: learn reusable html templates from references"
 ```
 
 ---
@@ -660,8 +657,8 @@ git commit -m "feat: persist resumable deck plans and runs"
 - Test: `tests/unit/plan-deck.test.ts`
 
 **Interfaces:**
-- Consumes: `PlanDeckInput`, `normalizeSource`, `paginateSource`, `buildBidSlideSpec`, `selectTemplate`, and `DeckStore`.
-- Produces: `planDeckWorkflow(rawInput, deps): Promise<PlanDeckOutput>` with persisted `deckPlanId`, four page plans, stable page-scoped assets, and no generated image bytes.
+- Consumes: `PlanDeckInput`, `normalizeSource`, `paginateSource`, `buildPageBlueprint`, capability profiles, `solveTemplateSlots`, `materializeSlideSpec`, `selectTemplate`, and `DeckStore`.
+- Produces: `planDeckWorkflow(rawInput, deps): Promise<PlanDeckOutput>` with persisted `deckPlanId`, arbitrary ordered page plans, stable page-scoped assets when visuals are justified, template-match evidence, and no generated image bytes.
 
 - [ ] **Step 1: Write a failing four-page planning test**
 
@@ -675,8 +672,8 @@ test("plan deck turns one source into pages 59 through 62", async () => {
     requestId: "plan-personnel-59-62",
   }, dependencies);
   assert.deepEqual(result.plannedDeck.slides.map((slide) => slide.page.number), [59, 60, 61, 62]);
-  assert.deepEqual(result.assets.map((asset) => asset.id), ["p59-img-001", "p60-img-001", "p61-img-001", "p62-img-001"]);
-  assert.equal(result.plannedDeck.slides.every((slide) => !slide.templateSlug.endsWith("-visual")), true);
+  assert.equal(result.assets.every((asset) => /^p(?:59|60|61|62)-img-\d{3}$/.test(asset.id)), true);
+  assert.equal(result.plannedDeck.slides.every((slide) => slide.templateMatch.unmatched.length === 0), true);
   assert.match(JSON.stringify(result.plannedDeck.slides[2]), /30分钟/);
   assert.match(JSON.stringify(result.plannedDeck.slides[3]), /五个工作日/);
 });
@@ -701,10 +698,10 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
   const partitions = deps.paginateSource(source, input.pageNumbers);
   const slides = await Promise.all(partitions.map(async (partition) => {
     const pageSource = deps.normalizeSource({ sections: partition.sourceSections, quality: input.quality });
-    const spec = input.documentType === "bid"
-      ? deps.buildBidSlideSpec(pageSource, partition.pageNumber, partition.title)
-      : await deps.buildSlideSpec(pageSource, input.audience);
-    const selection = deps.selectTemplate(spec, input.templateSlug, input.documentType);
+    const blueprint = deps.buildPageBlueprint(pageSource, { pageNumber: partition.pageNumber, title: partition.title, documentType: input.documentType, audience: input.audience });
+    const selection = deps.selectTemplate(blueprint, input.templateSlug, input.documentType);
+    const templateMatch = deps.solveTemplateSlots(blueprint, selection.profile);
+    const spec = deps.materializeSlideSpec(blueprint, templateMatch);
     return {
       page: deps.buildPageMetadata(partition),
       sourceSections: partition.sourceSections,
@@ -712,6 +709,7 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
       originalSourceFactIds: partition.originalSourceFactIds,
       plannedSpec: spec,
       templateSlug: selection.slug,
+      templateMatch,
     };
   }));
   const plannedDeck = plannedDeckSchema.parse({ version: 1, deckPlanId: active.deckPlanId, sourceHash: source.sourceHash, documentType: input.documentType, pageNumbers: input.pageNumbers, slides });
@@ -721,7 +719,7 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
 }
 ```
 
-`buildPageMetadata` must fill consistent labels: section title `人员配置与履约保障`, part number `PART.01`, part label `方案响应`, chapter label `1.1 人员配备要求响应`, and page-specific subsection title.
+`buildPageMetadata` derives section/chapter/subsection labels from the source heading ancestry and caller-supplied context. It may use neutral fallbacks when headings are absent, but must not contain acceptance-specific labels. Add a second planning test for a product roadmap with pages `[3, 4]` and a catalog whose slugs are unrelated to the green templates.
 
 - [ ] **Step 4: Run planning and selector tests**
 
@@ -738,7 +736,7 @@ git commit -m "feat: plan multi-page bid decks from source"
 
 ---
 
-### Task 7: Bid-specific page gates and cross-page consistency
+### Task 7: Profile-driven page gates and cross-page consistency
 
 **Files:**
 - Modify: `src/services/page-renderer.ts`
@@ -748,15 +746,15 @@ git commit -m "feat: plan multi-page bid decks from source"
 - Test: `tests/unit/deck-consistency.test.ts`
 
 **Interfaces:**
-- Consumes: a rendered page plus optional `{ documentType, expectedPageNumber, maxRasterAreaRatio }` policy.
+- Consumes: a rendered page plus optional `{ documentType, expectedPageNumber, profile, policy }`.
 - Produces: page structure signals and `evaluateDeckConsistency(pages): DeckConsistencyReport`.
 
 - [ ] **Step 1: Add failing render and consistency tests**
 
 ```ts
-test("bid gate requires standard template landmarks and correct page number", async () => {
+test("page gate requires profile-declared landmarks and correct page number", async () => {
   const render = await renderPage({ html: validBidHtml, screenshotPath });
-  const report = evaluateDeterministic(render, { documentType: "bid", expectedPageNumber: 59, maxRasterAreaRatio: 0.18 });
+  const report = evaluateDeterministic(render, { documentType: "bid", expectedPageNumber: 59, profile });
   assert.equal(report.hardGatePassed, true);
   assert.equal(render.structure.pageNumber, "59");
 });
@@ -800,11 +798,11 @@ structure: {
 };
 ```
 
-In Chromium, query `.page-header`, `.chapter-band`, `.subsection-title`, `.summary-band`, `.page-footer`, and `.page-number`. Sum the clipped on-canvas area of non-SVG `<img>` rectangles once and divide by `1123 * 794`.
+In Chromium, query semantic landmarks declared by the chosen profile rather than a fixed CSS selector list. Sum the clipped on-canvas area of non-SVG `<img>` rectangles once and divide by the declared canvas area.
 
-Update `evaluateDeterministic` to accept an optional policy. In bid mode, emit hard errors for missing landmarks, page-number mismatch, or raster area above `0.18`.
+Update `evaluateDeterministic` to accept the selected profile and document policy. Emit hard errors for missing declared landmarks, page-number mismatch, or raster area above the stricter of profile and policy limits.
 
-Implement `evaluateDeckConsistency` to require strictly consecutive page numbers, one common template theme prefix `green-infographic-bid-a4-landscape`, identical section title and part labels, and no page with `status !== "delivered"`.
+Implement `evaluateDeckConsistency` to require strictly consecutive page numbers, compatible declared `themeId`/design tokens, consistent caller/source-derived hierarchy labels, and no page with `status !== "delivered"`. Never derive theme from slug prefixes.
 
 - [ ] **Step 4: Run render, evaluator, and consistency tests**
 
@@ -922,7 +920,7 @@ git commit -m "feat: generate and resume quality-gated bid decks"
 
 ---
 
-### Task 9: MCP tools and production composition
+### Task 9: MCP workflow and template-knowledge tools
 
 **Files:**
 - Modify: `src/mcp/register-tools.ts`
@@ -933,14 +931,14 @@ git commit -m "feat: generate and resume quality-gated bid decks"
 
 **Interfaces:**
 - Consumes: `planDeckWorkflow`, `generateDeckWorkflow`, `DeckStore`, and deck schemas.
-- Produces MCP tools `plan_deck`, `generate_deck`, and `get_deck` with structured output and safe error handling.
+- Produces MCP tools `plan_deck`, `generate_deck`, `get_deck`, `inspect_template`, `create_template_from_reference`, and `list_template_knowledge` with structured output and safe error handling.
 
 - [ ] **Step 1: Write failing MCP contract tests**
 
 ```ts
 test("lists the multi-page workflow tools", async () => {
   const tools = await client.listTools();
-  for (const name of ["plan_deck", "generate_deck", "get_deck"]) {
+  for (const name of ["plan_deck", "generate_deck", "get_deck", "inspect_template", "create_template_from_reference", "list_template_knowledge"]) {
     assert.ok(tools.tools.some((tool) => tool.name === name));
   }
 });
@@ -950,7 +948,7 @@ test("plan_deck returns page-scoped image prompts", async () => {
   assert.equal(result.isError, undefined);
   const output = planDeckOutputSchema.parse(result.structuredContent);
   assert.deepEqual(output.plannedDeck.pageNumbers, [59, 60, 61, 62]);
-  assert.deepEqual(output.assets.map((asset) => asset.id), ["p59-img-001", "p60-img-001", "p61-img-001", "p62-img-001"]);
+  assert.equal(output.assets.every((asset) => /^p\d+-img-\d{3}$/.test(asset.id)), true);
 });
 
 test("get_deck never exposes arbitrary paths or stack traces", async () => {
@@ -994,6 +992,8 @@ server.registerTool("get_deck", {
 ```
 
 Extend `PptMcpDependencies` with typed `planDeck`, `generateDeck`, and `deckStore` members. Keep all existing atomic and single-slide tools unchanged.
+
+Register the three template-knowledge tools from Task 4B. The image-reference tool must expose both `needs_analysis` and `approved` structured outputs; it accepts data URLs or validated blueprints, never arbitrary source/output filesystem paths. `inspect_template` is read-only. `list_template_knowledge` returns records and safe artifact identifiers, not unrestricted paths.
 
 - [ ] **Step 4: Run MCP contract and single-slide acceptance tests**
 
@@ -1067,7 +1067,7 @@ Expected: FAIL until the full deck MCP path is wired.
 1. Read `test.md`.
 2. Call `plan_deck` through the in-memory MCP client.
 3. Write `asset-prompts.json` under the deck output directory.
-4. Look for page assets at `examples/assets/personnel-deck/<asset-id>.png`.
+4. Look for every asset actually returned by `plan_deck` at `examples/assets/personnel-deck/<asset-id>.png`; zero assets is valid.
 5. If any asset is missing, print the exact asset IDs and prompts and exit with code 2 without calling `generate_deck`.
 6. If all assets exist, convert them to data URLs, call `generate_deck`, and copy only `page-59.html` through `page-62.html` into `output/deliverables/personnel-deck-59-62/`.
 7. Print every page score, hard-gate result, runId, HTML path, preview path, and quality path.
@@ -1096,15 +1096,12 @@ Expected: all commands exit 0; existing single-slide tests remain green.
 
 Run: `npm run plan:personnel-deck`
 
-Expected: exit code 2 with four stable asset IDs and four prompts written to `asset-prompts.json`.
+Expected: exit code 2 when one or more planned assets are absent, with stable asset IDs and prompts written to `asset-prompts.json`; if the planner decides a page needs no raster asset, do not invent one.
 
-For each asset, call the built-in `imagegen` tool with exactly the prompt returned by MCP. Inspect every result, copy the accepted file from the Codex generated-images directory to:
+For each returned asset, call the built-in `imagegen` tool with exactly the prompt returned by MCP. Inspect every result and copy the accepted file from the Codex generated-images directory to the matching ID under:
 
 ```text
-examples/assets/personnel-deck/p59-img-001.png
-examples/assets/personnel-deck/p60-img-001.png
-examples/assets/personnel-deck/p61-img-001.png
-examples/assets/personnel-deck/p62-img-001.png
+examples/assets/personnel-deck/<asset-id>.png
 ```
 
 Do not use CLI fallback, do not add text to images, do not reuse one image for multiple pages, and record the final prompts in `examples/assets/personnel-deck/README.md`.

@@ -116,6 +116,31 @@ test("optional image projection rejects only the page title cap plus one and pre
   assert.match(composed.html, new RegExp(withImage.assets[0].alt));
 });
 
+test("a forged shared prompt and image tag reproduces slot erasure before asset injection", async () => {
+  const optionalTemplateSlug = "green-infographic-bid-a4-landscape";
+  const optionalTemplate = loadTemplate(templatesDir, optionalTemplateSlug);
+  const optionalProfile = loadTemplateProfiles(templatesDir).find((item) => item.slug === optionalTemplateSlug)!;
+  const forgedProfile = structuredClone(optionalProfile);
+  forgedProfile.assetPromptBindings = { figureRef: forgedProfile.imageSlots.placeholderTag };
+  forgedProfile.maxCharsBySlot[forgedProfile.imageSlots.placeholderTag] = 240;
+  const forgedTemplate = {
+    ...optionalTemplate,
+    html: optionalTemplate.html.replace(/<figure-ref>([\s\S]*?)<\/figure-ref>/i, "$1"),
+  };
+  const withImage = makeSlideSpec({ assetCount: 1 });
+  const mapped = mapSlideContent(withImage, forgedTemplate, forgedProfile);
+  assert.deepEqual(mapped[forgedProfile.imageSlots.placeholderTag], [withImage.blocks[0].title]);
+  await assert.rejects(
+    () => composeSlide({
+      spec: withImage,
+      template: forgedTemplate,
+      profile: forgedProfile,
+      assets: makeGeneratedAssets(withImage.assets),
+    }),
+    /contains 0 image placeholders/i,
+  );
+});
+
 test("four-figure template requires exact cardinality and never reuses an asset", async () => {
   const exactProfile = {
     ...profile,

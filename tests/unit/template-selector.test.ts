@@ -89,6 +89,9 @@ test("loads one approved profile for every repository template", () => {
     profiles.map((profile) => profile.slug).sort(),
     templates.map((template) => template.slug).sort(),
   );
+  const promptProfiles = profiles.filter((profile) => profile.assetPromptBindings?.figureRef);
+  assert.equal(promptProfiles.length, 3);
+  assert.ok(promptProfiles.every((profile) => profile.assetPromptBindings!.figureRef !== profile.imageSlots.placeholderTag));
 });
 
 test("green visual baseline preserves canonical placeholder cardinality", () => {
@@ -412,6 +415,34 @@ type PromptCapableProfile = TemplateProfile & { assetPromptBindings?: { figureRe
 
 function promptReferenceProfile(profiles: TemplateProfile[]): TemplateProfile {
   return profiles.find((profile) => profile.slug === "green-infographic-bid-a4-landscape")!;
+}
+
+for (const conflict of [
+  { label: "image directive", tag: "figures" },
+  { label: "visible page binding", tag: "image-caption" },
+  { label: "semantic binding", tag: "component-title" },
+  { label: "auxiliary binding", tag: "step-label" },
+]) {
+  test(`loader rejects asset prompt tag ownership shared with ${conflict.label}`, async () => {
+    const fixture = await temporaryCatalog((profile, html) => {
+      (profile as PromptCapableProfile).assetPromptBindings = { figureRef: conflict.tag };
+      profile.maxCharsBySlot[conflict.tag] ??= 240;
+      if (conflict.tag === profile.imageSlots.placeholderTag) {
+        html = html.replace(/<figure-ref>([\s\S]*?)<\/figure-ref>/i, "$1");
+      }
+      return { profile, html };
+    }, promptReferenceProfile);
+    try {
+      assert.throws(
+        () => loadTemplateProfiles(fixture.directory),
+        (error: unknown) => error instanceof Error
+          && /tag ownership conflict/i.test(error.message)
+          && error.message.includes(conflict.tag),
+      );
+    } finally {
+      await fixture.cleanup();
+    }
+  });
 }
 
 test("loader requires prompt-only references to be owned exactly once by each non-rendered image directive", async () => {

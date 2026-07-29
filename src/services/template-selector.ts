@@ -110,26 +110,41 @@ interface BindingEmission {
   source: string;
 }
 
-function declaredBindingEmissions(profile: TemplateProfile): BindingEmission[] {
-  const emissions: BindingEmission[] = [];
+interface TagOwnership {
+  tag: string;
+  source: string;
+  emissionCount?: number;
+}
+
+function declaredTagOwnerships(profile: TemplateProfile): TagOwnership[] {
+  const ownerships: TagOwnership[] = [{
+    tag: profile.imageSlots.placeholderTag,
+    source: "image directive",
+  }];
   for (const slot of profile.semanticSlots) {
     for (const [field, tag] of Object.entries(slot.bindings)) {
-      emissions.push({ tag, count: slot.itemCapacity * slot.bindingExpansion[field], source: `semantic slot ${slot.id}.${field}` });
+      ownerships.push({ tag, emissionCount: slot.itemCapacity * slot.bindingExpansion[field], source: `semantic slot ${slot.id}.${field}` });
     }
   }
   for (const [field, tag] of Object.entries(profile.auxiliaryBindings ?? {})) {
     const cardinality = profile.auxiliaryCapacities?.[field];
     if (!cardinality) throw new Error(`Auxiliary binding ${field} has no declared cardinality`);
-    emissions.push({ tag, count: cardinality.itemCapacity * cardinality.valuesPerItem, source: `auxiliary binding ${field}` });
+    ownerships.push({ tag, emissionCount: cardinality.itemCapacity * cardinality.valuesPerItem, source: `auxiliary binding ${field}` });
   }
   for (const [field, tag] of Object.entries(profile.pageBindings)) {
     const count = field === "imageCaption" || field === "figureRef" ? profile.imageSlots.placeholderCount : 1;
-    emissions.push({ tag, count, source: `page binding ${field}` });
+    ownerships.push({ tag, emissionCount: count, source: `page binding ${field}` });
   }
   for (const [field, tag] of Object.entries(profile.assetPromptBindings ?? {})) {
-    emissions.push({ tag, count: profile.imageSlots.placeholderCount, source: `asset prompt binding ${field}` });
+    ownerships.push({ tag, emissionCount: profile.imageSlots.placeholderCount, source: `asset prompt binding ${field}` });
   }
-  return emissions;
+  return ownerships;
+}
+
+function declaredBindingEmissions(profile: TemplateProfile): BindingEmission[] {
+  return declaredTagOwnerships(profile).flatMap((ownership) => ownership.emissionCount === undefined
+    ? []
+    : [{ tag: ownership.tag, count: ownership.emissionCount, source: ownership.source }]);
 }
 
 function rawTagCount(html: string, tag: string): number {
@@ -371,14 +386,19 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   for (const profile of profiles) {
     if (!actual.has(profile.slug)) throw new Error(`Template profile has no matching HTML: ${profile.slug}`);
     const template = loadTemplate(templatesDir, profile.slug);
+    const ownerships = declaredTagOwnerships(profile);
+    const ownershipsByTag = new Map<string, TagOwnership[]>();
+    for (const ownership of ownerships) ownershipsByTag.set(ownership.tag, [...(ownershipsByTag.get(ownership.tag) ?? []), ownership]);
+    const ownershipConflicts = [...ownershipsByTag.entries()].filter(([, targets]) => targets.length > 1);
+    if (ownershipConflicts.length > 0) {
+      throw new Error(`Template profile ${profile.slug} has tag ownership conflict from duplicate placeholder target tags: ${ownershipConflicts.map(([tag, targets]) => `${tag} (${targets.map((target) => target.source).join(", ")})`).join("; ")}`);
+    }
     validateAssetPromptBindings(template, profile);
-    const emissions = declaredBindingEmissions(profile);
+    const emissions = ownerships.flatMap((ownership): BindingEmission[] => ownership.emissionCount === undefined
+      ? []
+      : [{ tag: ownership.tag, count: ownership.emissionCount, source: ownership.source }]);
     const emissionsByTag = new Map<string, BindingEmission[]>();
     for (const emission of emissions) emissionsByTag.set(emission.tag, [...(emissionsByTag.get(emission.tag) ?? []), emission]);
-    const duplicateTargets = [...emissionsByTag.entries()].filter(([, targets]) => targets.length > 1);
-    if (duplicateTargets.length > 0) {
-      throw new Error(`Template profile ${profile.slug} has duplicate placeholder target tags: ${duplicateTargets.map(([tag, targets]) => `${tag} (${targets.map((target) => target.source).join(", ")})`).join("; ")}`);
-    }
     const declaredTags = [...emissionsByTag.keys()];
     const missing = declaredTags.filter((tag) => actualPlaceholderCount(template, tag) === 0);
     if (missing.length > 0) throw new Error(`Template profile ${profile.slug} declares missing placeholders: ${[...new Set(missing)].join(", ")}`);

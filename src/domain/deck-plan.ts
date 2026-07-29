@@ -10,6 +10,7 @@ import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, pro
 import { extractFacts } from "../services/fact-extractor.js";
 import { pageBlueprintSchema } from "./page-blueprint.js";
 import { solveTemplateSlots } from "../services/template-slot-solver.js";
+import { hashDeckSourceEvidence } from "./deck-source-evidence.js";
 
 const sourceChoice = {
   sourceMarkdown: z.string().trim().min(20).max(120_000).optional(),
@@ -354,6 +355,9 @@ export const plannedDeckSchema = z.object({
   pageNumbers: z.array(z.number().int().positive()),
   slides: z.array(deckSlidePlanSchema).min(1).max(30),
 }).strict().superRefine((deck, context) => {
+  if (deck.sourceHash !== hashDeckSourceEvidence(deck)) {
+    context.addIssue({ code: "custom", message: "Deck source hash must equal canonical persisted source evidence", path: ["sourceHash"] });
+  }
   const slideNumbers = deck.slides.map((slide) => slide.page.number);
   if (slideNumbers.length !== deck.pageNumbers.length
     || slideNumbers.some((pageNumber, index) => pageNumber !== deck.pageNumbers[index])) {

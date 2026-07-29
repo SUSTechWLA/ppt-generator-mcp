@@ -183,10 +183,10 @@ test("verifier recomputes canonical project-name and negation anchors from sourc
 });
 
 for (const scenario of [
-  { text: `项目配置3,000（${"甲".repeat(24)}）株常绿乔木。`, number: "3,000", unit: "株" },
-  { text: `年度服务12（${"乙".repeat(24)}）万人次。`, number: "12", unit: "万人次" },
-  { text: `应配置5（${"丙".repeat(24)}）辆作业车。`, number: "5", unit: "辆" },
-  { text: `中标人需服务12（${"丁".repeat(24)}）家子项目。`, number: "12", unit: "家" },
+  { text: `年度目标明确，配置3,000（${"甲".repeat(24)}）株常绿乔木。`, number: "3,000", unit: "株" },
+  { text: `年度目标明确，服务12（${"乙".repeat(24)}）万人次。`, number: "12", unit: "万人次" },
+  { text: `年度目标明确，配置5（${"丙".repeat(24)}）辆作业车。`, number: "5", unit: "辆" },
+  { text: `年度目标明确，服务12（${"丁".repeat(24)}）家子项目。`, number: "12", unit: "家" },
 ] as const) {
   test(`numeric anchor retains independently separated unit ${scenario.unit}`, () => {
     const source = normalizeSource({ sections: [{ heading: "数量要求", body: scenario.text }], quality: { minScore: 90, maxAttempts: 3 } });
@@ -243,7 +243,7 @@ test("explicit enumeration clause retains all unknown names", () => {
 test("ordinary subject prefix is structural rather than a fabricated name", () => {
   const anchors = extractCanonicalAnchors("工作人员承担常态化维护工作，服务期间必须每日巡查。");
   assert.equal(anchors.some((anchor) => anchor.kind === "name"), false);
-  assert.ok(anchors.some((anchor) => anchor.kind === "subject" && anchor.text === "工作人员"));
+  assert.ok(anchors.some((anchor) => anchor.kind === "subject" && anchor.text === "工作人员承担常态化维护工作"));
 });
 
 test("subject plus mandatory tokens fail capacity instead of silently dropping the subject", () => {
@@ -258,4 +258,69 @@ test("subject plus mandatory tokens fail capacity instead of silently dropping t
     }) }),
     (error: unknown) => error instanceof WorkflowError && /without losing grounded source anchors/.test(error.message),
   );
+});
+
+test("complete first semantic clause retains coordinated object names across enumeration commas", () => {
+  const firstClause = "服务团队重点保障云栖府、滨江壹品和钱塘江沿线";
+  const source = normalizeSource({
+    sections: [{ heading: "重点对象", body: `${firstClause}，必须在30分钟内响应并形成闭环。` }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  const result = planGroundedDisplay(source, { pageNumber: 40, title: "重点对象", documentType: "bid", profile: profile({
+    semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 44 }],
+    maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 44 },
+  }) });
+  assert.match(result.blueprint.groups[0].body, /云栖府/);
+  assert.match(result.blueprint.groups[0].body, /滨江壹品/);
+  assert.match(result.blueprint.groups[0].body, /钱塘江/);
+  assert.ok(result.displayPlan.factCoverages[0].criticalAnchors.some((anchor) =>
+    anchor.kind === "subject" && anchor.text === firstClause
+  ));
+});
+
+test("ordinary first clause is retained as context without fabricating a proper name", () => {
+  const firstClause = "工作人员认真完成常规清洁任务";
+  const anchors = extractCanonicalAnchors(`${firstClause}，必须每日巡查。`);
+  assert.ok(anchors.some((anchor) => anchor.kind === "subject" && anchor.text === firstClause));
+  assert.equal(anchors.some((anchor) => anchor.kind === "name"), false);
+});
+
+test("overlong first semantic clause produces a structured capacity failure", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "长分句", body: `服务团队重点保障${"常规作业".repeat(10)}，必须每日巡查。` }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  assert.throws(
+    () => planGroundedDisplay(source, { pageNumber: 41, title: "长分句", documentType: "bid", profile: profile({
+      semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 34 }],
+      maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 34 },
+    }) }),
+    (error: unknown) => error instanceof WorkflowError
+      && error.code === "INPUT_INVALID"
+      && /without losing grounded source anchors/.test(error.message),
+  );
+});
+
+test("bare obligation prefixes require a following generic action phrase", () => {
+  const positive = extractCanonicalAnchors("人员应及时完成检查并记录，团队需按要求提交结果。");
+  assert.ok(positive.some((anchor) => anchor.kind === "obligation" && anchor.text === "应"));
+  assert.ok(positive.some((anchor) => anchor.kind === "obligation" && anchor.text === "需"));
+
+  const negative = extractCanonicalAnchors("响应适应反应对应供应效应需求所需供需均属于普通词汇。");
+  assert.equal(negative.some((anchor) => anchor.kind === "obligation"), false);
+});
+
+test("ordinary conclusion does not compact to a fabricated obligation fragment", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "年度结论", body: "年度目标明确，系统响应顺畅，服务体验良好。" }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  const result = planGroundedDisplay(source, { pageNumber: 42, title: "年度结论", documentType: "bid", profile: profile({
+    semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 12 }],
+    maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 12 },
+  }) });
+  assert.equal(result.blueprint.groups[0].body, "年度目标明确");
+  assert.equal(result.displayPlan.factCoverages[0].criticalAnchors.some((anchor) =>
+    anchor.kind === "obligation" && anchor.text === "应"
+  ), false);
 });

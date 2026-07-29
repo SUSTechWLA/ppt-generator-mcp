@@ -11,6 +11,7 @@ import { DeckStore } from "../../src/workflow/deck-store.js";
 import { createPlanDeckDependencies, planDeckWorkflow } from "../../src/workflow/plan-deck.js";
 import { validatePlanAgainstProfiles } from "../../src/services/plan-profile-validator.js";
 import { hashCanonical } from "../../src/domain/source-document.js";
+import { hashDeckSourceEvidence } from "../../src/domain/deck-source-evidence.js";
 
 function page(number: number, title: string, body: string): string {
   return `<page ${number}>\n一级标题：数字产品方案\n二级标题：客户交付\n三级标题：运行保障\n四级标题：${title}\n正文：\n${body}`;
@@ -256,6 +257,64 @@ test("loaded-profile validation rejects a coherent but stale persisted capabilit
   } finally {
     await f.cleanup();
   }
+});
+
+test("deck source hash rejects a whole-slide transplant from another valid plan", async () => {
+  const f = await fixture();
+  try {
+    const planA = await planDeckWorkflow({
+      sourceText: explicitSource, pageNumbers: [17, 23], documentType: "bid",
+      requestId: "source-evidence-plan-a",
+    }, f.deps);
+    const planB = await planDeckWorkflow({
+      sourceText: explicitSource.replace("1名固定负责人", "2名轮值负责人").replace("每日形成1份记录", "每周形成2份记录"),
+      pageNumbers: [17, 23], documentType: "bid",
+      requestId: "source-evidence-plan-b",
+    }, f.deps);
+    const forged = structuredClone(planA);
+    forged.plannedDeck.slides = structuredClone(planB.plannedDeck.slides);
+    forged.assets = structuredClone(planB.assets);
+    assert.equal(planDeckOutputSchema.safeParse(forged).success, false);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("deck source evidence hash ignores key order and CRLF but changes with lexical source", () => {
+  const lf = {
+    pageNumbers: [1],
+    slides: [{
+      page: {
+        number: 1,
+        sectionTitle: "实施方案",
+        partNumber: "PART.01",
+        partLabel: "服务响应",
+        chapterLabel: "运行保障",
+        subsectionTitle: "检查流程",
+      },
+      sourceSections: [{ heading: "检查流程", body: "第一行\n第二行", keyPoints: ["完整记录"] }],
+      originalSourceSectionIds: ["section-1"],
+    }],
+  };
+  const reorderedCrlf = {
+    slides: [{
+      originalSourceSectionIds: ["section-1"],
+      sourceSections: [{ keyPoints: ["完整记录"], body: "第一行\r\n第二行", heading: "检查流程" }],
+      page: {
+        subsectionTitle: "检查流程",
+        chapterLabel: "运行保障",
+        partLabel: "服务响应",
+        partNumber: "PART.01",
+        sectionTitle: "实施方案",
+        number: 1,
+      },
+    }],
+    pageNumbers: [1],
+  };
+  assert.equal(hashDeckSourceEvidence(lf), hashDeckSourceEvidence(reorderedCrlf));
+  const changed = structuredClone(lf);
+  changed.slides[0].sourceSections[0].body = "第一行\n伪造第二行";
+  assert.notEqual(hashDeckSourceEvidence(lf), hashDeckSourceEvidence(changed));
 });
 
 test("profile diagnostics never echo dependency messages, recoveries, paths, or unenumerated secrets", async () => {

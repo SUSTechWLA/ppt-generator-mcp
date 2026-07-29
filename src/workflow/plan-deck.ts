@@ -25,6 +25,7 @@ import { selectTemplate } from "../services/template-selector.js";
 import { solveTemplateSlots, type TemplateSlotSolution } from "../services/template-slot-solver.js";
 import type { DeckStoreApi } from "./deck-store.js";
 import { validatePlanAgainstProfiles } from "../services/plan-profile-validator.js";
+import { hashDeckSourceEvidence } from "../domain/deck-source-evidence.js";
 
 type PlanDeckInput = ReturnType<typeof planDeckInputSchema.parse>;
 type PlanDeckOutput = ReturnType<typeof planDeckOutputSchema.parse>;
@@ -397,7 +398,7 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
   const plannedDeck = plannedDeckSchema.parse({
     version: 1,
     deckPlanId: active.deckPlanId,
-    sourceHash: hashCanonical({ sourceText }),
+    sourceHash: hashDeckSourceEvidence({ pageNumbers: input.pageNumbers, slides }),
     documentType: input.documentType,
     ...(input.preferredThemeId ? { preferredThemeId: input.preferredThemeId } : {}),
     pageNumbers: input.pageNumbers,

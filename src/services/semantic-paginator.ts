@@ -76,7 +76,7 @@ function hasTimeLimit(value: string): boolean {
 }
 
 function isMandatoryContinuation(value: string): boolean {
-  return /^(?:该|其|此|上述|前述|随后|然后|继而|其中|并|且|同时|若|如|当|在.+(?:完成后|之后|条件下|情况下))/.test(value);
+  return /^(?:该|其|此|上述|前述|其中|随后|然后|继而|并|且|同时)/.test(value);
 }
 
 function continuationPenalty(value: string): number {
@@ -302,6 +302,9 @@ function draftForPart(group: SectionGroup, part: PagePart, partIndex: number): P
   const paragraphsInPart = units.filter((unit) => unit.kind === "paragraph").map((unit) => unit.text);
   const keyPoints = units.filter((unit) => unit.kind === "keyPoint").map((unit) => unit.text);
   const body = (paragraphsInPart.length > 0 ? paragraphsInPart : keyPoints).join("\n\n");
+  const retainedKeyPoints = paragraphsInPart.length > 0
+    ? keyPoints.filter((keyPoint) => !paragraphsInPart.some((paragraph) => normalizeSentence(paragraph) === normalizeSentence(keyPoint)))
+    : [];
   const originalSourceSectionIds = Array.from(new Set(units.map((unit) => unit.sourceSectionId)));
 
   return {
@@ -309,7 +312,7 @@ function draftForPart(group: SectionGroup, part: PagePart, partIndex: number): P
     sourceSections: [{
       heading: group.heading,
       body,
-      ...(keyPoints.length > 0 ? { keyPoints } : {}),
+      ...(retainedKeyPoints.length > 0 ? { keyPoints: retainedKeyPoints } : {}),
     }],
     originalSourceSectionIds,
     originalSourceFactIds: [],

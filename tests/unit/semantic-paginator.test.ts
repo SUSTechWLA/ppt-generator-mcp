@@ -60,6 +60,10 @@ test("paginator uses bullet-only content as non-overlapping source units", () =>
   const pages = paginateSource(source, [1, 2]);
 
   assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["重置设备。", "检查线路。"]);
+  assert.deepEqual(
+    pages.flatMap((page) => page.sourceSections.flatMap((section) => [section.body, ...(section.keyPoints ?? [])])),
+    ["重置设备。", "检查线路。"],
+  );
   assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
   assert.deepEqual(
     pages.flatMap((page) => page.originalSourceFactIds),
@@ -76,9 +80,13 @@ test("paginator removes structured key points that overlap body paragraphs", () 
     }],
   });
 
-  const pages = paginateSource(source, [21, 22, 23]);
+  const pages = paginateSource(source, [21, 22]);
 
-  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["重置设备。", "检查线路。", "归档报告。"]);
+  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["重置设备。", "检查线路。"]);
+  assert.deepEqual(
+    pages.flatMap((page) => page.sourceSections.flatMap((section) => [section.body, ...(section.keyPoints ?? [])])),
+    ["重置设备。", "检查线路。", "归档报告。"],
+  );
   assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
   assert.deepEqual(
     pages.flatMap((page) => page.originalSourceFactIds),
@@ -139,6 +147,32 @@ test("paginator rejects page counts that require splitting a structural continua
       && error.stage === "paginate_source"
       && /dependency-safe partitions/.test(error.message),
   );
+});
+
+test("paginator can split a self-contained conditional action paragraph", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "故障响应",
+      body: "监测设备状态。\n\n若发生故障，立即启动预案。",
+    }],
+  });
+
+  const pages = paginateSource(source, [63, 64]);
+
+  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["监测设备状态。", "若发生故障，立即启动预案。"]);
+});
+
+test("paginator can split a self-contained completion condition", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "校验流程",
+      body: "准备任务。\n\n在设备完成后，启动校验。",
+    }],
+  });
+
+  const pages = paginateSource(source, [65, 66]);
+
+  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["准备任务。", "在设备完成后，启动校验。"]);
 });
 
 test("paginator rejects factless normalized source instead of returning empty fact partitions", () => {

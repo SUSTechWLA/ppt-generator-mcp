@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { deckManifestSchema } from "../../src/domain/deck-manifest.js";
 import type { GenerateSlideOutput } from "../../src/domain/quality-report.js";
 import { DeckStore } from "../../src/workflow/deck-store.js";
 
@@ -72,6 +73,34 @@ test("plan requests use a canonical fingerprint and resume persisted output", as
   assert.equal(second.resumed, true);
   assert.deepEqual(second.plan, output);
   assert.deepEqual(await store.getPlan(first.deckPlanId), output);
+});
+
+test("saved plans are immutable while canonically identical saves are idempotent", async () => {
+  const { store } = await makeStore();
+  const plan = await store.createOrResumePlan({ canonicalInput: { pageNumbers: [4, 9] } });
+  await store.savePlan(plan.deckPlanId, { metadata: { density: "high", audience: "reviewer" }, pages: [4, 9] });
+  await store.savePlan(plan.deckPlanId, { pages: [4, 9], metadata: { audience: "reviewer", density: "high" } });
+
+  await assert.rejects(
+    () => store.savePlan(plan.deckPlanId, { pages: [4, 10], metadata: { audience: "reviewer", density: "high" } }),
+    /plan replacement/i,
+  );
+  assert.deepEqual(await store.getPlan(plan.deckPlanId), {
+    metadata: { audience: "reviewer", density: "high" },
+    pages: [4, 9],
+  });
+});
+
+test("concurrent different plan saves permit one immutable winner", async () => {
+  const { store } = await makeStore();
+  const plan = await store.createOrResumePlan({ canonicalInput: { pageNumbers: [12, 13] } });
+  const candidates = [{ pages: [12, 13], variant: "alpha" }, { pages: [12, 13], variant: "beta" }];
+  const outcomes = await Promise.allSettled(candidates.map((candidate) => store.savePlan(plan.deckPlanId, candidate)));
+
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "rejected").length, 1);
+  const persisted = await store.getPlan(plan.deckPlanId);
+  assert.equal(candidates.some((candidate) => JSON.stringify(candidate) === JSON.stringify(persisted)), true);
 });
 
 test("plan request ids reject different canonical input", async () => {
@@ -192,6 +221,28 @@ test("concurrent page mutations preserve every record and delivered-page state",
   assert.equal(repaired.find((page) => page.pageNumber === 41)?.status, "delivered");
 });
 
+test("delivered page records are immutable and win concurrent delivery/failure races", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const delivered = slideResult(crypto.randomUUID());
+  const race = await Promise.allSettled([
+    store.savePageResult(run.deckRunId, 77, delivered),
+    store.savePageFailure(run.deckRunId, 77, { code: "LATE_FAILURE", message: "late worker failed" }),
+  ]);
+  assert.equal(race.some((outcome) => outcome.status === "fulfilled"), true);
+  assert.equal((await store.listPageRecords(run.deckRunId))[0]?.status, "delivered");
+
+  await store.savePageResult(run.deckRunId, 77, delivered);
+  await assert.rejects(
+    () => store.savePageResult(run.deckRunId, 77, { ...delivered, summary: "different result" }),
+    /delivered page.*immutable/i,
+  );
+  await assert.rejects(
+    () => store.savePageFailure(run.deckRunId, 77, { message: "late failure" }),
+    /delivered page.*immutable/i,
+  );
+});
+
 test("page failures persist bounded diagnostics without stacks, paths, or secrets", async () => {
   const { root, store } = await makeStore();
   const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
@@ -206,6 +257,26 @@ test("page failures persist bounded diagnostics without stacks, paths, or secret
   assert.equal(record.error?.retryable, true);
   assert.match(record.error?.message ?? "", /provider failed/i);
   assert.doesNotMatch(manifestText, /STACK SHOULD|\/Users\/private|sk-secret-value/);
+});
+
+test("page failure diagnostics redact generic paths, URLs, and credential forms", async () => {
+  const { root, store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const message = [
+    "provider failed at /etc/ssl/private/key.pem",
+    "client_secret=hunter2 access_token=abc123 Bearer bearer-value",
+    'auth=plain-auth "client_secret":"json-secret" x-api-key:header-key Authorization: Basic basic-value',
+    "../relative/secrets.json C:\\private\\token.txt \\\\server\\share\\key.pem",
+    "https://example.invalid/callback?api_key=query-secret&token=url-token",
+  ].join("; ");
+  await store.savePageFailure(run.deckRunId, 19, { code: "PROVIDER_FAILED", retryable: true, message });
+
+  const text = await readFile(join(root, "decks", "runs", run.deckRunId, "manifest.json"), "utf8");
+  const [record] = await store.listPageRecords(run.deckRunId);
+  assert.equal(record.error?.code, "PROVIDER_FAILED");
+  assert.equal(record.error?.retryable, true);
+  assert.match(record.error?.message ?? "", /provider failed/i);
+  assert.doesNotMatch(text, /\/etc\/ssl|hunter2|abc123|bearer-value|plain-auth|json-secret|header-key|basic-value|relative\/secrets|C:\\private|server\\share|query-secret|url-token/);
 });
 
 test("finalize derives a truthful status and persists consistency evidence", async () => {
@@ -237,6 +308,78 @@ test("all delivered pages with passing consistency finalize as delivered", async
     consistency: { passed: true, issues: [] },
   });
   assert.equal(output.status, "delivered");
+});
+
+test("a delivered run remains terminal under idempotent and conflicting continuation calls", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const result = slideResult(crypto.randomUUID());
+  await store.savePageResult(run.deckRunId, 8, result);
+  await store.finalizeRun(run.deckRunId, {
+    pages: await store.listPageRecords(run.deckRunId),
+    consistency: { passed: true, issues: [] },
+  });
+
+  assert.equal((await store.savePageResult(run.deckRunId, 8, result)).status, "delivered");
+  assert.equal((await store.markNeedsAssets(run.deckRunId, [])).status, "delivered");
+  await assert.rejects(() => store.markNeedsAssets(run.deckRunId, ["p8-img-001"]), /delivered deck run.*immutable/i);
+  await assert.rejects(() => store.mergeAssetHashes(run.deckRunId, { "p8-img-001": HASH_A }), /delivered deck run.*immutable/i);
+  await assert.rejects(() => store.savePageFailure(run.deckRunId, 9, { message: "late failure" }), /delivered deck run.*immutable/i);
+  assert.equal((await store.getRun(run.deckRunId)).status, "delivered");
+});
+
+test("finalize rejects attempts to erase or replace a delivered page", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const result = slideResult(crypto.randomUUID());
+  await store.savePageResult(run.deckRunId, 51, result);
+
+  await assert.rejects(
+    () => store.finalizeRun(run.deckRunId, {
+      pages: [{ pageNumber: 51, status: "delivered", runId: result.runId, result: { ...result, summary: "forged replacement" } }],
+      consistency: { passed: true, issues: [] },
+    }),
+    /delivered page.*immutable/i,
+  );
+  await assert.rejects(
+    () => store.finalizeRun(run.deckRunId, {
+      pages: [{ pageNumber: 52, status: "failed", error: { message: "other page" } }],
+      consistency: { passed: true, issues: [] },
+    }),
+    /cannot omit delivered page/i,
+  );
+});
+
+test("finalize cannot report delivered when consistency fails", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  await store.savePageResult(run.deckRunId, 68, slideResult(crypto.randomUUID()));
+  const output = await store.finalizeRun(run.deckRunId, {
+    pages: await store.listPageRecords(run.deckRunId),
+    consistency: { passed: false, issues: ["visual inconsistency"] },
+  });
+  assert.equal(output.status, "partial");
+});
+
+test("manifest schema rejects delivered state with failed pages or consistency", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const base = await store.getRun(run.deckRunId);
+  const failedPage = { pageNumber: 68, status: "failed" as const, error: { message: "quality failed" } };
+  assert.equal(deckManifestSchema.safeParse({ ...base, status: "delivered", pages: [failedPage] }).success, false);
+  const delivered = slideResult(crypto.randomUUID());
+  const deliveredPage = { pageNumber: 68, status: "delivered" as const, runId: delivered.runId, result: delivered };
+  assert.equal(deckManifestSchema.safeParse({
+    ...base,
+    status: "delivered",
+    pages: [deliveredPage],
+    consistency: { passed: false, issues: ["not consistent"] },
+  }).success, false);
+  assert.equal(deckManifestSchema.safeParse({
+    ...base,
+    status: "running",
+    missingAssetIds: ["p68-img-001"],
+  }).success, false);
 });
 
 test("invalid identifiers, artifact names, and asset hashes cannot become paths or keys", async () => {
@@ -281,6 +424,49 @@ test("missing persisted JSON reports a logical artifact without exposing the out
     (error: Error) => {
       assert.match(error.message, /deck json not found.*plan\.json/i);
       assert.doesNotMatch(error.message, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      return true;
+    },
+  );
+});
+
+test("artifact lookup maps missing and filesystem errors to bounded logical diagnostics", async () => {
+  const { root, store } = await makeStore();
+  await assert.rejects(
+    () => store.getArtifact(PLAN_ID, "manifest.json"),
+    (error: Error) => {
+      assert.match(error.message, /deck artifact not found.*manifest\.json/i);
+      assert.doesNotMatch(error.message, /deck-store-|11111111/);
+      return true;
+    },
+  );
+
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const manifestPath = join(root, "decks", "runs", run.deckRunId, "manifest.json");
+  await rm(manifestPath);
+  await mkdir(manifestPath);
+  await assert.rejects(
+    () => store.getArtifact(run.deckRunId, "manifest.json"),
+    (error: Error) => {
+      assert.match(error.message, /unable to read deck artifact.*manifest\.json/i);
+      assert.doesNotMatch(error.message, new RegExp(`${run.deckRunId}|${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      return true;
+    },
+  );
+});
+
+test("artifact lookup hides physical paths when a symlink escapes the root", async () => {
+  const { root, store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const outside = await mkdtemp(join(tmpdir(), "deck-artifact-outside-"));
+  const outsideFile = join(outside, "consistency.json");
+  await writeFile(outsideFile, "{}", "utf8");
+  await symlink(outsideFile, join(root, "decks", "runs", run.deckRunId, "consistency.json"), "file");
+
+  await assert.rejects(
+    () => store.getArtifact(run.deckRunId, "consistency.json"),
+    (error: Error) => {
+      assert.match(error.message, /deck artifact unavailable.*consistency\.json.*unsafe path/i);
+      assert.doesNotMatch(error.message, new RegExp(`${run.deckRunId}|${outside.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
       return true;
     },
   );

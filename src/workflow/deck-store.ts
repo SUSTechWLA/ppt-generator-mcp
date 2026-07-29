@@ -109,7 +109,15 @@ function normalizedJson(value: unknown, stack = new Set<object>()): unknown {
 }
 
 function fingerprint(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(normalizedJson(value))).digest("hex");
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(normalizedJson(value));
+}
+
+function canonicallyEqual(left: unknown, right: unknown): boolean {
+  return canonicalJson(left) === canonicalJson(right);
 }
 
 function requireUuid(value: string, kind: "deckPlanId" | "deckRunId"): void {
@@ -142,10 +150,14 @@ function isErrno(error: unknown, code: string): boolean {
 function sanitizeMessage(value: unknown): string {
   const raw = typeof value === "string" && value.trim() ? value.trim() : "Page generation failed";
   return raw
-    .replace(/\b(?:api[_-]?key|access[_-]?token|authorization|secret)\s*[:=]\s*\S+/gi, "$1=[redacted]")
-    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
-    .replace(/(?:\/(?:Users|home|tmp|private|var)\/[^\s,;]+)/g, "[path]")
-    .replace(/[A-Za-z]:\\[^\s,;]+/g, "[path]")
+    .replace(/\b(?:https?|file):\/\/[^\s,;"'`)]+/gi, "[url]")
+    .replace(/["']?\b(?:authorization|auth)\b["']?\s*[:=]\s*(?:(?:Basic|Bearer)\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "[credential]=[redacted]")
+    .replace(/\bBearer\s+[^\s,;"'`)]+/gi, "Bearer [redacted]")
+    .replace(/["']?\b(?:client[\s_-]*secret|x[\s_-]*api[\s_-]*key|api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|auth(?:orization)?[\s_-]*token|password|secret|token)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "[credential]=[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/gi, "[credential]")
+    .replace(/(^|[\s("'`])(?:[A-Za-z]:\\|\\\\)[^\s,;"'`)]+/g, (_match, prefix: string) => `${prefix}[path]`)
+    .replace(/(^|[\s("'`])(?:\.\.?[\\/])+(?:[^\s,;:"'`)]+[\\/]?)+/g, (_match, prefix: string) => `${prefix}[path]`)
+    .replace(/(^|[\s("'`])\/(?!\/)[^\s,;"'`)]+/g, (_match, prefix: string) => `${prefix}[path]`)
     .slice(0, 500);
 }
 
@@ -180,6 +192,33 @@ function validateIndex(value: unknown, idKind: "deckPlanId" | "deckRunId"): Requ
 function insertPage(pages: DeckPageRecord[], record: DeckPageRecord): DeckPageRecord[] {
   return [...pages.filter((page) => page.pageNumber !== record.pageNumber), record]
     .sort((left, right) => left.pageNumber - right.pageNumber);
+}
+
+const PAGE_STATUS_RANK: Record<DeckPageRecord["status"], number> = {
+  running: 0,
+  failed: 1,
+  best_effort: 2,
+  delivered: 3,
+};
+
+function applyPageMutation(manifest: DeckManifest, incoming: DeckPageRecord): DeckManifest {
+  const existing = manifest.pages.find((page) => page.pageNumber === incoming.pageNumber);
+  if (manifest.status === "delivered") {
+    if (existing && canonicallyEqual(existing, incoming)) return manifest;
+    throw new Error("Delivered deck run is immutable");
+  }
+  if (existing?.status === "delivered") {
+    if (canonicallyEqual(existing, incoming)) return manifest;
+    throw new Error(`Delivered page ${incoming.pageNumber} is immutable`);
+  }
+  if (existing && PAGE_STATUS_RANK[incoming.status] < PAGE_STATUS_RANK[existing.status]) {
+    throw new Error(`Page ${incoming.pageNumber} state cannot be downgraded`);
+  }
+  if (existing && PAGE_STATUS_RANK[incoming.status] === PAGE_STATUS_RANK[existing.status]) {
+    if (canonicallyEqual(existing, incoming)) return manifest;
+    throw new Error(`Page ${incoming.pageNumber} record replacement rejected`);
+  }
+  return { ...manifest, status: "running", pages: insertPage(manifest.pages, incoming) };
 }
 
 function outputPages(records: DeckPageRecord[]): GenerateDeckOutput["pages"] {
@@ -373,7 +412,13 @@ export class DeckStore implements DeckStoreApi {
         if (isErrno(error, "ENOENT")) throw new Error(`Unknown deckPlanId: ${deckPlanId}`);
         throw error;
       }
-      await this.atomicWrite(this.planPath(deckPlanId), safeJson(output, "deck plan"));
+      const normalizedOutput = normalizedJson(output);
+      const existing = await this.readJson(this.planPath(deckPlanId), "plan.json", true);
+      if (existing !== undefined) {
+        if (canonicallyEqual(existing, normalizedOutput)) return;
+        throw new Error(`Deck plan replacement rejected for ${deckPlanId}`);
+      }
+      await this.atomicWrite(this.planPath(deckPlanId), safeJson(normalizedOutput, "deck plan"));
     });
   }
 
@@ -443,6 +488,11 @@ export class DeckStore implements DeckStoreApi {
       if (!SHA256.test(hash)) throw new Error(`Invalid asset hash for ${assetId}`);
     }
     return this.mutateManifest(deckRunId, (manifest) => {
+      if (manifest.status === "delivered") {
+        const idempotent = Object.entries(hashes).every(([assetId, hash]) => manifest.assetHashes[assetId] === hash);
+        if (idempotent) return manifest;
+        throw new Error("Delivered deck run is immutable");
+      }
       const assetHashes = { ...manifest.assetHashes };
       for (const [assetId, hash] of Object.entries(hashes)) {
         if (assetHashes[assetId] && assetHashes[assetId] !== hash) throw new Error(`Asset hash replacement rejected for ${assetId}`);
@@ -464,7 +514,10 @@ export class DeckStore implements DeckStoreApi {
     const manifest = await this.mutateManifest(deckRunId, (current) => {
       const missingAssetIds = Array.from(new Set([...current.missingAssetIds, ...ids]))
         .filter((assetId) => !current.assetHashes[assetId]);
-      if (current.status === "delivered" && missingAssetIds.length > 0) throw new Error("Cannot add missing assets to a delivered deck run");
+      if (current.status === "delivered") {
+        if (missingAssetIds.length === 0) return current;
+        throw new Error("Delivered deck run is immutable");
+      }
       return { ...current, missingAssetIds, status: missingAssetIds.length > 0 ? "needs_assets" : "running" };
     });
     return this.toOutput(manifest);
@@ -487,7 +540,7 @@ export class DeckStore implements DeckStoreApi {
     });
     return this.mutateManifest(deckRunId, (manifest) => {
       if (manifest.missingAssetIds.length > 0) throw new Error("Cannot save a page while assets are missing");
-      return { ...manifest, status: "running", pages: insertPage(manifest.pages, record) };
+      return applyPageMutation(manifest, record);
     });
   }
 
@@ -496,7 +549,7 @@ export class DeckStore implements DeckStoreApi {
     const record = deckPageRecordSchema.parse({ pageNumber, status: "failed", error: pageError(error) });
     return this.mutateManifest(deckRunId, (manifest) => {
       if (manifest.missingAssetIds.length > 0) throw new Error("Cannot save a page while assets are missing");
-      return { ...manifest, status: "running", pages: insertPage(manifest.pages, record) };
+      return applyPageMutation(manifest, record);
     });
   }
 
@@ -516,33 +569,64 @@ export class DeckStore implements DeckStoreApi {
 
     const manifest = await this.mutateManifest(deckRunId, async (current) => {
       if (current.missingAssetIds.length > 0) throw new Error("Cannot finalize while assets are missing");
-      const merged = current.pages.reduce((records, record) => insertPage(records, record), pages)
-        .sort((left, right) => left.pageNumber - right.pageNumber);
+      for (const protectedPage of current.pages.filter((page) => page.status === "delivered")) {
+        const incoming = pages.find((page) => page.pageNumber === protectedPage.pageNumber);
+        if (!incoming) throw new Error(`Cannot omit delivered page ${protectedPage.pageNumber}`);
+        if (!canonicallyEqual(protectedPage, incoming)) throw new Error(`Delivered page ${protectedPage.pageNumber} is immutable`);
+      }
+      if (current.status === "delivered") {
+        const sortedInput = pages.slice().sort((left, right) => left.pageNumber - right.pageNumber);
+        const effectiveConsistency = consistency ?? current.consistency;
+        if (!canonicallyEqual(current.pages, sortedInput) || !canonicallyEqual(current.consistency ?? null, effectiveConsistency ?? null)) {
+          throw new Error("Delivered deck run is immutable");
+        }
+        return current;
+      }
+      let merged = current.pages.slice();
+      for (const page of pages) {
+        const existing = merged.find((record) => record.pageNumber === page.pageNumber);
+        if (existing && PAGE_STATUS_RANK[page.status] < PAGE_STATUS_RANK[existing.status]) {
+          throw new Error(`Page ${page.pageNumber} state cannot be downgraded`);
+        }
+        merged = insertPage(merged, page);
+      }
+      merged = merged.sort((left, right) => left.pageNumber - right.pageNumber);
+      const effectiveConsistency = consistency ?? current.consistency;
       const deliveredCount = merged.filter((page) => page.status === "delivered").length;
       const successfulCount = merged.filter((page) => page.status === "delivered" || page.status === "best_effort").length;
-      const status = deliveredCount === merged.length && consistency?.passed !== false
+      const status = deliveredCount === merged.length && effectiveConsistency?.passed !== false
         ? "delivered"
         : successfulCount > 0
           ? "partial"
           : "failed";
-      if (consistency) await this.atomicWrite(this.consistencyPath(deckRunId), safeJson(consistency, "deck consistency"));
-      return { ...current, status, pages: merged, ...(consistency ? { consistency } : {}) };
+      if (effectiveConsistency) await this.atomicWrite(this.consistencyPath(deckRunId), safeJson(effectiveConsistency, "deck consistency"));
+      return { ...current, status, pages: merged, ...(effectiveConsistency ? { consistency: effectiveConsistency } : {}) };
     });
     return this.toOutput(manifest);
   }
 
   async getArtifact(id: string, name: DeckArtifactName): Promise<{ path: string; size: number; text?: string }> {
     if (!ARTIFACTS.has(name)) throw new Error(`Invalid deck artifact name: ${String(name)}`);
-    await this.ensureLayout();
-    const path = name === "plan.json"
-      ? this.planPath(id)
-      : name === "manifest.json"
-        ? this.manifestPath(id)
-        : this.consistencyPath(id);
-    await this.assertRealPathContained(path);
-    const metadata = await stat(path);
-    const result: { path: string; size: number; text?: string } = { path, size: metadata.size };
-    if (metadata.size <= MAX_JSON_ARTIFACT_BYTES) result.text = await readFile(path, "utf8");
-    return result;
+    requireUuid(id, name === "plan.json" ? "deckPlanId" : "deckRunId");
+    try {
+      await this.ensureLayout();
+      const path = name === "plan.json"
+        ? this.planPath(id)
+        : name === "manifest.json"
+          ? this.manifestPath(id)
+          : this.consistencyPath(id);
+      await this.assertRealPathContained(path);
+      const metadata = await stat(path);
+      if (!metadata.isFile()) throw new Error("Artifact is not a regular file");
+      const result: { path: string; size: number; text?: string } = { path, size: metadata.size };
+      if (metadata.size <= MAX_JSON_ARTIFACT_BYTES) result.text = await readFile(path, "utf8");
+      return result;
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) throw new Error(`Deck artifact not found (${name})`);
+      if (error instanceof Error && error.message === "Resolved path escapes the output root") {
+        throw new Error(`Deck artifact unavailable (${name}): unsafe path`);
+      }
+      throw new Error(`Unable to read deck artifact (${name}): filesystem error`);
+    }
   }
 }

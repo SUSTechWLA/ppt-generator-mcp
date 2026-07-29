@@ -71,6 +71,17 @@ export const deckManifestSchema = z.object({
   if (manifest.status === "needs_assets" && manifest.missingAssetIds.length === 0) {
     context.addIssue({ code: "custom", message: "needs_assets status requires missing assets", path: ["status"] });
   }
+  if (manifest.status !== "needs_assets" && manifest.missingAssetIds.length > 0) {
+    context.addIssue({ code: "custom", message: "Only needs_assets runs may retain missing assets", path: ["status"] });
+  }
+  if (manifest.status === "delivered") {
+    if (manifest.pages.length === 0 || manifest.pages.some((page) => page.status !== "delivered")) {
+      context.addIssue({ code: "custom", message: "Delivered runs require only delivered page records", path: ["pages"] });
+    }
+    if (manifest.consistency?.passed === false) {
+      context.addIssue({ code: "custom", message: "Delivered runs cannot have failing consistency", path: ["consistency"] });
+    }
+  }
 });
 
 export type DeckStatus = "needs_assets" | "running" | "partial" | "delivered" | "failed";

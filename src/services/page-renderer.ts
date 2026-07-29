@@ -11,6 +11,8 @@ export interface RenderElement {
   clientWidth: number;
   scrollHeight: number;
   clientHeight: number;
+  overflowX: string;
+  overflowY: string;
   fontSize: number;
   fontWeight: number;
   contrastRatio: number;
@@ -31,6 +33,7 @@ export interface RenderResult {
     naturalHeight: number;
     opaqueRatio: number;
     luminanceVariance: number;
+    isVector: boolean;
   }>;
   bodyScroll: { width: number; height: number };
   occupiedRatio: number;
@@ -112,6 +115,8 @@ export async function renderPage(input: { html: string; screenshotPath: string }
             clientWidth: element.clientWidth,
             scrollHeight: element.scrollHeight,
             clientHeight: element.clientHeight,
+            overflowX: style.overflowX,
+            overflowY: style.overflowY,
             fontSize,
             fontWeight,
             contrastRatio: contrast(foreground, background.color),
@@ -144,7 +149,8 @@ export async function renderPage(input: { html: string; screenshotPath: string }
             opaqueRatio = 1;
           }
         }
-        return { src: image.currentSrc || image.src, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, opaqueRatio, luminanceVariance };
+        const src = image.currentSrc || image.src;
+        return { src, complete: image.complete, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, opaqueRatio, luminanceVariance, isVector: src.startsWith("data:image/svg+xml") };
       }));
 
       const area = elements.reduce((sum, element) => sum + Math.min(element.rect.width * element.rect.height, 1123 * 794), 0);

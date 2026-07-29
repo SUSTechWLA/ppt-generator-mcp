@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "ppt-generator": {
-      "command": "npx",
-      "args": ["tsx", "src/server.ts"],
+      "command": "node",
+      "args": ["dist/src/server.js"],
       "cwd": "${workspaceFolder}",
-      "description": "PPT Generator MCP — 将 HTML 模板转化为可交付页面的工具集"
+      "description": "PPT Generator MCP — 质量门禁单页生成 workflow"
     }
   }
 }

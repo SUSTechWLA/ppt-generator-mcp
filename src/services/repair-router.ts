@@ -17,7 +17,9 @@ export function routeRepairs(
       if (issue.targetId?.startsWith("block-") && /overflow|溢出/i.test(issue.evidence)) {
         actions.push({ type: "rewrite_block", targetId: issue.targetId, reasonIssueId: issue.id });
       } else if (!state.templateSwitched) {
-        actions.push({ type: "switch_template", reasonIssueId: issue.id });
+        if (!actions.some((action) => action.type === "switch_template")) {
+          actions.push({ type: "switch_template", reasonIssueId: issue.id });
+        }
       } else {
         actions.push({ type: "adjust_token", token: "font-scale", value: Math.max(0.86, 1 - state.attempt * 0.04), reasonIssueId: issue.id });
       }

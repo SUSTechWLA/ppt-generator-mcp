@@ -11,7 +11,7 @@ export function makeEvaluationFixtures() {
     viewport: { width: 1123, height: 794 },
     pageCount: 1,
     elements: [],
-    images: [{ src: "data:image/png;base64,iVBORw0KGgo=", complete: true, naturalWidth: 1, naturalHeight: 1, opaqueRatio: 1, luminanceVariance: 0.2 }],
+    images: [{ src: "data:image/png;base64,iVBORw0KGgo=", complete: true, naturalWidth: 1, naturalHeight: 1, opaqueRatio: 1, luminanceVariance: 0.2, isVector: false }],
     bodyScroll: { width: 1123, height: 794 },
     occupiedRatio: 0.75,
     signals: { networkRequests: [], hasScripts: false, hasUnresolvedPlaceholders: false, hasSecretLikeText: false, screenshotCreated: true },

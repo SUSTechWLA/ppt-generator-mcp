@@ -33,7 +33,9 @@ export function evaluateDeterministic(render: RenderResult): DeterministicReport
     if (rect.x < -1 || rect.y < -1 || rect.x + rect.width > render.viewport.width + 1 || rect.y + rect.height > render.viewport.height + 1) {
       issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} 超出安全画布边界`, suggestedAction: "调整模板间距或缩短目标内容" });
     }
-    if (element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1) {
+    const clippedHorizontally = element.overflowX !== "visible" && element.scrollWidth > element.clientWidth + 1;
+    const clippedVertically = element.overflowY !== "visible" && element.scrollHeight > element.clientHeight + 1;
+    if (clippedHorizontally || clippedVertically) {
       issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} 存在文本滚动溢出`, suggestedAction: "定向改写该模块或切换模板" });
     }
     if (element.text && element.fontSize < 11.3) {
@@ -48,7 +50,7 @@ export function evaluateDeterministic(render: RenderResult): DeterministicReport
   for (const [index, image] of render.images.entries()) {
     if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0 || image.opaqueRatio < 0.02) {
       issue({ severity: "error", category: "asset", targetId: `image-${index + 1}`, evidence: "图片未加载或有效像素不足", suggestedAction: "重新注入有效图片资产" }, true);
-    } else if (image.luminanceVariance < 0.0005) {
+    } else if (!image.isVector && image.luminanceVariance < 0.0005) {
       issue({ severity: "warning", category: "asset", targetId: `image-${index + 1}`, evidence: "图片视觉变化过低，可能是占位色块", suggestedAction: "检查或重新生成图片" });
     }
   }

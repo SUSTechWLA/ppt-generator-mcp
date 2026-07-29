@@ -35,3 +35,14 @@ test("blocks remote requests in a supposedly self-contained page", async () => {
   assert.equal(report.safeToReturn, false);
   assert.ok(report.issues.some((issue) => issue.category === "technical"));
 });
+
+test("does not treat visible font ink or monochrome SVG icons as broken layout", async () => {
+  const output = await mkdtemp(join(tmpdir(), "ppt-render-font-"));
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M2 12h20" stroke="#075f34" stroke-width="2"/></svg>').toString("base64");
+  const html = `<html><head><style>*{box-sizing:border-box}html,body,article{width:1123px;height:794px;margin:0}article{padding:20px}.label{height:10px;font:800 20px/1 Arial;color:#075f34;overflow:visible}</style></head><body><article data-slide-page="1"><div class="label">PART.01</div><img src="data:image/svg+xml;base64,${svg}" alt="流程图标"></article></body></html>`;
+  const render = await renderPage({ html, screenshotPath: join(output, "preview.png") });
+  assert.ok(render.elements.some((element) => element.scrollHeight > element.clientHeight + 1));
+  const report = evaluateDeterministic(render);
+  assert.equal(report.issues.some((issue) => issue.category === "layout" && issue.severity === "error"), false, JSON.stringify(report.issues));
+  assert.equal(report.issues.some((issue) => issue.category === "asset" && /变化过低/.test(issue.evidence)), false, JSON.stringify(report.issues));
+});

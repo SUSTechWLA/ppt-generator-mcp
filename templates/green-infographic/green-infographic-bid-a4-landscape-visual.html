@@ -3,18 +3,16 @@
   @name        绿色信息图型标书页 — 视觉为主（A4横向）
   @slug        green-infographic-bid-a4-landscape-visual
   @description
-               少文字、强视觉的信息图型标书页。A4横向单页，绿色商务配色。
-               核心布局：大幅配图占据视觉焦点，辅以简短文字卡片和图标流程，
-               适合需要在标书中展示场景图、效果图或实景照片的页面。
-  @usecase     标书技术方案 | 项目建议书 | 场景展示 | 效果图展示
+               采购评审导向的视觉型单页：一张可信主图、三张承诺卡和一条合规响应轨。
+               聚焦单页结论与证据密度，适合人员配置、服务响应和项目保障方案。
+  @usecase     标书技术方案 | 项目建议书 | 人员配置 | 服务响应
   @format      A4横向 297×210mm 单页
-  @layout      12列网格：顶部大图(span-12) + 双栏简述(span-6×2) + 能力面板(span-12)
-               图标流程(span-8) + 简介卡片(span-4) + 总结条(span-12)
-  @components  image-card | text-card | icon-process | capability-panel | summary-band
-  @icons       calendar | scissors | search | clipboard-check | shield-check | leaf | sun
-  @style       绿色商务 | 少文字 | 强视觉 | 信息图
+  @layout      12列网格：主图(span-7) + 三张承诺卡(span-5) + 合规响应轨(span-12)
+  @components  image-card | commitment-card | compliance-track | summary-band
+  @icons       users-group | calendar | shield-check
+  @style       深林绿 | 纸白 | 克制金 | 编辑型商务
   @lang        zh-CN
-  @since       2026-07-27
+  @since       2026-07-29
   =============================================================================
 -->
 <!doctype html>
@@ -24,110 +22,332 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="template-name" content="绿色信息图型标书页 — 视觉为主（A4横向）">
   <meta name="template-slug" content="green-infographic-bid-a4-landscape-visual">
-  <meta name="template-description" content="少文字、强视觉的信息图型标书页。大幅配图占据视觉焦点，辅以简短文字和图标流程。">
-  <meta name="template-usecase" content="标书技术方案, 项目建议书, 场景展示, 效果图展示">
+  <meta name="template-description" content="一张可信主图、三张承诺卡和一条合规响应轨，面向采购评审的高证据密度单页。">
+  <meta name="template-usecase" content="标书技术方案, 项目建议书, 人员配置, 服务响应">
   <meta name="template-format" content="A4横向 297×210mm">
   <title><page-title>第N页｜页面主题标题</page-title></title>
   <link rel="stylesheet" href="./green-infographic-theme.css">
+  <style>
+    .bid-page.visual-v2 {
+      grid-template-rows: 36mm 166mm 8mm;
+      background:
+        radial-gradient(circle at 92% 4%, rgba(194, 157, 82, .14), transparent 25%),
+        #f7f8f3;
+    }
+    .visual-header {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 38mm;
+      align-items: center;
+      gap: 8mm;
+      margin: 0 7mm;
+      padding: 4.2mm 0 3mm;
+      border-bottom: .45mm solid #0b5a2a;
+    }
+    .visual-header::before {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 28mm;
+      height: 1.4mm;
+      content: "";
+      background: linear-gradient(90deg, #0b5a2a 0 72%, #c29d52 72%);
+    }
+    .visual-kicker {
+      display: flex;
+      align-items: center;
+      gap: 3mm;
+      margin-bottom: 1.2mm;
+      color: #2f6b45;
+      font-size: 9.3pt;
+      font-weight: 750;
+      letter-spacing: .08em;
+    }
+    .visual-kicker .chapter {
+      padding-left: 3mm;
+      border-left: .35mm solid #c29d52;
+      color: #666e68;
+      font-weight: 600;
+    }
+    .visual-title {
+      margin: 0;
+      color: #103c27;
+      font-size: 28pt;
+      font-weight: 850;
+      line-height: 1.05;
+      letter-spacing: -.02em;
+    }
+    .visual-deck {
+      margin: 1.2mm 0 0;
+      color: #39473f;
+      font-size: 10.4pt;
+      font-weight: 560;
+      line-height: 1.35;
+    }
+    .visual-part {
+      align-self: center;
+      padding: 3mm 3.2mm;
+      border: .3mm solid rgba(11, 90, 42, .28);
+      border-radius: 2.2mm;
+      background: rgba(255, 255, 255, .72);
+      box-shadow: 0 1.2mm 3mm rgba(24, 55, 36, .07);
+      text-align: right;
+    }
+    .visual-part .part-number { color: #0b5a2a; font-size: 14pt; }
+    .visual-part .part-label { margin-top: .8mm; color: #57625b; font-size: 8.5pt; }
+    .visual-main {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      grid-template-rows: repeat(3, 35mm) 29mm 14mm;
+      gap: 2mm 3mm;
+      min-height: 0;
+      padding: 3mm 7mm 2mm;
+    }
+    .visual-main .component {
+      border: .28mm solid rgba(11, 90, 42, .30);
+      border-radius: 2.6mm;
+      box-shadow: 0 1.3mm 4mm rgba(26, 58, 39, .07);
+    }
+    .visual-hero {
+      position: relative;
+      grid-column: 1 / span 7;
+      grid-row: 1 / span 3;
+      min-width: 0;
+      min-height: 0;
+      margin: 0;
+      overflow: hidden;
+      background: #0e402b;
+    }
+    .visual-hero::after {
+      position: absolute;
+      inset: 0;
+      content: "";
+      pointer-events: none;
+      background: linear-gradient(90deg, rgba(7, 44, 29, .40), transparent 48%);
+    }
+    .visual-hero > img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+    }
+    .visual-hero .image-caption {
+      position: absolute;
+      z-index: 1;
+      right: 3mm;
+      bottom: 3mm;
+      left: 3mm;
+      padding: 1.7mm 2.5mm;
+      border-left: .7mm solid #c29d52;
+      border-radius: 1.2mm;
+      background: rgba(5, 43, 28, .86);
+      color: #fff;
+      font-size: 8.8pt;
+      line-height: 1.25;
+      text-align: left;
+      white-space: normal;
+      backdrop-filter: blur(3px);
+    }
+    .commitment-card {
+      grid-column: 8 / span 5;
+      display: grid;
+      grid-template-columns: 8mm minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      column-gap: 3mm;
+      align-content: center;
+      padding: 3.2mm 4mm 2.8mm 3mm;
+      overflow: hidden;
+      background: rgba(255, 255, 255, .88);
+    }
+    .commitment-card::before {
+      grid-row: 1 / span 2;
+      align-self: start;
+      color: #c29d52;
+      font-family: Georgia, serif;
+      font-size: 19pt;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .commitment-card:nth-of-type(1)::before { content: "01"; }
+    .commitment-card:nth-of-type(2)::before { content: "02"; }
+    .commitment-card:nth-of-type(3)::before { content: "03"; }
+    .commitment-card .component-title {
+      margin: 0 0 1mm;
+      color: #0b5a2a;
+      font-size: 13.5pt;
+      font-weight: 800;
+      line-height: 1.15;
+    }
+    .commitment-card p {
+      margin: 0;
+      overflow: hidden;
+      color: #28372f;
+      font-size: 9.6pt;
+      font-weight: 520;
+      line-height: 1.48;
+      text-align: left;
+      text-indent: 0;
+    }
+    .compliance-track {
+      position: relative;
+      grid-column: 1 / span 12;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4mm;
+      padding: 3.2mm 5mm;
+      overflow: hidden;
+      background: #103c27;
+      color: #fff;
+    }
+    .compliance-track::before {
+      position: absolute;
+      top: 50%;
+      right: 12%;
+      left: 12%;
+      height: .35mm;
+      content: "";
+      background: rgba(194, 157, 82, .65);
+      transform: translateY(-50%);
+    }
+    .track-step {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 12mm minmax(0, 1fr);
+      grid-template-rows: auto auto;
+      align-items: center;
+      column-gap: 2.5mm;
+      min-width: 0;
+      padding: 1.8mm 3mm;
+      border: .25mm solid rgba(255, 255, 255, .30);
+      border-radius: 2mm;
+      background: rgba(10, 58, 38, .94);
+    }
+    .track-step img {
+      grid-row: 1 / span 2;
+      width: 10mm;
+      height: 10mm;
+      filter: brightness(0) invert(1);
+    }
+    .track-step strong {
+      overflow: visible;
+      color: #fff;
+      font-size: 10.5pt;
+      line-height: 1.15;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .track-step small {
+      overflow: hidden;
+      color: #dce8df;
+      font-size: 8.6pt;
+      font-weight: 550;
+      line-height: 1.15;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .visual-summary {
+      grid-column: 1 / span 12;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 3mm;
+      padding: 2mm 4mm;
+      overflow: hidden;
+      background: #fff;
+      color: #23342b;
+      font-size: 9.4pt;
+      font-weight: 650;
+      line-height: 1.2;
+    }
+    .visual-summary::before {
+      content: "COMMITMENT";
+      color: #c29d52;
+      font-family: Georgia, serif;
+      font-size: 8.6pt;
+      letter-spacing: .10em;
+    }
+    .visual-summary p { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .visual-summary .compliance-mark {
+      padding: 1mm 2.5mm;
+      border-radius: 99px;
+      background: #e4efe5;
+      color: #0b5a2a;
+      font-size: 8.6pt;
+      font-weight: 800;
+    }
+    .visual-footer {
+      position: relative;
+      background: linear-gradient(90deg, #0b5a2a 0 70%, #c29d52 70% 78%, #0e8192 78%);
+    }
+    .visual-footer .page-number {
+      right: 7mm;
+      color: #0b5a2a;
+      font-weight: 800;
+    }
+  </style>
 </head>
 <body>
-  <article class="bid-page" data-page-number="N" data-template="green-infographic">
-    <header class="page-header">
-      <h1 class="section-title"><section-title>第X分节：分节名称</section-title></h1>
-      <div class="part-block">
-        <div class="part-number"><part-number>PART.N</part-number></div>
-        <div class="part-label"><part-label>部分标签</part-label></div>
-        <div class="part-swatches" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <article class="bid-page visual-v2" data-page-number="N" data-template="green-infographic-visual-v2">
+    <header class="visual-header">
+      <div>
+        <div class="visual-kicker">
+          <span><section-title>人员配置与履约保障</section-title></span>
+          <span class="chapter"><chapter-label>项目服务方案</chapter-label></span>
+        </div>
+        <h1 class="visual-title"><topic-title>项目人员配备要求响应</topic-title></h1>
+        <p class="visual-deck"><subsection-title>以稳定窗口、弹性调配和有序变更保障服务连续</subsection-title></p>
+      </div>
+      <div class="visual-part">
+        <div class="part-number"><part-number>PART.01</part-number></div>
+        <div class="part-label"><part-label>方案响应</part-label></div>
       </div>
     </header>
 
-    <div class="chapter-band">
-      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
-      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
-    </div>
-
-    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
-
-    <main class="body-grid">
-      <!-- Row 1: Full-width hero image -->
-      <figure class="component image-card span-12" data-component="image-card" data-asset-ref="img-hero">
-        <figures>根据页面主题生成宽幅场景图：展示核心业务场景的实景或效果图，构图采用全景或广角视角，光线明亮自然，写实风格，适合标书配图。</figures>
-        <figcaption class="image-caption"><image-caption>核心场景展示（AI生成，非项目实景）</image-caption></figcaption>
+    <main class="visual-main">
+      <figure class="component visual-hero" data-component="image-card" data-asset-ref="img-hero">
+        <figures>宽幅项目服务协同场景图</figures>
+        <figcaption class="image-caption"><image-caption>项目服务协同场景示意</image-caption></figcaption>
       </figure>
 
-      <!-- Row 2: Two brief text cards side by side -->
-      <section class="component text-card compact span-6" data-component="text-card">
-        <h4 class="component-title"><component-title>左侧要点标题</component-title></h4>
-        <p data-source-paragraph="1"><paragraph>简短要点描述，60-100字。突出核心信息，语言精炼有力。</paragraph></p>
+      <section class="component commitment-card" data-component="text-card">
+        <h2 class="component-title"><component-title>固定窗口</component-title></h2>
+        <p><paragraph>配置固定项目对接人员，形成采购人与作业班组之间的稳定信息窗口。</paragraph></p>
+      </section>
+      <section class="component commitment-card" data-component="text-card">
+        <h2 class="component-title"><component-title>动态调配</component-title></h2>
+        <p><paragraph>按项目差异、季节变化与临时任务动态配置专业作业力量。</paragraph></p>
+      </section>
+      <section class="component commitment-card" data-component="text-card">
+        <h2 class="component-title"><component-title>有序变更</component-title></h2>
+        <p><paragraph>确需变更时履行书面申请、采购人审核和充分交接程序。</paragraph></p>
       </section>
 
-      <section class="component text-card compact span-6" data-component="text-card">
-        <h4 class="component-title"><component-title>右侧要点标题</component-title></h4>
-        <p data-source-paragraph="2"><paragraph>简短要点描述，60-100字。突出核心信息，语言精炼有力。</paragraph></p>
-      </section>
-
-      <!-- Row 3: Icon process (span-8) + text card (span-4) -->
-      <section class="component icon-process span-8" data-component="icon-process" aria-label="核心流程">
-        <div class="process-step">
-          <icon name="calendar">日历图标</icon>
-          <span><step-label>步骤一</step-label></span>
+      <section class="component compliance-track" data-component="icon-process" aria-label="合规响应轨">
+        <div class="track-step">
+          <icon name="users-group">固定对接图标</icon>
+          <strong><step-label>固定窗口</step-label></strong>
+          <small><bullet>唯一对接窗口</bullet></small>
         </div>
-        <span class="process-arrow" aria-hidden="true">→</span>
-        <div class="process-step">
-          <icon name="scissors">剪刀图标</icon>
-          <span><step-label>步骤二</step-label></span>
+        <div class="track-step">
+          <icon name="calendar">动态调配图标</icon>
+          <strong><step-label>动态调配</step-label></strong>
+          <small><bullet>30分钟内启动</bullet></small>
         </div>
-        <span class="process-arrow" aria-hidden="true">→</span>
-        <div class="process-step">
-          <icon name="search">搜索图标</icon>
-          <span><step-label>步骤三</step-label></span>
-        </div>
-        <span class="process-arrow" aria-hidden="true">→</span>
-        <div class="process-step">
-          <icon name="clipboard-check">剪贴板图标</icon>
-          <span><step-label>步骤四</step-label></span>
+        <div class="track-step">
+          <icon name="shield-check">审批保障图标</icon>
+          <strong><step-label>有序变更</step-label></strong>
+          <small><bullet>书面提出申请</bullet></small>
         </div>
       </section>
 
-      <section class="component text-card compact span-4" data-component="text-card">
-        <h4 class="component-title"><component-title>流程说明标题</component-title></h4>
-        <p data-source-paragraph="3"><paragraph>对左侧流程的简要说明，80-120字。解释各步骤的核心要点和衔接关系。</paragraph></p>
-      </section>
-
-      <!-- Row 4: Full-width capability panel -->
-      <section class="component icon-process capability-panel span-12" data-component="icon-process" aria-label="核心能力">
-        <div class="capability-grid">
-          <div class="capability-item">
-            <icon name="shield-check">盾牌图标</icon>
-            <span><item-label>能力项一</item-label></span>
-          </div>
-          <div class="capability-item">
-            <icon name="leaf">叶子图标</icon>
-            <span><item-label>能力项二</item-label></span>
-          </div>
-          <div class="capability-item">
-            <icon name="sun">太阳图标</icon>
-            <span><item-label>能力项三</item-label></span>
-          </div>
-          <div class="capability-item">
-            <icon name="users-group">用户组图标</icon>
-            <span><item-label>能力项四</item-label></span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Row 5: Summary -->
-      <section class="component summary-band span-12" data-component="summary-band">
-        <p data-source-paragraph="4"><summary-text>总结段落。用1-2句话概括本页核心观点，信息精炼、结论明确。</summary-text></p>
-        <ul class="summary-list">
-          <li><bullet>要点一</bullet></li>
-          <li><bullet>要点二</bullet></li>
-          <li><bullet>要点三</bullet></li>
-        </ul>
+      <section class="component visual-summary" data-component="summary-band">
+        <p><summary-text>稳定窗口、弹性调配、有序变更，共同保障服务连续。</summary-text></p>
+        <span class="compliance-mark">要求已响应</span>
       </section>
     </main>
 
-    <footer class="page-footer">
+    <footer class="visual-footer">
       <span class="page-number"><page-number>N</page-number></span>
     </footer>
   </article>

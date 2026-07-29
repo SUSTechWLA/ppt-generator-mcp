@@ -3,16 +3,21 @@
   "version": "1.0.0",
   "description": "MCP Server that transforms HTML templates into deliverable pages (PPT/bid/report) via LLM orchestration.",
   "type": "module",
-  "main": "src/server.ts",
+  "main": "dist/src/server.js",
   "scripts": {
-    "start": "npx tsx src/server.ts",
-    "dev": "npx tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/src/server.js",
+    "dev": "tsx watch src/server.ts",
     "demo": "npx tsx tests/demo.ts",
     "test:templates": "npx tsx tests/test-all-templates.ts",
-    "demo:source": "npx tsx tests/demo-from-source.ts",
+    "demo:source": "node --import tsx scripts/generate-personnel-deliverable.ts",
+    "generate:personnel": "node --import tsx scripts/generate-personnel-deliverable.ts",
+    "test": "npm run test:unit && npm run test:contract && npm run test:render && npm run test:e2e && npm run test:templates",
     "test:unit": "node --import tsx --test tests/unit/*.test.ts",
+    "test:contract": "node --import tsx --test tests/contract/*.test.ts",
     "test:render": "node --import tsx --test tests/render/*.test.ts",
-    "typecheck": "npx tsc --noEmit"
+    "test:e2e": "node --import tsx --test tests/e2e/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "mcp",

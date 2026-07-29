@@ -75,8 +75,12 @@ function hasTimeLimit(value: string): boolean {
   return /\d[\d,.]*(?:个)?(?:工作日|分钟|小时|天|日|周|个月|月|年)/.test(value);
 }
 
+function isMandatoryContinuation(value: string): boolean {
+  return /^(?:该|其|此|上述|前述|随后|然后|继而|其中|并|且|同时|若|如|当|在.+(?:完成后|之后|条件下|情况下))/.test(value);
+}
+
 function continuationPenalty(value: string): number {
-  return /^(?:并|且|同时|随后|其中|该|其|上岗后|在.+(?:内|后))/.test(value) ? 300 : 0;
+  return /^(?:此外|另外|补充)/.test(value) ? 300 : 0;
 }
 
 function paginationError(message: string, recovery: string): never {
@@ -100,39 +104,44 @@ function unitCost(text: string, factCount: number): number {
 
 function unitsForSection(section: SourceSection, source: SourceDocument): SemanticUnit[] {
   const result: SemanticUnit[] = [];
+  const seen = new Set<string>();
   let cursor = 0;
+  const bodyIsKeyPointJoin = section.keyPoints.length > 0
+    && normalizeSentence(section.body) === normalizeSentence(section.keyPoints.join("；"));
 
-  for (const paragraph of paragraphs(section.body)) {
-    const start = section.body.indexOf(paragraph, cursor);
-    const safeStart = start >= 0 ? start : cursor;
-    cursor = safeStart + paragraph.length;
-    const factCount = source.facts.filter((fact) => fact.sourceSectionId === section.id && matchesFact(paragraph, fact.text)).length;
+  const appendUnit = (kind: UnitKind, text: string, start: number): void => {
+    const normalized = normalizeSentence(text);
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+
+    const factCount = source.facts.filter((fact) => fact.sourceSectionId === section.id && matchesFact(text, fact.text)).length;
     result.push({
       sourceSectionId: section.id,
-      kind: "paragraph",
-      text: paragraph,
-      start: safeStart,
-      end: safeStart + paragraph.length,
-      cost: unitCost(paragraph, factCount),
+      kind,
+      text,
+      start,
+      end: start + text.length,
+      cost: unitCost(text, factCount),
       factCount,
       lockedBefore: false,
     });
+  };
+
+  if (!bodyIsKeyPointJoin) {
+    for (const paragraph of paragraphs(section.body)) {
+      const start = section.body.indexOf(paragraph, cursor);
+      const safeStart = start >= 0 ? start : cursor;
+      cursor = safeStart + paragraph.length;
+      appendUnit("paragraph", paragraph, safeStart);
+    }
   }
 
   for (let index = 0; index < section.keyPoints.length; index += 1) {
     const keyPoint = section.keyPoints[index];
-    const factCount = source.facts.filter((fact) => fact.sourceSectionId === section.id && matchesFact(keyPoint, fact.text)).length;
-    const start = section.body.length + index + 1;
-    result.push({
-      sourceSectionId: section.id,
-      kind: "keyPoint",
-      text: keyPoint,
-      start,
-      end: start + keyPoint.length,
-      cost: unitCost(keyPoint, factCount),
-      factCount,
-      lockedBefore: false,
-    });
+    const startInBody = bodyIsKeyPointJoin ? section.body.indexOf(keyPoint, cursor) : -1;
+    const start = startInBody >= 0 ? startInBody : section.body.length + index + 1;
+    cursor = start + keyPoint.length;
+    appendUnit("keyPoint", keyPoint, start);
   }
 
   return result;
@@ -170,14 +179,17 @@ function buildGroups(source: SourceDocument): SectionGroup[] {
     const units = [...overviewUnits, ...unitsForSection(section, source)];
 
     if (overviewUnits.length > 0 && units.length > overviewUnits.length) {
-      units[overviewUnits.length].lockedBefore = true;
+      for (let unitIndex = 1; unitIndex <= overviewUnits.length; unitIndex += 1) {
+        units[unitIndex].lockedBefore = true;
+      }
     }
 
     for (let unitIndex = 1; unitIndex < units.length; unitIndex += 1) {
       const previous = units[unitIndex - 1];
       const current = units[unitIndex];
       if ((isApprovalAction(previous.text) && hasTimeLimit(current.text))
-        || (hasTimeLimit(previous.text) && isApprovalAction(current.text))) {
+        || (hasTimeLimit(previous.text) && isApprovalAction(current.text))
+        || isMandatoryContinuation(current.text)) {
         current.lockedBefore = true;
       }
     }
@@ -282,7 +294,7 @@ function allocateParts(groups: SectionGroup[], pageCount: number): void {
 }
 
 function titleFor(group: SectionGroup, partIndex: number): string {
-  return partIndex === 0 ? group.heading : `${group.heading}（续：职责与履职保障）`;
+  return partIndex === 0 ? group.heading : `${group.heading}（续）`;
 }
 
 function draftForPart(group: SectionGroup, part: PagePart, partIndex: number): PageDraft {
@@ -345,6 +357,34 @@ function assignFactIds(source: SourceDocument, drafts: PageDraft[]): void {
   }
 }
 
+function validateFactInvariant(source: SourceDocument, drafts: PageDraft[]): void {
+  if (source.facts.length === 0) {
+    paginationError(
+      "Source does not contain extractable facts",
+      "Normalize a source with at least one usable factual sentence before planning pages.",
+    );
+  }
+
+  if (drafts.some((draft) => draft.originalSourceFactIds.length === 0)) {
+    paginationError(
+      "A requested page partition does not contain a source fact",
+      "Request fewer pages or provide more independently fact-bearing source paragraphs.",
+    );
+  }
+
+  const assignedFactIds = drafts.flatMap((draft) => draft.originalSourceFactIds);
+  const expectedFactIds = source.facts.map((fact) => fact.id);
+  if (new Set(assignedFactIds).size !== assignedFactIds.length
+    || new Set(expectedFactIds).size !== expectedFactIds.length
+    || assignedFactIds.length !== expectedFactIds.length
+    || assignedFactIds.some((factId, index) => factId !== expectedFactIds[index])) {
+    paginationError(
+      "Source facts cannot be assigned exactly once in source order",
+      "Review the source structure and request a page count compatible with its semantic units.",
+    );
+  }
+}
+
 function validatePageNumbers(pageNumbers: number[]): void {
   if (pageNumbers.length === 0 || pageNumbers.some((number) => !Number.isInteger(number) || number < 1)
     || pageNumbers.some((number, index) => index > 0 && number <= pageNumbers[index - 1])) {
@@ -369,6 +409,7 @@ export function paginateSource(source: SourceDocument, pageNumbers: number[]): P
   allocateParts(groups, pageNumbers.length);
   const drafts = groups.flatMap((group) => group.parts.map((part, index) => draftForPart(group, part, index)));
   assignFactIds(source, drafts);
+  validateFactInvariant(source, drafts);
 
   return drafts.map((draft, index) => ({
     pageNumber: pageNumbers[index],

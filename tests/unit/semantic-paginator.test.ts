@@ -31,7 +31,7 @@ test("paginator creates four ordered pages without losing source order", () => {
 
   assert.deepEqual(pages.map((page) => page.pageNumber), [59, 60, 61, 62]);
   assert.match(pages[0].title, /固定|总体/);
-  assert.match(pages[1].title, /职责|履职/);
+  assert.match(pages[1].title, /固定|续/);
   assert.match(pages[2].title, /动态调配/);
   assert.match(pages[3].title, /变更|交接/);
   assert.deepEqual(
@@ -48,6 +48,127 @@ test("paginator keeps approval and its time limits on the same page", () => {
   assert.match(body, /书面申请/);
   assert.match(body, /五个工作日/);
   assert.match(body, /三个工作日/);
+});
+
+test("paginator uses bullet-only content as non-overlapping source units", () => {
+  const source = normalizeSource({
+    sourceText: `# 操作清单
+- 重置设备。
+- 检查线路。`,
+  });
+
+  const pages = paginateSource(source, [1, 2]);
+
+  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["重置设备。", "检查线路。"]);
+  assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
+  assert.deepEqual(
+    pages.flatMap((page) => page.originalSourceFactIds),
+    source.facts.map((fact) => fact.id),
+  );
+});
+
+test("paginator removes structured key points that overlap body paragraphs", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "维护步骤",
+      body: "重置设备。\n\n检查线路。",
+      keyPoints: ["检查线路。", "归档报告。"],
+    }],
+  });
+
+  const pages = paginateSource(source, [21, 22, 23]);
+
+  assert.deepEqual(pages.map((page) => page.sourceSections[0].body), ["重置设备。", "检查线路。", "归档报告。"]);
+  assert.ok(pages.every((page) => page.originalSourceFactIds.length > 0));
+  assert.deepEqual(
+    pages.flatMap((page) => page.originalSourceFactIds),
+    source.facts.map((fact) => fact.id),
+  );
+});
+
+test("paginator gives unrelated continuation pages a neutral title", () => {
+  const source = normalizeSource({
+    sections: [{
+      heading: "产品发布流程",
+      body: "整理发布清单。\n\n完成线上校验。",
+    }],
+  });
+
+  const pages = paginateSource(source, [41, 42]);
+
+  assert.equal(pages[1].title, "产品发布流程（续）");
+});
+
+test("paginator keeps a multi-paragraph overview with the first substantive component", () => {
+  const source = normalizeSource({
+    sourceText: `# 总体方案
+概述一。
+
+概述二。
+
+## 执行
+步骤一。
+
+步骤二。
+
+步骤三。`,
+  });
+
+  const pages = paginateSource(source, [51, 52, 53]);
+  const firstPageBody = pages[0].sourceSections[0].body;
+  const laterPageBodies = pages.slice(1).map((page) => page.sourceSections[0].body).join("\n");
+
+  assert.match(firstPageBody, /概述一。/);
+  assert.match(firstPageBody, /概述二。/);
+  assert.match(firstPageBody, /步骤一。/);
+  assert.doesNotMatch(laterPageBodies, /概述一。|概述二。/);
+});
+
+test("paginator rejects page counts that require splitting a structural continuation", () => {
+  const source = normalizeSource({
+    sourceText: `# 设备方案
+## 流程
+设备完成初始化。
+
+该设备随后进入校验。`,
+  });
+
+  assert.throws(
+    () => paginateSource(source, [61, 62]),
+    (error: unknown) => error instanceof WorkflowError
+      && error.stage === "paginate_source"
+      && /dependency-safe partitions/.test(error.message),
+  );
+});
+
+test("paginator rejects factless normalized source instead of returning empty fact partitions", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "执行", body: "完成检查。" }],
+  });
+
+  assert.throws(
+    () => paginateSource({ ...source, facts: [] }, [71]),
+    (error: unknown) => error instanceof WorkflowError
+      && error.stage === "paginate_source"
+      && /does not contain extractable facts/.test(error.message),
+  );
+});
+
+test("paginator rejects duplicate source fact IDs instead of emitting duplicate references", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "执行", body: "完成检查。\n\n记录结果。" }],
+  });
+  const duplicateFactIds = source.facts.map((fact, index) => ({
+    ...fact,
+    id: index === 1 ? source.facts[0].id : fact.id,
+  }));
+
+  assert.throws(
+    () => paginateSource({ ...source, facts: duplicateFactIds }, [72, 73]),
+    (error: unknown) => error instanceof WorkflowError
+      && error.stage === "paginate_source"
+      && /exactly once/.test(error.message),
+  );
 });
 
 test("paginator uses the same paragraph allocation for unrelated content and page numbers", () => {

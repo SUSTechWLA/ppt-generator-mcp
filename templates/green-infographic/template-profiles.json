@@ -1,67 +1,269 @@
 [
   {
     "slug": "green-infographic-bid-a4-landscape",
-    "version": "1.0.0",
+    "version": "2.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "process", "comparison", "evidence", "visual-support"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+    "semanticSlots": [
+      {
+        "id": "main-content",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 5,
+        "maxCharsPerItem": 150,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+        "bindings": { "title": "component-title", "body": "paragraph" }
+      }
+    ],
+    "auxiliaryBindings": {
+      "stepLabel": "step-label",
+      "stageLabel": "stage-label",
+      "stageNumber": "stage-number",
+      "itemLabel": "item-label",
+      "nodeLabel": "node-label",
+      "bullet": "bullet"
+    },
+    "pageBindings": {
+      "pageTitle": "page-title",
+      "pageNumber": "page-number",
+      "sectionTitle": "section-title",
+      "partNumber": "part-number",
+      "partLabel": "part-label",
+      "chapterLabel": "chapter-label",
+      "topicTitle": "topic-title",
+      "subsectionTitle": "subsection-title",
+      "summaryText": "summary-text",
+      "imageCaption": "image-caption",
+      "figureRef": "figure-ref"
+    },
     "blockCapacity": 5,
-    "supportedBlocks": ["text", "image", "process", "metric"],
+    "supportedBlocks": ["text", "image", "table", "process", "metric"],
     "imageSlots": 1,
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "title": 40, "body": 150, "summary": 120 },
+    "maxRasterAreaRatio": 0.18,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
   {
     "slug": "green-infographic-bid-a4-landscape-text-image",
-    "version": "1.0.0",
+    "version": "2.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "process", "evidence", "visual-support"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
+    "semanticSlots": [
+      {
+        "id": "paired-content",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 4,
+        "maxCharsPerItem": 145,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
+        "bindings": { "title": "component-title", "body": "paragraph" }
+      }
+    ],
+    "auxiliaryBindings": { "bullet": "bullet" },
+    "pageBindings": {
+      "pageTitle": "page-title",
+      "pageNumber": "page-number",
+      "sectionTitle": "section-title",
+      "partNumber": "part-number",
+      "partLabel": "part-label",
+      "chapterLabel": "chapter-label",
+      "topicTitle": "topic-title",
+      "subsectionTitle": "subsection-title",
+      "summaryText": "summary-text",
+      "imageCaption": "image-caption",
+      "figureRef": "figure-ref"
+    },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "image", "process", "metric"],
     "imageSlots": 4,
     "densityRange": ["low", "high"],
     "maxCharsBySlot": { "title": 40, "body": 145, "summary": 110 },
+    "maxRasterAreaRatio": 0.45,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
   {
     "slug": "green-infographic-bid-a4-landscape-visual",
-    "version": "1.0.0",
+    "version": "2.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "process", "visual-support"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
+    "semanticSlots": [
+      {
+        "id": "visual-support-content",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 3,
+        "maxCharsPerItem": 100,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
+        "bindings": { "title": "component-title", "body": "paragraph" }
+      }
+    ],
+    "auxiliaryBindings": { "stepLabel": "step-label", "bullet": "bullet" },
+    "pageBindings": {
+      "pageTitle": "page-title",
+      "pageNumber": "page-number",
+      "sectionTitle": "section-title",
+      "partNumber": "part-number",
+      "partLabel": "part-label",
+      "chapterLabel": "chapter-label",
+      "topicTitle": "topic-title",
+      "subsectionTitle": "subsection-title",
+      "summaryText": "summary-text",
+      "imageCaption": "image-caption"
+    },
     "blockCapacity": 3,
     "supportedBlocks": ["text", "image", "process", "metric"],
     "imageSlots": 1,
     "densityRange": ["low", "medium"],
     "maxCharsBySlot": { "title": 40, "body": 100, "summary": 100 },
+    "maxRasterAreaRatio": 0.55,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
   {
     "slug": "green-infographic-bid-a4-landscape-table-text",
-    "version": "1.0.0",
+    "version": "2.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "comparison", "evidence"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
+    "semanticSlots": [
+      {
+        "id": "table-explanation",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 2,
+        "maxCharsPerItem": 180,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
+        "bindings": { "title": "component-title", "body": "paragraph" }
+      }
+    ],
+    "auxiliaryBindings": { "tableHeader": "table-header", "tableCell": "table-cell", "bullet": "bullet" },
+    "pageBindings": {
+      "pageTitle": "page-title",
+      "pageNumber": "page-number",
+      "sectionTitle": "section-title",
+      "partNumber": "part-number",
+      "partLabel": "part-label",
+      "chapterLabel": "chapter-label",
+      "topicTitle": "topic-title",
+      "subsectionTitle": "subsection-title",
+      "summaryText": "summary-text"
+    },
     "blockCapacity": 2,
     "supportedBlocks": ["text", "table", "metric"],
     "imageSlots": 0,
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "title": 40, "body": 180, "table-cell": 24, "summary": 110 },
+    "maxRasterAreaRatio": 0,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
   {
     "slug": "green-infographic-bid-a4-landscape-table-image",
-    "version": "1.0.0",
+    "version": "2.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "process", "comparison", "evidence", "visual-support"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+    "semanticSlots": [
+      {
+        "id": "matrix-content",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 4,
+        "maxCharsPerItem": 130,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+        "bindings": { "body": "table-cell" }
+      }
+    ],
+    "auxiliaryBindings": {
+      "title": "component-title",
+      "narrativeBody": "paragraph",
+      "tableHeader": "table-header",
+      "stageLabel": "stage-label",
+      "stageNumber": "stage-number",
+      "bullet": "bullet"
+    },
+    "pageBindings": {
+      "pageTitle": "page-title",
+      "pageNumber": "page-number",
+      "sectionTitle": "section-title",
+      "partNumber": "part-number",
+      "partLabel": "part-label",
+      "chapterLabel": "chapter-label",
+      "topicTitle": "topic-title",
+      "subsectionTitle": "subsection-title",
+      "summaryText": "summary-text",
+      "imageCaption": "image-caption"
+    },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "table", "image", "process", "metric"],
     "imageSlots": 1,
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "title": 40, "body": 130, "table-cell": 24, "summary": 110 },
+    "maxRasterAreaRatio": 0.18,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   },
   {
     "slug": "green-infographic-bid-a4-landscape-table-text-image",
-    "version": "1.0.0",
+    "version": "2.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "comparison", "evidence", "visual-support"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence", "visual"],
+    "semanticSlots": [
+      {
+        "id": "compact-matrix-content",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 4,
+        "maxCharsPerItem": 125,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence", "visual"],
+        "bindings": { "body": "table-cell" }
+      }
+    ],
+    "auxiliaryBindings": {
+      "title": "component-title",
+      "narrativeBody": "paragraph",
+      "tableHeader": "table-header",
+      "itemLabel": "item-label",
+      "bullet": "bullet"
+    },
+    "pageBindings": {
+      "pageTitle": "page-title",
+      "pageNumber": "page-number",
+      "sectionTitle": "section-title",
+      "partNumber": "part-number",
+      "partLabel": "part-label",
+      "chapterLabel": "chapter-label",
+      "topicTitle": "topic-title",
+      "subsectionTitle": "subsection-title",
+      "summaryText": "summary-text",
+      "imageCaption": "image-caption",
+      "figureRef": "figure-ref"
+    },
     "blockCapacity": 4,
-    "supportedBlocks": ["text", "table", "image", "process", "metric"],
+    "supportedBlocks": ["text", "table", "image", "metric"],
     "imageSlots": 1,
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "title": 40, "body": 125, "table-cell": 22, "summary": 100 },
+    "maxRasterAreaRatio": 0.18,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
   }

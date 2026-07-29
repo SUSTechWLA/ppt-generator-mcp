@@ -3,8 +3,10 @@ import { dirname, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 
 import type { GeneratedAsset, SlideSpec } from "../domain/slide-spec.js";
+import type { PageMetadata } from "../domain/document-context.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
 import type { ParsedTemplate } from "../lib/template-parser.js";
+import type { TemplateSlotSolution } from "./template-slot-solver.js";
 import { fillPlaceholders } from "../tools/fill-placeholders.js";
 import { mapSlideContent } from "./slide-content-mapper.js";
 
@@ -13,6 +15,8 @@ export interface ComposeSlideInput {
   template: ParsedTemplate;
   profile: TemplateProfile;
   assets: GeneratedAsset[];
+  page?: PageMetadata;
+  slotSolution?: TemplateSlotSolution;
   designTokens?: { fontScale?: number; spacingScale?: number; contrastMode?: "normal" | "high" };
 }
 
@@ -79,7 +83,7 @@ function injectAssets(doc: Document, spec: SlideSpec, assets: GeneratedAsset[]):
 function applyMarkersAndTokens(doc: Document, input: ComposeSlideInput): void {
   const pages = doc.querySelectorAll(".bid-page");
   if (pages.length !== 1) throw new Error(`Template must contain exactly one .bid-page; found ${pages.length}`);
-  pages[0].setAttribute("data-slide-page", "1");
+  pages[0].setAttribute("data-slide-page", String(input.page?.number ?? 1));
   input.spec.blocks.forEach((block, index) => {
     doc.querySelectorAll("[data-component]")[index]?.setAttribute("data-block-id", block.id);
   });
@@ -98,7 +102,7 @@ function scanResiduals(html: string): string[] {
 }
 
 export async function composeSlide(input: ComposeSlideInput): Promise<ComposeResult> {
-  const content = mapSlideContent(input.spec, input.template, input.profile);
+  const content = mapSlideContent(input.spec, input.template, input.profile, input.page, input.slotSolution);
   const filled = await fillPlaceholders({ html: input.template.html, content: { direct: content } });
   const dom = new JSDOM(filled.html);
   const doc = dom.window.document;

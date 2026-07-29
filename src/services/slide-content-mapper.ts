@@ -1,64 +1,152 @@
+import type { PageMetadata } from "../domain/document-context.js";
+import type { SemanticRole } from "../domain/page-blueprint.js";
 import type { SlideBlock, SlideSpec } from "../domain/slide-spec.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
 import type { ParsedTemplate } from "../lib/template-parser.js";
+import { solveTemplateSlots, type TemplateSlotSolution } from "./template-slot-solver.js";
 
 export type FillContent = Record<string, string | string[]>;
+
+type BindingField = keyof TemplateProfile["semanticSlots"][number]["bindings"];
+
+const DEFAULT_PAGE_BINDINGS: TemplateProfile["pageBindings"] = {
+  pageTitle: "page-title",
+  pageNumber: "page-number",
+  sectionTitle: "section-title",
+  partNumber: "part-number",
+  partLabel: "part-label",
+  chapterLabel: "chapter-label",
+  topicTitle: "topic-title",
+  subsectionTitle: "subsection-title",
+  summaryText: "summary-text",
+  imageCaption: "image-caption",
+  figureRef: "figure-ref",
+};
+
+const ROLE_LABELS: Record<SemanticRole, string> = {
+  headline: "页面主题",
+  conclusion: "核心结论",
+  fact: "事实要点",
+  metric: "量化指标",
+  process: "实施流程",
+  comparison: "对比分析",
+  evidence: "事实依据",
+  visual: "视觉说明",
+};
 
 function count(template: ParsedTemplate, tag: string): number {
   return template.placeholders.find((placeholder) => placeholder.tag === tag)?.count ?? 0;
 }
 
-function fit(text: string, limit: number): string {
-  const normalized = text.trim().replace(/\s+/g, " ");
-  if (normalized.length <= limit) return normalized;
-  const sentences = normalized.match(/[^。！？；]+[。！？；]?/g) ?? [normalized];
-  let result = "";
-  for (const sentence of sentences) {
-    if ((result + sentence).length > limit) break;
-    result += sentence;
-  }
-  return result || `${normalized.slice(0, Math.max(1, limit - 1))}…`;
+function shortTitle(block: SlideBlock): string {
+  return Array.from(block.title.trim()).slice(0, 8).join("");
 }
 
-function repeatFromBlocks(blocks: SlideBlock[], length: number, map: (block: SlideBlock, index: number) => string): string[] {
-  if (length === 0) return [];
-  return Array.from({ length }, (_, index) => map(blocks[index % blocks.length], index));
+function metricText(block: SlideBlock): string {
+  return block.metrics.map((metric) => `${metric.label}：${metric.value}`).join("；");
+}
+
+function valuesFor(field: BindingField, blocks: SlideBlock[], roles: SemanticRole[]): string[] {
+  if (field === "title" || field === "figureRef") return blocks.map((block) => block.title);
+  if (field === "body" || field === "narrativeBody") return blocks.map((block) => [block.body, ...block.bullets].filter(Boolean).join("；"));
+  if (["shortTitle", "label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return blocks.map(shortTitle);
+  if (["sequence", "stepNumber", "stageNumber"].includes(field)) return blocks.map((_, index) => String(index + 1).padStart(2, "0"));
+  if (field === "bullet") return blocks.map((block) => block.bullets[0] ?? block.title);
+  if (field === "metric") return blocks.map((block) => metricText(block) || block.title);
+  if (field === "tableHeader") return ["语义主题", "原文事实", "量化信息", "内容类型"];
+  if (field === "tableCell") {
+    return blocks.flatMap((block, index) => [
+      block.title,
+      [block.body, ...block.bullets].filter(Boolean).join("；"),
+      metricText(block) || "—",
+      ROLE_LABELS[roles[index]],
+    ]);
+  }
+  return [];
+}
+
+function append(output: Map<string, string[]>, tag: string | undefined, values: string[]): void {
+  if (!tag) return;
+  output.set(tag, [...(output.get(tag) ?? []), ...values]);
+}
+
+function exactValues(template: ParsedTemplate, tag: string, values: string[]): string[] {
+  const available = count(template, tag);
+  if (available === 0) return [];
+  if (values.length > available) {
+    throw new Error(`Declared binding ${tag} has ${available} placeholders but received ${values.length} values`);
+  }
+  return [...values, ...Array.from({ length: available - values.length }, () => "")];
+}
+
+function pageContent(spec: SlideSpec, page: PageMetadata | undefined, profile: TemplateProfile, template: ParsedTemplate): FillContent {
+  const bindings = profile.pageBindings ?? DEFAULT_PAGE_BINDINGS;
+  const values: FillContent = {
+    [bindings.pageTitle]: spec.title,
+    [bindings.pageNumber]: String(page?.number ?? 1),
+    [bindings.sectionTitle]: page?.sectionTitle ?? spec.eyebrow ?? "项目方案响应",
+    [bindings.partNumber]: page?.partNumber ?? "PART.01",
+    [bindings.partLabel]: page?.partLabel ?? "方案响应",
+    [bindings.chapterLabel]: page?.chapterLabel ?? spec.eyebrow ?? "项目服务方案",
+    [bindings.topicTitle]: spec.title,
+    [bindings.subsectionTitle]: page?.subsectionTitle ?? spec.conclusion,
+    [bindings.summaryText]: spec.conclusion,
+  };
+  if (bindings.imageCaption && count(template, bindings.imageCaption) > 0) {
+    const captions = spec.assets.map((asset) => asset.alt);
+    values[bindings.imageCaption] = exactValues(template, bindings.imageCaption, captions.length > 0 ? captions : ["方案场景示意图"]);
+  }
+  if (bindings.figureRef && count(template, bindings.figureRef) > 0) {
+    const blockById = new Map(spec.blocks.map((block) => [block.id, block]));
+    const references = spec.assets.map((asset) => blockById.get(asset.blockId)?.title ?? asset.alt);
+    values[bindings.figureRef] = exactValues(template, bindings.figureRef, references.length > 0 ? references : [spec.title]);
+  }
+  return values;
 }
 
 export function mapSlideContent(
   spec: SlideSpec,
   template: ParsedTemplate,
   profile: TemplateProfile,
+  page?: PageMetadata,
+  providedSolution?: TemplateSlotSolution,
 ): FillContent {
   if (spec.blocks.length === 0) throw new Error("SlideSpec has no content blocks");
-  const bodyLimit = Math.min(170, profile.maxCharsBySlot.body ?? 170);
-  const short = (block: SlideBlock) => block.title.replace(/配置方案|管理体系|保障机制|响应要求/g, "").slice(0, 8) || block.title.slice(0, 8);
-  const direct: FillContent = {
-    "page-title": spec.title,
-    "page-number": "1",
-    "section-title": spec.eyebrow || "项目方案响应",
-    "part-number": "PART.01",
-    "part-label": "方案响应",
-    "chapter-label": "项目服务方案",
-    "topic-title": spec.title,
-    "subsection-title": spec.conclusion,
-    "component-title": repeatFromBlocks(spec.blocks, count(template, "component-title"), (block) => block.title),
-    paragraph: repeatFromBlocks(spec.blocks, count(template, "paragraph"), (block) => fit([block.body, ...block.bullets].filter(Boolean).join("；"), bodyLimit)),
-    "figure-ref": repeatFromBlocks(spec.blocks, count(template, "figure-ref"), (block) => block.title),
-    "image-caption": Array.from({ length: count(template, "image-caption") }, (_, index) => spec.assets[index]?.alt ?? spec.assets[0]?.alt ?? "方案场景示意图"),
-    "summary-text": fit(spec.conclusion, profile.maxCharsBySlot.summary ?? 110),
-    bullet: repeatFromBlocks(spec.blocks, count(template, "bullet"), (block) => block.bullets[0] ?? block.title),
-    "step-label": repeatFromBlocks(spec.blocks, count(template, "step-label"), short),
-    "step-number": Array.from({ length: count(template, "step-number") }, (_, index) => String(index + 1).padStart(2, "0")),
-    "stage-number": Array.from({ length: count(template, "stage-number") }, (_, index) => String(index + 1).padStart(2, "0")),
-    "stage-label": repeatFromBlocks(spec.blocks, count(template, "stage-label"), short),
-    "item-label": repeatFromBlocks(spec.blocks, count(template, "item-label"), short),
-    "node-label": repeatFromBlocks(spec.blocks, count(template, "node-label"), short),
-    "table-header": Array.from({ length: count(template, "table-header") }, (_, index) => ["响应维度", "核心要求", "落实机制", "交付证据"][index % 4]),
-    "table-cell": repeatFromBlocks(spec.blocks, count(template, "table-cell"), (block, index) => {
-      const metric = block.metrics[index % Math.max(1, block.metrics.length)];
-      return fit(index % 4 === 0 ? block.title : metric ? `${metric.label}：${metric.value}` : block.bullets[index % Math.max(1, block.bullets.length)] ?? block.body, profile.maxCharsBySlot["table-cell"] ?? 28);
-    }),
-  };
-  return Object.fromEntries(Object.entries(direct).filter(([, value]) => !Array.isArray(value) || value.length > 0));
+  const solution = providedSolution ?? solveTemplateSlots(spec, profile);
+  if (!solution.feasible) {
+    const diagnostics = solution.unmatched.map((item) => `${item.groupId || "required-slot"}: ${item.reason}`).join("；");
+    throw new Error(`Template slot assignment failed: ${diagnostics}; unrepresented facts: ${solution.unrepresentedFactIds.join(", ")}`);
+  }
+  const blockById = new Map(spec.blocks.map((block) => [block.id, block]));
+  const mapped = new Map<string, string[]>();
+  const orderedSlots = profile.semanticSlots
+    .map((slot, catalogIndex) => ({ slot, catalogIndex }))
+    .sort((left, right) => left.slot.priority - right.slot.priority || left.catalogIndex - right.catalogIndex);
+
+  for (const { slot } of orderedSlots) {
+    const assignments = solution.assignments
+      .filter((assignment) => assignment.slotId === slot.id)
+      .sort((left, right) => left.itemIndex - right.itemIndex);
+    const blocks = assignments.map((assignment) => blockById.get(assignment.groupId)).filter((block): block is SlideBlock => Boolean(block));
+    const roles = assignments.map((assignment) => assignment.role);
+    for (const [field, tag] of Object.entries(slot.bindings) as Array<[BindingField, string]>) {
+      append(mapped, tag, valuesFor(field, blocks, roles));
+    }
+  }
+
+  if (profile.auxiliaryBindings) {
+    const assignments = [...solution.assignments];
+    const blocks = assignments.map((assignment) => blockById.get(assignment.groupId)).filter((block): block is SlideBlock => Boolean(block));
+    const roles = assignments.map((assignment) => assignment.role);
+    for (const [field, tag] of Object.entries(profile.auxiliaryBindings) as Array<[BindingField, string]>) {
+      const available = count(template, tag);
+      if (available > 0) append(mapped, tag, valuesFor(field, blocks, roles).slice(0, available));
+    }
+  }
+
+  const direct = pageContent(spec, page, profile, template);
+  for (const [tag, values] of mapped) {
+    if (count(template, tag) > 0) direct[tag] = exactValues(template, tag, values);
+  }
+  return direct;
 }

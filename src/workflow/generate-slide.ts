@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import { join } from "node:path";
 
 import { generateSlideOutputSchema, type GenerateSlideOutput } from "../domain/quality-report.js";
+import type { DocumentType, PageMetadata } from "../domain/document-context.js";
 import type { RunManifest, StageRecord, WorkflowStage } from "../domain/run-manifest.js";
 import { generateSlideInputSchema, type GenerateSlideRequest, type SourceDocument } from "../domain/source-document.js";
 import type { AssetSpec, GeneratedAsset, SlideSpec } from "../domain/slide-spec.js";
@@ -22,6 +23,8 @@ export interface WorkflowQualityInput {
   assets: GeneratedAsset[];
   initialPage: ComposeResult;
   quality: GenerateSlideRequest["quality"];
+  documentType?: DocumentType;
+  page?: PageMetadata;
 }
 
 export interface WorkflowDependencies {
@@ -29,9 +32,9 @@ export interface WorkflowDependencies {
   profiles: TemplateProfile[];
   normalizeSource(input: GenerateSlideRequest): SourceDocument;
   buildSlideSpec(source: SourceDocument, audience?: string): Promise<SlideSpec>;
-  selectTemplate(spec: SlideSpec, forcedSlug?: string): TemplateSelection;
+  selectTemplate(spec: SlideSpec, forcedSlug?: string, documentType?: DocumentType): TemplateSelection;
   generateAssets(runId: string, specs: AssetSpec[], externalAssets?: ExternalAsset[]): Promise<GeneratedAsset[]>;
-  composeSlide(spec: SlideSpec, selection: TemplateSelection, assets: GeneratedAsset[]): Promise<ComposeResult>;
+  composeSlide(spec: SlideSpec, selection: TemplateSelection, assets: GeneratedAsset[], page?: PageMetadata): Promise<ComposeResult>;
   runQualityLoop(input: WorkflowQualityInput): Promise<QualityLoopResult>;
 }
 
@@ -92,9 +95,9 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
     }
     return deps.buildSlideSpec(source, input.audience);
   });
-  const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug));
+  const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug, input.documentType));
   const assets = await runStage(deps.runStore, run, "generate_assets", () => deps.generateAssets(run.runId, spec.assets, input.externalAssets));
-  const initialPage = await runStage(deps.runStore, run, "compose_html", () => deps.composeSlide(spec, selection, assets));
+  const initialPage = await runStage(deps.runStore, run, "compose_html", () => deps.composeSlide(spec, selection, assets, input.page));
   const profile = deps.profiles.find((candidate) => candidate.slug === selection.slug);
   await deps.runStore.updateWorkflowData(run.runId, {
     sourceHash: source.sourceHash,
@@ -112,6 +115,8 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
     assets,
     initialPage,
     quality: input.quality,
+    documentType: input.documentType,
+    page: input.page,
   });
   for (const attempt of loop.attempts) {
     if (!attempt.htmlPath || !attempt.qualityPath) throw new Error(`Attempt ${attempt.attempt} did not persist all artifacts`);

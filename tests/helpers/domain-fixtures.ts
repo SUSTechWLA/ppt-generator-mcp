@@ -57,9 +57,56 @@ export function makeSlideSpec(options: {
 }
 
 export function makeTemplateProfiles(): TemplateProfile[] {
+  const pageBindings = {
+    pageTitle: "page-title",
+    pageNumber: "page-number",
+    sectionTitle: "section-title",
+    partNumber: "part-number",
+    partLabel: "part-label",
+    chapterLabel: "chapter-label",
+    topicTitle: "topic-title",
+    subsectionTitle: "subsection-title",
+    summaryText: "summary-text",
+  } as const;
   return [
-    { slug: "green-infographic-bid-a4-landscape-text-image", version: "1.0.0", blockCapacity: 4, supportedBlocks: ["text", "image", "process", "metric"], imageSlots: 4, densityRange: ["low", "high"], maxCharsBySlot: { body: 160 }, format: "a4-landscape", status: "approved" },
-    { slug: "green-infographic-bid-a4-landscape-table-text", version: "1.0.0", blockCapacity: 2, supportedBlocks: ["text", "table"], imageSlots: 0, densityRange: ["medium", "high"], maxCharsBySlot: { body: 200 }, format: "a4-landscape", status: "approved" },
+    {
+      slug: "green-infographic-bid-a4-landscape-text-image",
+      version: "2.0.0",
+      themeId: "fixture-theme",
+      pageIntents: ["detail", "process", "visual-support"],
+      supportedRoles: ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
+      semanticSlots: [{ id: "main", priority: 1, required: true, itemCapacity: 4, maxCharsPerItem: 160, acceptedRoles: ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"], bindings: { title: "component-title", body: "paragraph" } }],
+      pageBindings,
+      blockCapacity: 4,
+      supportedBlocks: ["text", "image", "process", "metric"],
+      imageSlots: 4,
+      densityRange: ["low", "high"],
+      maxCharsBySlot: { body: 160 },
+      maxRasterAreaRatio: 0.45,
+      requiredLandmarks: ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+      documentCompatibility: { bid: true, proposal: true, presentation: true },
+      format: "a4-landscape",
+      status: "approved",
+    },
+    {
+      slug: "green-infographic-bid-a4-landscape-table-text",
+      version: "2.0.0",
+      themeId: "fixture-theme",
+      pageIntents: ["detail", "comparison", "evidence"],
+      supportedRoles: ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
+      semanticSlots: [{ id: "main", priority: 1, required: true, itemCapacity: 2, maxCharsPerItem: 200, acceptedRoles: ["headline", "conclusion", "fact", "metric", "comparison", "evidence"], bindings: { title: "component-title", body: "paragraph" } }],
+      pageBindings,
+      blockCapacity: 2,
+      supportedBlocks: ["text", "table", "metric"],
+      imageSlots: 0,
+      densityRange: ["medium", "high"],
+      maxCharsBySlot: { body: 200 },
+      maxRasterAreaRatio: 0,
+      requiredLandmarks: ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+      documentCompatibility: { bid: true, proposal: true, presentation: true },
+      format: "a4-landscape",
+      status: "approved",
+    },
   ];
 }
 

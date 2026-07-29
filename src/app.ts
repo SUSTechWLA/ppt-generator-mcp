@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { AppConfig } from "./config/env.js";
 import type { GeneratedAsset } from "./domain/slide-spec.js";
@@ -29,6 +29,7 @@ export function createProductionDependencies(
 ): PptMcpDependencies {
   const templatesDir = resolve(options.templatesDir ?? join(process.cwd(), "templates"));
   const profiles = loadTemplateProfiles(templatesDir);
+  const defaultIconBasePath = join(dirname(loadTemplate(templatesDir, profiles[0].slug).filePath), "assets", "icons");
   const textProvider = config.llm
     ? createOpenAICompatibleTextProvider(config.llm, config.limits.requestTimeoutMs)
     : undefined;
@@ -48,7 +49,7 @@ export function createProductionDependencies(
     buildSlideSpec: async (source, audience) => textProvider
       ? buildSlideSpec(source, textProvider, audience)
       : buildDeterministicSlideSpec(source),
-    selectTemplate: (spec, forcedSlug) => selectTemplate(spec, profiles, forcedSlug),
+    selectTemplate: (spec, forcedSlug, documentType) => selectTemplate(spec, profiles, forcedSlug, documentType),
     generateAssets: async (runId, specs, externalAssets) => generateAssets({
       specs,
       provider: imageProvider,
@@ -58,13 +59,13 @@ export function createProductionDependencies(
       timeoutMs: config.limits.requestTimeoutMs,
       existing: [],
       externalAssets,
-      iconBasePath: join(templatesDir, "green-infographic", "assets", "icons"),
+      iconBasePath: defaultIconBasePath,
       cacheIdentity: { model: config.image?.model ?? "agent-imagegen", templateVersion: "1.0.0" },
     }),
-    composeSlide: async (spec, selection, assets) => {
+    composeSlide: async (spec, selection, assets, page) => {
       const profile = profiles.find((candidate) => candidate.slug === selection.slug);
       if (!profile) throw new Error(`Approved profile not found: ${selection.slug}`);
-      return composeSlide({ spec, template: loadTemplate(templatesDir, selection.slug), profile, assets });
+      return composeSlide({ spec, template: loadTemplate(templatesDir, selection.slug), profile, assets, page });
     },
     runQualityLoop: async (workflowInput) => {
       const renderByAttempt = new Map<number, RenderResult>();
@@ -94,6 +95,7 @@ export function createProductionDependencies(
                 template: loadTemplate(templatesDir, state.templateSlug),
                 profile,
                 assets: state.assets,
+                page: workflowInput.page,
                 designTokens: state.designTokens,
               });
           await writeFile(htmlPath, composed.html);
@@ -121,7 +123,7 @@ export function createProductionDependencies(
           actions,
           source: workflowInput.source,
           switchTemplate: async (current) => {
-            const selection = selectTemplate(current.spec, profiles);
+            const selection = selectTemplate(current.spec, profiles, undefined, workflowInput.documentType);
             return selection.candidates.find((candidate) => candidate.slug !== current.templateSlug)?.slug ?? current.templateSlug;
           },
           regenerateAsset: async (assetId, current) => {

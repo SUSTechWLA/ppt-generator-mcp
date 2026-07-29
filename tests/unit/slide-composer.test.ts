@@ -13,6 +13,14 @@ const template = loadTemplate(templatesDir, templateSlug);
 const profile = loadTemplateProfiles(templatesDir).find((item) => item.slug === templateSlug)!;
 const spec = makeSlideSpec({ blockTypes: ["image", "image", "image", "image"], assetCount: 4 });
 const assets = makeGeneratedAssets(spec.assets);
+const page = {
+  number: 17,
+  sectionTitle: "第二部分 履约响应",
+  partNumber: "PART.02",
+  partLabel: "履约方案",
+  chapterLabel: "2.3 交付与审批机制",
+  subsectionTitle: "2.3.1 稳定交付流程",
+};
 
 test("composes one self-contained page with no slots or remote assets", async () => {
   const result = await composeSlide({ spec, template, profile, assets });
@@ -37,4 +45,23 @@ test("fails when a declared image has no generated asset", async () => {
     () => composeSlide({ spec, template, profile, assets: assets.slice(0, 3) }),
     /Missing generated asset: img-004/,
   );
+});
+
+test("caller page metadata survives initial and repair compositions", async () => {
+  const initial = await composeSlide({ spec, template, profile, assets, page });
+  const repaired = await composeSlide({
+    spec,
+    template,
+    profile,
+    assets,
+    page,
+    designTokens: { spacingScale: 0.94, fontScale: 1, contrastMode: "high" },
+  });
+  for (const result of [initial, repaired]) {
+    assert.match(result.html, />17</);
+    assert.match(result.html, /第二部分 履约响应/);
+    assert.match(result.html, /2\.3 交付与审批机制/);
+    assert.match(result.html, /2\.3\.1 稳定交付流程/);
+    assert.match(result.html, /data-slide-page="17"/);
+  }
 });

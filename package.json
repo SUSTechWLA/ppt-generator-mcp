@@ -10,15 +10,23 @@
     "demo": "npx tsx tests/demo.ts",
     "test:templates": "npx tsx tests/test-all-templates.ts",
     "demo:source": "npx tsx tests/demo-from-source.ts",
+    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
     "typecheck": "npx tsc --noEmit"
   },
-  "keywords": ["mcp", "ppt-generator", "template", "llm", "agent"],
+  "keywords": [
+    "mcp",
+    "ppt-generator",
+    "template",
+    "llm",
+    "agent"
+  ],
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "jsdom": "^29.1.1",
-    "openai": "^6.49.0"
+    "openai": "^6.49.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",

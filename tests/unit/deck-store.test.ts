@@ -14,12 +14,14 @@ import test from "node:test";
 
 import { deckManifestSchema } from "../../src/domain/deck-manifest.js";
 import type { GenerateSlideOutput } from "../../src/domain/quality-report.js";
+import { WorkflowError } from "../../src/domain/workflow-error.js";
 import { DeckStore } from "../../src/workflow/deck-store.js";
 
 const PLAN_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_PLAN_ID = "22222222-2222-4222-8222-222222222222";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
+const CLOSED_FAILURE = { code: "INTERNAL_ERROR" as const, message: "Page generation failed" as const, retryable: false };
 
 async function makeStore(prefix = "deck-store-"): Promise<{ root: string; store: DeckStore }> {
   const root = await mkdtemp(join(tmpdir(), prefix));
@@ -243,6 +245,62 @@ test("delivered page records are immutable and win concurrent delivery/failure r
   );
 });
 
+test("non-delivered page records can be replaced by later retry outcomes", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const renderFailure = new WorkflowError({
+    code: "RENDER_FAILED",
+    stage: "compose_html",
+    retryable: true,
+    message: "first attempt failed",
+  });
+  const qualityFailure = new WorkflowError({
+    code: "QUALITY_FAILED",
+    stage: "quality_loop",
+    retryable: true,
+    message: "second attempt failed",
+  });
+  const firstBestEffort = slideResult(crypto.randomUUID(), "best_effort");
+  const secondBestEffort = { ...slideResult(crypto.randomUUID(), "best_effort"), summary: "new retry result" };
+
+  await store.savePageFailure(run.deckRunId, 31, renderFailure);
+  await store.savePageFailure(run.deckRunId, 31, qualityFailure);
+  assert.equal((await store.listPageRecords(run.deckRunId)).find((page) => page.pageNumber === 31)?.error?.code, "QUALITY_FAILED");
+
+  await store.savePageResult(run.deckRunId, 32, firstBestEffort);
+  await store.savePageResult(run.deckRunId, 32, secondBestEffort);
+  assert.equal((await store.listPageRecords(run.deckRunId)).find((page) => page.pageNumber === 32)?.runId, secondBestEffort.runId);
+
+  await store.savePageFailure(run.deckRunId, 33, renderFailure);
+  await store.savePageResult(run.deckRunId, 33, firstBestEffort);
+  assert.equal((await store.listPageRecords(run.deckRunId)).find((page) => page.pageNumber === 33)?.status, "best_effort");
+
+  await store.savePageResult(run.deckRunId, 34, firstBestEffort);
+  await store.savePageFailure(run.deckRunId, 34, qualityFailure);
+  assert.equal((await store.listPageRecords(run.deckRunId)).find((page) => page.pageNumber === 34)?.status, "failed");
+
+  await store.savePageFailure(run.deckRunId, 34, qualityFailure);
+  assert.equal((await store.listPageRecords(run.deckRunId)).find((page) => page.pageNumber === 34)?.status, "failed");
+});
+
+test("delivery wins concurrent retry mutations for the same nonterminal page", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  await store.savePageFailure(run.deckRunId, 88, { message: "initial failure" });
+  const delivered = slideResult(crypto.randomUUID());
+  const retry = slideResult(crypto.randomUUID(), "best_effort");
+
+  await Promise.allSettled([
+    store.savePageResult(run.deckRunId, 88, retry),
+    store.savePageResult(run.deckRunId, 88, delivered),
+    store.savePageFailure(run.deckRunId, 88, { message: "late failure" }),
+  ]);
+
+  const page = (await store.listPageRecords(run.deckRunId)).find((record) => record.pageNumber === 88);
+  assert.equal(page?.status, "delivered");
+  assert.equal(page?.runId, delivered.runId);
+});
+
 test("page failures persist bounded diagnostics without stacks, paths, or secrets", async () => {
   const { root, store } = await makeStore();
   const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
@@ -253,9 +311,7 @@ test("page failures persist bounded diagnostics without stacks, paths, or secret
   await store.savePageFailure(run.deckRunId, 9, failure);
   const manifestText = await readFile(join(root, "decks", "runs", run.deckRunId, "manifest.json"), "utf8");
   const [record] = await store.listPageRecords(run.deckRunId);
-  assert.equal(record.error?.code, "PROVIDER_FAILED");
-  assert.equal(record.error?.retryable, true);
-  assert.match(record.error?.message ?? "", /provider failed/i);
+  assert.deepEqual(record.error, { code: "INTERNAL_ERROR", message: "Page generation failed", retryable: false });
   assert.doesNotMatch(manifestText, /STACK SHOULD|\/Users\/private|sk-secret-value/);
 });
 
@@ -266,6 +322,8 @@ test("page failure diagnostics redact generic paths, URLs, and credential forms"
     "provider failed at /etc/ssl/private/key.pem",
     "client_secret=hunter2 access_token=abc123 Bearer bearer-value",
     'auth=plain-auth "client_secret":"json-secret" x-api-key:header-key Authorization: Basic basic-value',
+    "OPENAI_API_KEY=openai-secret DATABASE_URL=postgres://db-user:db-pass@example.invalid/app FTP=ftp://ftp-user:ftp-pass@example.invalid/file",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.jwt-signature",
     "../relative/secrets.json C:\\private\\token.txt \\\\server\\share\\key.pem",
     "https://example.invalid/callback?api_key=query-secret&token=url-token",
   ].join("; ");
@@ -273,10 +331,30 @@ test("page failure diagnostics redact generic paths, URLs, and credential forms"
 
   const text = await readFile(join(root, "decks", "runs", run.deckRunId, "manifest.json"), "utf8");
   const [record] = await store.listPageRecords(run.deckRunId);
-  assert.equal(record.error?.code, "PROVIDER_FAILED");
-  assert.equal(record.error?.retryable, true);
-  assert.match(record.error?.message ?? "", /provider failed/i);
-  assert.doesNotMatch(text, /\/etc\/ssl|hunter2|abc123|bearer-value|plain-auth|json-secret|header-key|basic-value|relative\/secrets|C:\\private|server\\share|query-secret|url-token/);
+  assert.deepEqual(record.error, { code: "INTERNAL_ERROR", message: "Page generation failed", retryable: false });
+  assert.doesNotMatch(text, /provider failed|\/etc\/ssl|hunter2|abc123|bearer-value|plain-auth|json-secret|header-key|basic-value|openai-secret|db-user|db-pass|ftp-user|ftp-pass|jwt-signature|relative\/secrets|C:\\private|server\\share|query-secret|url-token/);
+});
+
+test("allowlisted WorkflowError metadata persists with a closed generic message", async () => {
+  const { root, store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const error = new WorkflowError({
+    code: "RENDER_FAILED",
+    stage: "compose_html",
+    retryable: true,
+    message: "render exposed OPENAI_API_KEY=must-not-persist at /etc/private/key.pem",
+  });
+
+  await store.savePageFailure(run.deckRunId, 20, error);
+  const [record] = await store.listPageRecords(run.deckRunId);
+  assert.deepEqual(record.error, {
+    code: "RENDER_FAILED",
+    stage: "compose_html",
+    message: "Page rendering failed",
+    retryable: true,
+  });
+  const text = await readFile(join(root, "decks", "runs", run.deckRunId, "manifest.json"), "utf8");
+  assert.doesNotMatch(text, /must-not-persist|\/etc\/private/);
 });
 
 test("finalize derives a truthful status and persists consistency evidence", async () => {
@@ -343,7 +421,7 @@ test("finalize rejects attempts to erase or replace a delivered page", async () 
   );
   await assert.rejects(
     () => store.finalizeRun(run.deckRunId, {
-      pages: [{ pageNumber: 52, status: "failed", error: { message: "other page" } }],
+      pages: [{ pageNumber: 52, status: "failed", error: CLOSED_FAILURE }],
       consistency: { passed: true, issues: [] },
     }),
     /cannot omit delivered page/i,
@@ -365,7 +443,7 @@ test("manifest schema rejects delivered state with failed pages or consistency",
   const { store } = await makeStore();
   const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
   const base = await store.getRun(run.deckRunId);
-  const failedPage = { pageNumber: 68, status: "failed" as const, error: { message: "quality failed" } };
+  const failedPage = { pageNumber: 68, status: "failed" as const, error: CLOSED_FAILURE };
   assert.equal(deckManifestSchema.safeParse({ ...base, status: "delivered", pages: [failedPage] }).success, false);
   const delivered = slideResult(crypto.randomUUID());
   const deliveredPage = { pageNumber: 68, status: "delivered" as const, runId: delivered.runId, result: delivered };

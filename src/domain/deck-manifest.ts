@@ -10,10 +10,54 @@ export const deckConsistencySchema = z.object({
   issues: z.array(z.string().trim().min(1).max(500)).max(100),
 }).strict();
 
+export const deckPersistedErrorCodeSchema = z.enum([
+  "INPUT_INVALID",
+  "CONFIG_MISSING",
+  "TEMPLATE_FAILED",
+  "MODEL_FAILED",
+  "ASSET_FAILED",
+  "RENDER_FAILED",
+  "QUALITY_FAILED",
+  "INTERNAL_ERROR",
+]);
+
+export const deckPersistedErrorStageSchema = z.enum([
+  "config",
+  "provider_request",
+  "provider_response",
+  "provider_setup",
+  "normalize_input",
+  "parse_explicit_pages",
+  "partition_deck_source",
+  "paginate_source",
+  "build_page_blueprint",
+  "build_slide_spec",
+  "load_template_profiles",
+  "select_template",
+  "generate_assets",
+  "download_asset",
+  "compose_html",
+  "quality_loop",
+  "finalize",
+  "workflow_stage",
+]);
+
+export const deckPersistedErrorMessageSchema = z.enum([
+  "Page input was invalid",
+  "Page generation configuration is unavailable",
+  "Page template processing failed",
+  "Page content generation failed",
+  "Page asset generation failed",
+  "Page rendering failed",
+  "Page quality validation failed",
+  "Page generation failed",
+]);
+
 export const deckPageErrorSchema = z.object({
-  code: z.string().regex(/^[A-Z0-9_-]{1,80}$/).optional(),
-  message: z.string().trim().min(1).max(500),
-  retryable: z.boolean().optional(),
+  code: deckPersistedErrorCodeSchema,
+  stage: deckPersistedErrorStageSchema.optional(),
+  message: deckPersistedErrorMessageSchema,
+  retryable: z.boolean(),
 }).strict();
 
 export const deckPageRecordSchema = z.object({
@@ -85,13 +129,14 @@ export const deckManifestSchema = z.object({
 });
 
 export type DeckStatus = "needs_assets" | "running" | "partial" | "delivered" | "failed";
+export type DeckPageError = z.infer<typeof deckPageErrorSchema>;
 
 export interface DeckPageRecord {
   pageNumber: number;
   status: "running" | "delivered" | "best_effort" | "failed";
   runId?: string;
   result?: GenerateSlideOutput;
-  error?: { code?: string; message: string; retryable?: boolean };
+  error?: DeckPageError;
 }
 
 export interface DeckManifest {

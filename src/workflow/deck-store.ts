@@ -14,11 +14,14 @@ import {
   deckConsistencySchema,
   deckManifestSchema,
   deckPageRecordSchema,
+  deckPersistedErrorStageSchema,
   type DeckManifest,
+  type DeckPageError,
   type DeckPageRecord,
 } from "../domain/deck-manifest.js";
 import { generateDeckOutputSchema } from "../domain/deck-plan.js";
 import { generateSlideOutputSchema, type GenerateSlideOutput } from "../domain/quality-report.js";
+import { WorkflowError, type WorkflowErrorCode } from "../domain/workflow-error.js";
 
 type GenerateDeckOutput = ReturnType<typeof generateDeckOutputSchema.parse>;
 
@@ -147,30 +150,28 @@ function isErrno(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === code;
 }
 
-function sanitizeMessage(value: unknown): string {
-  const raw = typeof value === "string" && value.trim() ? value.trim() : "Page generation failed";
-  return raw
-    .replace(/\b(?:https?|file):\/\/[^\s,;"'`)]+/gi, "[url]")
-    .replace(/["']?\b(?:authorization|auth)\b["']?\s*[:=]\s*(?:(?:Basic|Bearer)\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "[credential]=[redacted]")
-    .replace(/\bBearer\s+[^\s,;"'`)]+/gi, "Bearer [redacted]")
-    .replace(/["']?\b(?:client[\s_-]*secret|x[\s_-]*api[\s_-]*key|api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|auth(?:orization)?[\s_-]*token|password|secret|token)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, "[credential]=[redacted]")
-    .replace(/\bsk-[A-Za-z0-9_-]+\b/gi, "[credential]")
-    .replace(/(^|[\s("'`])(?:[A-Za-z]:\\|\\\\)[^\s,;"'`)]+/g, (_match, prefix: string) => `${prefix}[path]`)
-    .replace(/(^|[\s("'`])(?:\.\.?[\\/])+(?:[^\s,;:"'`)]+[\\/]?)+/g, (_match, prefix: string) => `${prefix}[path]`)
-    .replace(/(^|[\s("'`])\/(?!\/)[^\s,;"'`)]+/g, (_match, prefix: string) => `${prefix}[path]`)
-    .slice(0, 500);
-}
+const PERSISTED_ERROR_MESSAGES: Record<WorkflowErrorCode, DeckPageError["message"]> = {
+  INPUT_INVALID: "Page input was invalid",
+  CONFIG_MISSING: "Page generation configuration is unavailable",
+  TEMPLATE_FAILED: "Page template processing failed",
+  MODEL_FAILED: "Page content generation failed",
+  ASSET_FAILED: "Page asset generation failed",
+  RENDER_FAILED: "Page rendering failed",
+  QUALITY_FAILED: "Page quality validation failed",
+  INTERNAL_ERROR: "Page generation failed",
+};
 
-function pageError(error: unknown): { code?: string; message: string; retryable?: boolean } {
-  const source = typeof error === "object" && error !== null ? error as Record<string, unknown> : undefined;
-  const code = typeof source?.code === "string" && /^[A-Z0-9_-]{1,80}$/.test(source.code) ? source.code : undefined;
-  const retryable = typeof source?.retryable === "boolean" ? source.retryable : undefined;
-  const messageSource = source && "message" in source ? source.message : error;
-  return {
-    ...(code ? { code } : {}),
-    message: sanitizeMessage(messageSource),
-    ...(retryable !== undefined ? { retryable } : {}),
-  };
+function pageError(error: unknown): DeckPageError {
+  if (error instanceof WorkflowError && Object.hasOwn(PERSISTED_ERROR_MESSAGES, error.code)) {
+    const parsedStage = deckPersistedErrorStageSchema.safeParse(error.stage);
+    return {
+      code: error.code,
+      ...(parsedStage.success ? { stage: parsedStage.data } : {}),
+      message: PERSISTED_ERROR_MESSAGES[error.code],
+      retryable: error.retryable,
+    };
+  }
+  return { code: "INTERNAL_ERROR", message: "Page generation failed", retryable: false };
 }
 
 function validateIndex(value: unknown, idKind: "deckPlanId" | "deckRunId"): RequestIndex {
@@ -194,13 +195,6 @@ function insertPage(pages: DeckPageRecord[], record: DeckPageRecord): DeckPageRe
     .sort((left, right) => left.pageNumber - right.pageNumber);
 }
 
-const PAGE_STATUS_RANK: Record<DeckPageRecord["status"], number> = {
-  running: 0,
-  failed: 1,
-  best_effort: 2,
-  delivered: 3,
-};
-
 function applyPageMutation(manifest: DeckManifest, incoming: DeckPageRecord): DeckManifest {
   const existing = manifest.pages.find((page) => page.pageNumber === incoming.pageNumber);
   if (manifest.status === "delivered") {
@@ -211,13 +205,7 @@ function applyPageMutation(manifest: DeckManifest, incoming: DeckPageRecord): De
     if (canonicallyEqual(existing, incoming)) return manifest;
     throw new Error(`Delivered page ${incoming.pageNumber} is immutable`);
   }
-  if (existing && PAGE_STATUS_RANK[incoming.status] < PAGE_STATUS_RANK[existing.status]) {
-    throw new Error(`Page ${incoming.pageNumber} state cannot be downgraded`);
-  }
-  if (existing && PAGE_STATUS_RANK[incoming.status] === PAGE_STATUS_RANK[existing.status]) {
-    if (canonicallyEqual(existing, incoming)) return manifest;
-    throw new Error(`Page ${incoming.pageNumber} record replacement rejected`);
-  }
+  if (existing && canonicallyEqual(existing, incoming)) return manifest;
   return { ...manifest, status: "running", pages: insertPage(manifest.pages, incoming) };
 }
 
@@ -225,7 +213,11 @@ function outputPages(records: DeckPageRecord[]): GenerateDeckOutput["pages"] {
   const pages: GenerateDeckOutput["pages"] = [];
   for (const record of records) {
     if (record.result) pages.push({ ...record.result, pageNumber: record.pageNumber });
-    else if (record.error) pages.push({ pageNumber: record.pageNumber, status: "failed", error: record.error });
+    else if (record.error) pages.push({
+      pageNumber: record.pageNumber,
+      status: "failed",
+      error: { code: record.error.code, message: record.error.message, retryable: record.error.retryable },
+    });
   }
   return pages;
 }
@@ -584,10 +576,6 @@ export class DeckStore implements DeckStoreApi {
       }
       let merged = current.pages.slice();
       for (const page of pages) {
-        const existing = merged.find((record) => record.pageNumber === page.pageNumber);
-        if (existing && PAGE_STATUS_RANK[page.status] < PAGE_STATUS_RANK[existing.status]) {
-          throw new Error(`Page ${page.pageNumber} state cannot be downgraded`);
-        }
         merged = insertPage(merged, page);
       }
       merged = merged.sort((left, right) => left.pageNumber - right.pageNumber);

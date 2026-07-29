@@ -8,6 +8,7 @@ import {
   planGroundedDisplay,
   verifyGroundedDisplay,
 } from "../../src/services/grounded-display-planner.js";
+import { extractCanonicalAnchors } from "../../src/domain/critical-anchor.js";
 
 function profile(overrides: Partial<TemplateProfile> = {}): TemplateProfile {
   return {
@@ -159,4 +160,50 @@ test("more than 200 extracted facts fail planning with an explicit no-loss diagn
       && /201 facts/.test(error.message)
       && Boolean(error.recovery?.includes("No facts were dropped")),
   );
+});
+
+test("verifier recomputes canonical project-name and negation anchors from source", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "连续性要求", body: "星河壹号在长周期服务期间要求全程无中断并保留可追溯记录。" }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  const result = planGroundedDisplay(source, { pageNumber: 35, title: "连续性要求", documentType: "bid", profile: profile({
+    semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 32 }],
+    maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 32 },
+  }) });
+  const visible = result.blueprint.groups.map((group) => group.body).join("\n");
+  assert.match(visible, /星河壹号/);
+  assert.match(visible, /无中断/);
+
+  const forged = structuredClone(result.displayPlan);
+  forged.factCoverages[0].criticalAnchors = [];
+  const verification = verifyGroundedDisplay(source.facts, result.blueprint.groups, forged);
+  assert.equal(verification.passed, false);
+  assert.match(verification.issues.join("\n"), /canonical|anchor/i);
+});
+
+for (const scenario of [
+  { text: `项目配置3,000（${"甲".repeat(24)}）株常绿乔木。`, number: "3,000", unit: "株" },
+  { text: `年度服务12（${"乙".repeat(24)}）万人次。`, number: "12", unit: "万人次" },
+  { text: `应配置5（${"丙".repeat(24)}）辆作业车。`, number: "5", unit: "辆" },
+  { text: `中标人需服务12（${"丁".repeat(24)}）家子项目。`, number: "12", unit: "家" },
+] as const) {
+  test(`numeric anchor retains independently separated unit ${scenario.unit}`, () => {
+    const source = normalizeSource({ sections: [{ heading: "数量要求", body: scenario.text }], quality: { minScore: 90, maxAttempts: 3 } });
+    const result = planGroundedDisplay(source, { pageNumber: 36, title: "数量要求", documentType: "bid", profile: profile({
+      semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 34 }],
+      maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 34 },
+    }) });
+    const visible = result.blueprint.groups[0].body;
+    assert.match(visible, new RegExp(scenario.number.replace(",", "\\,")));
+    assert.match(visible, new RegExp(scenario.unit));
+    assert.ok(result.displayPlan.factCoverages[0].criticalAnchors.some((anchor) => anchor.kind === "unit" && anchor.text === scenario.unit));
+  });
+}
+
+test("anchor extraction has negative controls for place and ordinary noun prefixes", () => {
+  const anchors = extractCanonicalAnchors("无锡市未央区的名称由采购人确认。");
+  assert.equal(anchors.some((anchor) => anchor.kind === "negation"), false);
+  assert.equal(anchors.some((anchor) => anchor.kind === "unit" && anchor.text === "名"), false);
+  assert.ok(anchors.some((anchor) => anchor.kind === "name" && /(?:无锡市|未央区)/.test(anchor.text)));
 });

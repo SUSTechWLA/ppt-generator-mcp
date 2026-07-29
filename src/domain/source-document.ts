@@ -54,7 +54,7 @@ export const sourceSectionSchema = z.object({
 
 export const sourceFactSchema = z.object({
   id: z.string().regex(/^fact-\d+$/),
-  text: z.string().trim().min(1).max(500),
+  text: z.string().min(1).max(500).refine((value) => value.trim().length > 0, "Fact text must contain lexical content"),
   kind: z.enum(["number", "name", "requirement", "conclusion"]),
   sourceSectionId: z.string().regex(/^section-\d+$/),
 }).strict();

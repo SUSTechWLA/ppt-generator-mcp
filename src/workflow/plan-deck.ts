@@ -7,8 +7,10 @@ import {
 import type { PageMetadata } from "../domain/document-context.js";
 import { hashCanonical, type SourceDocument } from "../domain/source-document.js";
 import type { PageBlueprint } from "../domain/page-blueprint.js";
+import type { SlideSpec } from "../domain/slide-spec.js";
 import type { TemplateProfile, TemplateSelection } from "../domain/template-profile.js";
 import { WorkflowError } from "../domain/workflow-error.js";
+import { extractCanonicalAnchors } from "../domain/critical-anchor.js";
 import {
   partitionDeckSource,
   type ExplicitPagePartition,
@@ -96,6 +98,15 @@ interface CandidatePlan {
   grounded: GroundedDisplayResult;
   selection: TemplateSelection;
   solution: TemplateSlotSolution;
+  plannedSpec: SlideSpec;
+  pageBindings: TemplateProfile["pageBindings"];
+  metadataBindings: Array<{
+    field: keyof TemplateProfile["pageBindings"];
+    tag: string;
+    values: string[];
+    usedChars: number[];
+    maxChars: number;
+  }>;
 }
 
 function allowedProfiles(input: PlanDeckInput, profiles: TemplateProfile[]): TemplateProfile[] {
@@ -122,8 +133,122 @@ function compareCandidates(left: CandidatePlan, right: CandidatePlan): number {
   return left.profile.version.localeCompare(right.profile.version);
 }
 
+const diagnosticErrorCodes = new Set([
+  "INPUT_INVALID",
+  "CONFIG_MISSING",
+  "TEMPLATE_FAILED",
+  "MODEL_FAILED",
+  "ASSET_FAILED",
+  "RENDER_FAILED",
+  "QUALITY_FAILED",
+  "INTERNAL_ERROR",
+]);
+
+const diagnosticStages = new Set([
+  "build_page_blueprint",
+  "select_template",
+  "partition_deck_source",
+  "parse_explicit_pages",
+]);
+
+function safeProfileIdentifier(slug: string): string {
+  return /^[a-z0-9][a-z0-9-]{0,99}$/.test(slug) ? slug : "invalid-profile";
+}
+
+function safeFailureIdentity(error: unknown): { code: string; stage: string } {
+  if (!(error instanceof WorkflowError)) return { code: "INTERNAL_ERROR", stage: "workflow" };
+  return {
+    code: diagnosticErrorCodes.has(error.code) ? error.code : "INTERNAL_ERROR",
+    stage: diagnosticStages.has(error.stage) ? error.stage : "workflow",
+  };
+}
+
+function knownMetadataOverflows(
+  partition: ExplicitPagePartition,
+  page: PageMetadata,
+  profile: TemplateProfile,
+): string {
+  const knownValues: Partial<Record<keyof TemplateProfile["pageBindings"], string[]>> = {
+    pageTitle: [partition.title],
+    pageNumber: [String(page.number)],
+    sectionTitle: [page.sectionTitle],
+    partNumber: [page.partNumber],
+    partLabel: [page.partLabel],
+    chapterLabel: [page.chapterLabel],
+    topicTitle: [partition.title],
+    subsectionTitle: [page.subsectionTitle],
+  };
+  const failures: string[] = [];
+  for (const [field, values] of Object.entries(knownValues)) {
+    const typedField = field as keyof TemplateProfile["pageBindings"];
+    const tag = profile.pageBindings[typedField];
+    if (!tag) {
+      failures.push(`${field}:capacity=invalid`);
+      continue;
+    }
+    const maximum = profile.maxCharsBySlot[tag];
+    if (!Number.isSafeInteger(maximum) || maximum <= 0) {
+      failures.push(`${field}:capacity=invalid`);
+      continue;
+    }
+    const used = Math.max(...(values ?? []).map((value) => Array.from(value).length), 0);
+    if (used > maximum) failures.push(`${field}:used=${used},max=${maximum}`);
+  }
+  return failures.join("|") || "none";
+}
+
+/**
+ * Build candidate diagnostics exclusively from already-validated local structures.
+ * Dependency-provided messages, recoveries, causes, run ids, and stack traces must
+ * never become part of the public planning error.
+ */
+function localCandidateDiagnostic(
+  error: unknown,
+  partition: ExplicitPagePartition,
+  page: PageMetadata,
+  profile: TemplateProfile,
+): string {
+  const identity = safeFailureIdentity(error);
+  const facts = partition.normalizedSource.facts;
+  const semanticPositions = profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
+  const factBindingPositions = profile.semanticSlots.reduce(
+    (total, slot) => {
+      const expansion = slot.bindingExpansion[slot.factBearingBinding];
+      const hasCompleteFactBinding = Boolean(slot.bindings[slot.factBearingBinding])
+        && expansion !== undefined
+        && slot.factBearingValueIndex < expansion;
+      return total + (hasCompleteFactBinding ? slot.itemCapacity : 0);
+    },
+    0,
+  );
+  const factBearingLimits = profile.semanticSlots
+    .map((slot) => {
+      const tag = slot.bindings[slot.factBearingBinding];
+      return tag ? (profile.maxCharsBySlot[tag] ?? slot.maxCharsPerItem) : slot.maxCharsPerItem;
+    })
+    .filter((value) => Number.isSafeInteger(value) && value > 0);
+  const effectivePositions = Math.min(profile.blockCapacity, semanticPositions, factBindingPositions);
+  const maxFactChars = facts.reduce((maximum, fact) => Math.max(maximum, Array.from(fact.text).length), 0);
+  return [
+    `profile=${safeProfileIdentifier(profile.slug)}`,
+    `code=${identity.code}`,
+    `stage=${identity.stage}`,
+    `facts=${facts.length}`,
+    `anchors=${extractCanonicalAnchors(partition.body).length}`,
+    `sourceChars=${Array.from(partition.body).length}`,
+    `maxFactChars=${maxFactChars}`,
+    `blockCapacity=${profile.blockCapacity}`,
+    `semanticPositions=${semanticPositions}`,
+    `factBindingPositions=${factBindingPositions}`,
+    `effectivePositions=${effectivePositions}`,
+    `tightestFactChars=${factBearingLimits.length > 0 ? Math.min(...factBearingLimits) : 0}`,
+    `metadataOverflow=${knownMetadataOverflows(partition, page, profile)}`,
+  ].join("; ");
+}
+
 function planForProfile(
   partition: ExplicitPagePartition,
+  page: PageMetadata,
   input: PlanDeckInput,
   profile: TemplateProfile,
   deps: PlanDeckDependencies,
@@ -149,11 +274,48 @@ function planForProfile(
       `profile=${profile.slug}; unmatched=${solution.unmatched.map((item) => item.reason).join(" | ") || "none"}; unrepresented=${solution.unrepresentedFactIds.join(",") || "none"}`,
     );
   }
-  return { profile, grounded, selection, solution };
+  const plannedSpec = deps.materializeSlideSpec(grounded.blueprint);
+  const blockById = new Map(plannedSpec.blocks.map((block) => [block.id, block]));
+  const images = plannedSpec.assets.filter((asset) => asset.type === "image");
+  const values: Record<keyof TemplateProfile["pageBindings"], string[]> = {
+    pageTitle: [plannedSpec.title],
+    pageNumber: [String(page.number)],
+    sectionTitle: [page.sectionTitle],
+    partNumber: [page.partNumber],
+    partLabel: [page.partLabel],
+    chapterLabel: [page.chapterLabel],
+    topicTitle: [plannedSpec.title],
+    subsectionTitle: [page.subsectionTitle],
+    summaryText: [plannedSpec.conclusion],
+    imageCaption: images.map((asset) => asset.alt),
+    figureRef: images.map((asset) => blockById.get(asset.blockId)?.title ?? asset.alt),
+  };
+  const metadataBindings = Object.entries(profile.pageBindings).map(([field, tag]) => {
+    const typedField = field as keyof TemplateProfile["pageBindings"];
+    const maxChars = profile.maxCharsBySlot[tag];
+    if (!maxChars) {
+      planningError(
+        "Profile page binding has no declared character capacity",
+        `profile=${profile.slug}; field=${field}; tag=${tag}`,
+      );
+    }
+    const emitted = values[typedField];
+    const usedChars = emitted.map((value) => Array.from(value).length);
+    const overflow = usedChars.find((used) => used > maxChars);
+    if (overflow !== undefined) {
+      planningError(
+        "Page metadata does not fit the candidate profile",
+        `profile=${profile.slug}; field=${field}; tag=${tag}; used=${overflow}; max=${maxChars}`,
+      );
+    }
+    return { field: typedField, tag, values: emitted, usedChars, maxChars };
+  });
+  return { profile, grounded, selection, solution, plannedSpec, pageBindings: profile.pageBindings, metadataBindings };
 }
 
 function selectProfilePlan(
   partition: ExplicitPagePartition,
+  page: PageMetadata,
   input: PlanDeckInput,
   deps: PlanDeckDependencies,
 ): CandidatePlan {
@@ -161,12 +323,9 @@ function selectProfilePlan(
   const diagnostics: string[] = [];
   for (const profile of allowedProfiles(input, deps.profiles)) {
     try {
-      successes.push(planForProfile(partition, input, profile, deps));
+      successes.push(planForProfile(partition, page, input, profile, deps));
     } catch (error) {
-      const structured = error instanceof WorkflowError
-        ? `code=${error.code}; stage=${error.stage}; recovery=${error.recovery ?? "none"}`
-        : "unstructured";
-      diagnostics.push(`${profile.slug}: ${error instanceof Error ? error.message : "planning failed"} [${structured}]`.slice(0, 2_000));
+      diagnostics.push(localCandidateDiagnostic(error, partition, page, profile));
     }
   }
   const winner = successes.sort(compareCandidates)[0];
@@ -181,6 +340,19 @@ function selectProfilePlan(
 
 function templateMatch(candidate: CandidatePlan): DeckTemplateMatch {
   const semanticItemCapacity = candidate.profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
+  const capabilityEvidence = {
+    templateSlug: candidate.profile.slug,
+    themeId: candidate.profile.themeId,
+    profileVersion: candidate.profile.version,
+    blockCapacity: candidate.profile.blockCapacity,
+    semanticItemCapacity,
+    effectiveItemCapacity: candidate.grounded.displayPlan.targetBudget.itemCapacity,
+    effectiveMaxCharsPerItem: candidate.grounded.displayPlan.targetBudget.maxCharsPerItem,
+    minimumBodyFontPt: candidate.profile.minimumBodyFontPt,
+    maxRasterAreaRatio: candidate.profile.maxRasterAreaRatio,
+    pageBindings: candidate.pageBindings,
+    metadataBindings: candidate.metadataBindings.map(({ field, tag, maxChars }) => ({ field, tag, maxChars })),
+  };
   return {
     themeId: candidate.profile.themeId,
     profileVersion: candidate.profile.version,
@@ -193,6 +365,9 @@ function templateMatch(candidate: CandidatePlan): DeckTemplateMatch {
     effectiveMaxCharsPerItem: candidate.grounded.displayPlan.targetBudget.maxCharsPerItem,
     minimumBodyFontPt: candidate.profile.minimumBodyFontPt,
     maxRasterAreaRatio: candidate.profile.maxRasterAreaRatio,
+    pageBindings: candidate.pageBindings,
+    metadataBindings: candidate.metadataBindings,
+    profileCapabilityHash: hashCanonical(capabilityEvidence),
     assignments: candidate.solution.assignments,
     capacityUse: candidate.solution.capacityUse,
     transformations: candidate.solution.transformations,
@@ -211,16 +386,16 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
 
   const partitions = deps.partitionDeckSource({ sourceText, pageNumbers: input.pageNumbers });
   const slides = partitions.map((partition, pageIndex) => {
-    const candidate = selectProfilePlan(partition, input, deps);
-    const plannedSpec = deps.materializeSlideSpec(candidate.grounded.blueprint);
+    const page = buildPageMetadata(partition, pageIndex);
+    const candidate = selectProfilePlan(partition, page, input, deps);
     return {
-      page: buildPageMetadata(partition, pageIndex),
+      page,
       sourceSections: partition.sourceSections,
       originalSourceSectionIds: partition.originalSourceSectionIds,
       originalSourceFactIds: partition.originalSourceFactIds,
       originalSourceFacts: partition.normalizedSource.facts,
       displayPlan: candidate.grounded.displayPlan,
-      plannedSpec,
+      plannedSpec: candidate.plannedSpec,
       templateSlug: candidate.profile.slug,
       templateMatch: templateMatch(candidate),
     };

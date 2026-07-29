@@ -15,6 +15,7 @@ import type { DocumentType } from "../domain/document-context.js";
 import type { SourceDocument, SourceFact } from "../domain/source-document.js";
 import type { SemanticSlot, TemplateProfile } from "../domain/template-profile.js";
 import { WorkflowError } from "../domain/workflow-error.js";
+import { extractCanonicalAnchors } from "../domain/critical-anchor.js";
 
 export interface GroundedDisplayContext {
   pageNumber: number;
@@ -70,17 +71,6 @@ const COMPARISON_CUE = /(?:相比|较之|对比|高于|低于|优于|劣于|同�
 const METRIC_CUE = /(?:\d[\d,.]*(?:%|万元|元|个工作日|工作日|分钟|小时|天|日|周|个月|月|年|㎡|家|个|名|项|次|台|套)?|[零一二三四五六七八九十百千万两]+(?:个工作日|工作日|分钟|小时|天|日|周|个月|月|年|家|个|名|项|次|台|套))/u;
 const CONCLUSION_CUE = /^(?:因此|所以|综上|由此|结论)|(?:形成|实现|保障|确保|达成)/u;
 
-const ANCHOR_PATTERNS: Array<{ kind: CriticalAnchor["kind"]; expression: RegExp }> = [
-  { kind: "time", expression: /(?:\d[\d,.]*|[零一二三四五六七八九十百千万两]+)(?:个工作日|工作日|分钟|小时|天|日|周|个月|月|年)(?:内|前|后)?/gu },
-  { kind: "time", expression: /每日|每周|每月|年度|月度|周期|定期|临时/gu },
-  { kind: "number", expression: /(?:\d[\d,.]*(?:%|万元|元|㎡|家|个|名|项|次|台|套)?|[零一二三四五六七八九十百千万两]+(?:家|个|名|项|次|台|套))/gu },
-  { kind: "negation", expression: /不得|不应|不能|不可|不少于|不超过|未经|未(?=[一-鿿])|无需|严禁|禁止/gu },
-  { kind: "approval", expression: /书面申请|书面批准|采购人审核|采购人批准|审核|审批|批准|同意|许可|签字/gu },
-  { kind: "condition", expression: /仅限|只有|除非|如果|若|如遇|当[一-鿿]{0,12}时|在[一-鿿]{1,16}情况下|前提/gu },
-  { kind: "obligation", expression: /必须|应当|应在|应于|应(?=[一-鿿])|须|需在|需(?=[一-鿿])|要求|确保|保证|至少|不少于|不超过/gu },
-  { kind: "name", expression: /《[^》]+》|“[^”]+”|「[^」]+」|\b[A-Z][A-Za-z0-9._-]{1,30}\b|[一-鿿A-Za-z0-9]{2,24}(?:项目|中心|大学|总部|华府|雅苑|佳苑|楼|阁|园|公园|广场|道路|路|街道|公司|集团|市|县|区|镇|村)/gu },
-];
-
 function capacityError(message: string, diagnostics: string): never {
   throw new WorkflowError({
     code: "INPUT_INVALID",
@@ -89,24 +79,6 @@ function capacityError(message: string, diagnostics: string): never {
     message,
     recovery: diagnostics,
   });
-}
-
-function anchorsFor(text: string): CriticalAnchor[] {
-  const anchors: CriticalAnchor[] = [];
-  const seen = new Set<string>();
-  for (const { kind, expression } of ANCHOR_PATTERNS) {
-    expression.lastIndex = 0;
-    for (const match of text.matchAll(expression)) {
-      const start = match.index;
-      const value = match[0];
-      if (start === undefined || !value) continue;
-      const key = `${kind}:${start}:${start + value.length}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      anchors.push({ kind, start, end: start + value.length, text: value });
-    }
-  }
-  return anchors.sort((left, right) => left.start - right.start || left.end - right.end || left.kind.localeCompare(right.kind));
 }
 
 function trimSpan(text: string, start: number, end: number): SourceSpan | undefined {
@@ -300,7 +272,7 @@ function betterPlan(left: SearchPlan | undefined, right: SearchPlan): SearchPlan
 function searchDisplayPlan(source: SourceDocument, profile: TemplateProfile): { plan?: SearchPlan; positions: EffectivePosition[] } {
   const facts = source.facts;
   const positions = effectivePositions(profile);
-  const anchors = facts.map((fact) => anchorsFor(fact.text));
+  const anchors = facts.map((fact) => extractCanonicalAnchors(fact.text));
   const candidates = facts.map((fact, index) => extractionCandidates(fact, anchors[index]));
   const combinationCache = new Map<string, Combination | undefined>();
   const searchCache = new Map<string, SearchPlan | undefined>();
@@ -414,7 +386,16 @@ export function verifyGroundedDisplay(
     }
     const rebuilt = coverage.selectedSpans.map((span) => fact.text.slice(span.start, span.end)).join(ALLOWED_SPAN_SEPARATOR);
     if (rebuilt !== coverage.displayText) issues.push(`Coverage is not extractively rebuilt for ${coverage.factId}`);
-    for (const anchor of coverage.criticalAnchors) {
+    const canonicalAnchors = extractCanonicalAnchors(fact.text);
+    if (canonicalAnchors.length !== coverage.criticalAnchors.length
+      || canonicalAnchors.some((anchor, index) => {
+        const declared = coverage.criticalAnchors[index];
+        return !declared || anchor.kind !== declared.kind || anchor.start !== declared.start
+          || anchor.end !== declared.end || anchor.text !== declared.text;
+      })) {
+      issues.push(`Declared anchors do not equal canonical source anchors for ${coverage.factId}`);
+    }
+    for (const anchor of canonicalAnchors) {
       if (!coverage.selectedSpans.some((span) => span.start <= anchor.start && span.end >= anchor.end)) {
         issues.push(`Critical ${anchor.kind} anchor is missing for ${coverage.factId}`);
       }
@@ -440,7 +421,7 @@ export function planGroundedDisplay(source: SourceDocument, context: GroundedDis
   const { plan, positions } = searchDisplayPlan(source, context.profile);
   if (!plan) {
     const minimumAnchorCharacters = source.facts.reduce((total, fact) => {
-      const spans = mergeSpans(fact.text, anchorsFor(fact.text).map((anchor) => ({ start: anchor.start, end: anchor.end, text: anchor.text })));
+      const spans = mergeSpans(fact.text, extractCanonicalAnchors(fact.text).map((anchor) => ({ start: anchor.start, end: anchor.end, text: anchor.text })));
       return total + spans.reduce((sum, span) => sum + span.text.length, 0);
     }, 0);
     capacityError(

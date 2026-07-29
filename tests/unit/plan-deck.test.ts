@@ -138,3 +138,117 @@ test("profile capacity failure retains structured inner diagnostics", async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("persisted deck schema rejects independently forged cross-field evidence", async () => {
+  const f = await fixture();
+  try {
+    const valid = await planDeckWorkflow({
+      sourceText: explicitSource, pageNumbers: [17, 23], documentType: "bid",
+      preferredThemeId: "green-infographic-v1", requestId: "cross-schema-valid-plan",
+    }, f.deps);
+    assert.equal(planDeckOutputSchema.safeParse(valid).success, true);
+
+    const mutations: Array<[string, (value: typeof valid) => void]> = [
+      ["fact section reference", (value) => { value.plannedDeck.slides[0].originalSourceFacts[0].sourceSectionId = "section-999"; }],
+      ["coverage source", (value) => {
+        const coverage = value.plannedDeck.slides[0].displayPlan.factCoverages[0];
+        coverage.sourceText += "伪";
+        coverage.omittedCharacterCount += 1;
+        value.plannedDeck.slides[0].displayPlan.grounding.omittedCharacterCount += 1;
+      }],
+      ["canonical anchors", (value) => { value.plannedDeck.slides[0].displayPlan.factCoverages[0].criticalAnchors = []; }],
+      ["display budget", (value) => {
+        const budget = value.plannedDeck.slides[0].displayPlan.targetBudget.positionBudgets[0];
+        budget.maxChars = Math.max(1, value.plannedDeck.slides[0].displayPlan.items[0].body.length - 1);
+      }],
+      ["planned body", (value) => { value.plannedDeck.slides[0].plannedSpec.blocks[0].body += "伪"; }],
+      ["assignment usage", (value) => { value.plannedDeck.slides[0].templateMatch.assignments[0].usedChars = 1; }],
+      ["selection identity", (value) => { value.plannedDeck.slides[0].templateMatch.candidateScores[0].slug = "forged-profile"; }],
+      ["metadata capability", (value) => { value.plannedDeck.slides[0].templateMatch.metadataBindings[0].maxChars += 1; }],
+      ["page binding", (value) => { value.plannedDeck.slides[0].templateMatch.pageBindings.pageTitle = "forged-tag"; }],
+    ];
+    for (const [label, mutate] of mutations) {
+      const forged = structuredClone(valid);
+      mutate(forged);
+      assert.equal(planDeckOutputSchema.safeParse(forged).success, false, label);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("profile diagnostics never echo dependency messages, recoveries, paths, or unenumerated secrets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "plan-deck-redaction-test-"));
+  try {
+    const base = loadTemplateProfiles(resolve("templates")).find((profile) =>
+      profile.documentCompatibility.bid
+      && profile.blockCapacity === 5
+      && profile.semanticSlots.some((slot) => slot.itemCapacity === 5)
+    )!;
+    const maliciousWorkflowError = new WorkflowError({
+        code: "INPUT_INVALID", stage: "build_page_blueprint", retryable: false,
+        message: "message-canary AKIAIOSFODNN7EXAMPLE hunter2 C:\\Users\\alice\\secret.txt",
+        recovery: "recovery-canary \\\\server\\share\\secret sk-live-recovery /private/recovery",
+      });
+    const forgedWorkflowError = new WorkflowError({
+      code: "INPUT_INVALID", stage: "build_page_blueprint", retryable: false,
+      message: "forged-message-canary",
+      recovery: "forged-recovery-canary",
+    });
+    Object.defineProperties(forgedWorkflowError, {
+      code: { value: "INPUT_INVALID;code-canary", configurable: true },
+      stage: { value: "build_page_blueprint;stage-canary", configurable: true },
+    });
+    for (const injected of [
+      new Error("provider-canary failed sk-live-secret at /private/project/source.ts"),
+      maliciousWorkflowError,
+      forgedWorkflowError,
+    ]) {
+      const deps = createPlanDeckDependencies({ deckStore: new DeckStore(directory), profiles: [base] });
+      deps.planGroundedDisplay = () => { throw injected; };
+      try {
+        await planDeckWorkflow({ sourceText: explicitSource, pageNumbers: [17, 23], documentType: "bid" }, deps);
+        assert.fail("expected planning failure");
+      } catch (error) {
+        assert.ok(error instanceof WorkflowError);
+        const serialized = JSON.stringify(error.toJSON());
+        assert.doesNotMatch(serialized, /provider-canary|message-canary|recovery-canary|forged-|code-canary|stage-canary/);
+        assert.doesNotMatch(serialized, /AKIA|hunter2|sk-live|\/private\/|C:\\Users|server\\share/);
+        assert.match(serialized, /code=(?:INPUT_INVALID|INTERNAL_ERROR)/);
+        assert.match(serialized, /facts=\d+; anchors=\d+; sourceChars=\d+/);
+        assert.match(serialized, /blockCapacity=5; semanticPositions=5; factBindingPositions=5; effectivePositions=5/);
+      }
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("page metadata capacity participates in profile selection and forced failure", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "plan-deck-metadata-capacity-"));
+  try {
+    const sourceProfile = loadTemplateProfiles(resolve("templates")).find((profile) => profile.documentCompatibility.bid && profile.imageSlots.minAssets === 0)!;
+    const tight = structuredClone(sourceProfile);
+    tight.slug = "metadata-tight-profile";
+    tight.maxCharsBySlot[tight.pageBindings.sectionTitle] = 4;
+    const fitting = structuredClone(sourceProfile);
+    fitting.slug = "metadata-fitting-profile";
+    const store = new DeckStore(directory);
+    const deps = createPlanDeckDependencies({ deckStore: store, profiles: [tight, fitting] });
+    const input = { sourceText: explicitSource, pageNumbers: [17, 23], documentType: "bid" as const };
+
+    const selected = await planDeckWorkflow({ ...input, requestId: "metadata-cap-select" }, deps);
+    assert.equal(selected.plannedDeck.slides.every((slide) => slide.templateSlug === fitting.slug), true);
+    assert.ok(selected.plannedDeck.slides.every((slide) => slide.templateMatch.metadataBindings.every((binding) => binding.values.every((value) => value.length <= binding.maxChars))));
+
+    await assert.rejects(
+      () => planDeckWorkflow({ ...input, templateSlug: tight.slug, requestId: "metadata-cap-forced" }, deps),
+      (error: unknown) => error instanceof WorkflowError
+        && /no honest profile-budgeted display plan/.test(error.message)
+        && Boolean(error.recovery?.includes("sectionTitle"))
+        && Boolean(error.recovery?.includes("max=4")),
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 
 import { semanticRoleSchema } from "./page-blueprint.js";
+import { criticalAnchorKindSchema, extractCanonicalAnchors } from "./critical-anchor.js";
 
 const factIdSchema = z.string().regex(/^fact-\d+$/);
 const groupIdSchema = z.string().regex(/^group-\d+$/);
@@ -12,7 +13,7 @@ export const sourceSpanSchema = z.object({
 }).strict().refine((span) => span.end > span.start, "Source span end must be after start");
 
 export const criticalAnchorSchema = sourceSpanSchema.extend({
-  kind: z.enum(["number", "negation", "time", "name", "approval", "condition", "obligation"]),
+  kind: criticalAnchorKindSchema,
 }).strict();
 
 export const displayFactCoverageSchema = z.object({
@@ -42,6 +43,15 @@ export const displayFactCoverageSchema = z.object({
     if (!coverage.selectedSpans.some((span) => span.start <= anchor.start && span.end >= anchor.end)) {
       context.addIssue({ code: "custom", message: "Every critical anchor must be retained by a selected span", path: ["criticalAnchors", index] });
     }
+  }
+  const canonicalAnchors = extractCanonicalAnchors(coverage.sourceText);
+  if (canonicalAnchors.length !== coverage.criticalAnchors.length
+    || canonicalAnchors.some((anchor, index) => {
+      const declared = coverage.criticalAnchors[index];
+      return !declared || anchor.kind !== declared.kind || anchor.start !== declared.start
+        || anchor.end !== declared.end || anchor.text !== declared.text;
+    })) {
+    context.addIssue({ code: "custom", message: "Critical anchors must equal canonical source extraction", path: ["criticalAnchors"] });
   }
   const rebuilt = coverage.selectedSpans.map((span) => span.text).join("，");
   if (rebuilt !== coverage.displayText) {

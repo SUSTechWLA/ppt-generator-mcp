@@ -207,3 +207,55 @@ test("anchor extraction has negative controls for place and ordinary noun prefix
   assert.equal(anchors.some((anchor) => anchor.kind === "unit" && anchor.text === "名"), false);
   assert.ok(anchors.some((anchor) => anchor.kind === "name" && /(?:无锡市|未央区)/.test(anchor.text)));
 });
+
+for (const subject of ["云栖府", "滨江壹品", "钱塘江沿线"] as const) {
+  test(`conservative subject grounding retains unknown Chinese name ${subject}`, () => {
+    const source = normalizeSource({
+      sections: [{ heading: "服务对象", body: `${subject}承担常态化环境维护、应急响应和设施巡检等综合工作，服务期间必须每日巡查并保留记录。` }],
+      quality: { minScore: 90, maxAttempts: 3 },
+    });
+    const result = planGroundedDisplay(source, { pageNumber: 37, title: "服务对象", documentType: "bid", profile: profile({
+      semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 34 }],
+      maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 34 },
+    }) });
+    assert.match(result.blueprint.groups[0].body, new RegExp(subject));
+    assert.ok(result.displayPlan.factCoverages[0].criticalAnchors.some((anchor) => anchor.kind === "subject" && anchor.text.includes(subject)));
+  });
+}
+
+test("explicit enumeration clause retains all unknown names", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "服务范围", body: "服务范围包括云栖府、滨江壹品和钱塘江沿线，必须每日巡查。" }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  const result = planGroundedDisplay(source, { pageNumber: 38, title: "服务范围", documentType: "bid", profile: profile({
+    semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 44 }],
+    maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 44 },
+  }) });
+  assert.match(result.blueprint.groups[0].body, /云栖府/);
+  assert.match(result.blueprint.groups[0].body, /滨江壹品/);
+  assert.match(result.blueprint.groups[0].body, /钱塘江/);
+  assert.ok(result.displayPlan.factCoverages[0].criticalAnchors.some((anchor) =>
+    anchor.kind === "subject" && /云栖府.*滨江壹品.*钱塘江/u.test(anchor.text)
+  ));
+});
+
+test("ordinary subject prefix is structural rather than a fabricated name", () => {
+  const anchors = extractCanonicalAnchors("工作人员承担常态化维护工作，服务期间必须每日巡查。");
+  assert.equal(anchors.some((anchor) => anchor.kind === "name"), false);
+  assert.ok(anchors.some((anchor) => anchor.kind === "subject" && anchor.text === "工作人员"));
+});
+
+test("subject plus mandatory tokens fail capacity instead of silently dropping the subject", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "服务对象", body: "云栖府承担常态化环境维护工作，服务期间必须每日巡查并保留记录。" }],
+    quality: { minScore: 90, maxAttempts: 3 },
+  });
+  assert.throws(
+    () => planGroundedDisplay(source, { pageNumber: 39, title: "服务对象", documentType: "bid", profile: profile({
+      semanticSlots: [{ ...profile().semanticSlots[0], maxCharsPerItem: 7 }],
+      maxCharsBySlot: { ...profile().maxCharsBySlot, paragraph: 7 },
+    }) }),
+    (error: unknown) => error instanceof WorkflowError && /without losing grounded source anchors/.test(error.message),
+  );
+});

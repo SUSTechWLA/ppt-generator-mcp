@@ -13,9 +13,11 @@ import {
 } from "../domain/page-blueprint.js";
 import type { DocumentType } from "../domain/document-context.js";
 import type { SourceDocument, SourceFact } from "../domain/source-document.js";
-import type { SemanticSlot, TemplateProfile } from "../domain/template-profile.js";
+import type { TemplateProfile } from "../domain/template-profile.js";
 import { WorkflowError } from "../domain/workflow-error.js";
 import { extractCanonicalAnchors } from "../domain/critical-anchor.js";
+import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, projectGroundedVisualIntents } from "../domain/slide-projection.js";
+import { effectiveProfilePositions, type EffectiveProfilePosition } from "../domain/profile-capability.js";
 
 export interface GroundedDisplayContext {
   pageNumber: number;
@@ -44,17 +46,10 @@ interface FactChoice {
   anchors: CriticalAnchor[];
 }
 
-interface EffectivePosition {
-  slot: SemanticSlot;
-  itemIndex: number;
-  maxChars: number;
-  catalogIndex: number;
-}
-
 interface PlannedItem {
   role: SemanticRole;
   choices: FactChoice[];
-  position: EffectivePosition;
+  position: EffectiveProfilePosition;
 }
 
 interface SearchPlan {
@@ -66,10 +61,6 @@ interface SearchPlan {
 
 const ALLOWED_FACT_SEPARATOR = "；";
 const ALLOWED_SPAN_SEPARATOR = "，";
-const PROCESS_CUE = /(?:第[一二三四五六七八九十\d]+步|首先|其次|然后|随后|最后|每日|每周|每月|流程|步骤|启动|到场|提交|审核|审批|批准|交接|记录|反馈)/u;
-const COMPARISON_CUE = /(?:相比|较之|对比|高于|低于|优于|劣于|同比|环比|\bversus\b|\bvs\.?\b)/iu;
-const METRIC_CUE = /(?:\d[\d,.]*(?:%|万元|元|个工作日|工作日|分钟|小时|天|日|周|个月|月|年|㎡|家|个|名|项|次|台|套)?|[零一二三四五六七八九十百千万两]+(?:个工作日|工作日|分钟|小时|天|日|周|个月|月|年|家|个|名|项|次|台|套))/u;
-const CONCLUSION_CUE = /^(?:因此|所以|综上|由此|结论)|(?:形成|实现|保障|确保|达成)/u;
 
 function capacityError(message: string, diagnostics: string): never {
   throw new WorkflowError({
@@ -145,6 +136,13 @@ function extractionCandidates(fact: SourceFact, anchors: CriticalAnchor[]): Extr
   const clauseSelection = anchorClauses.length > 0 ? anchorClauses : fallbackClause ? [fallbackClause] : [];
   if (clauseSelection.length > 0) candidates.push(candidateFromSpans(clauseSelection, "clause"));
 
+  const exactAnchorSelection = mergeSpans(text, anchors.map((anchor) => ({
+    start: anchor.start,
+    end: anchor.end,
+    text: anchor.text,
+  })));
+  if (exactAnchorSelection.length > 0) candidates.push(candidateFromSpans(exactAnchorSelection, "anchor"));
+
   const windows = anchors.map((anchor) => trimSpan(text, Math.max(0, anchor.start - 6), Math.min(text.length, anchor.end + 8)))
     .filter((span): span is SourceSpan => Boolean(span));
   if (windows.length === 0 && fallbackClause) {
@@ -165,46 +163,6 @@ function extractionCandidates(fact: SourceFact, anchors: CriticalAnchor[]): Extr
     if (!existing || candidate.retainedCharacters > existing.retainedCharacters) unique.set(key, candidate);
   }
   return [...unique.values()].sort((left, right) => right.retainedCharacters - left.retainedCharacters);
-}
-
-function roleFor(fact: SourceFact): SemanticRole {
-  if (COMPARISON_CUE.test(fact.text)) return "comparison";
-  if (PROCESS_CUE.test(fact.text)) return "process";
-  if (METRIC_CUE.test(fact.text)) return "metric";
-  if (CONCLUSION_CUE.test(fact.text)) return "conclusion";
-  if (fact.kind === "name") return "evidence";
-  return "fact";
-}
-
-function combineRole(left: SemanticRole, right: SemanticRole): SemanticRole {
-  if (left === right) return left;
-  if (left === "process" || right === "process") return "process";
-  if (left === "comparison" || right === "comparison") return "comparison";
-  if (left === "metric" || right === "metric") return "metric";
-  if (left === "conclusion" || right === "conclusion") return "conclusion";
-  if (left === "evidence" || right === "evidence") return "evidence";
-  return "fact";
-}
-
-function groupRole(facts: SourceFact[]): SemanticRole {
-  return facts.map(roleFor).reduce(combineRole);
-}
-
-function effectivePositions(profile: TemplateProfile): EffectivePosition[] {
-  const auxiliaryFactLimits = Object.entries(profile.auxiliaryBindings ?? {})
-    .filter(([field]) => ["body", "narrativeBody", "tableCell"].includes(field))
-    .map(([, tag]) => profile.maxCharsBySlot[tag])
-    .filter((limit): limit is number => typeof limit === "number");
-  const slots = profile.semanticSlots
-    .map((slot, catalogIndex) => ({ slot, catalogIndex }))
-    .sort((left, right) => left.slot.priority - right.slot.priority || left.catalogIndex - right.catalogIndex);
-  return slots.flatMap(({ slot, catalogIndex }) => {
-    const factTag = slot.bindings[slot.factBearingBinding];
-    const limits = [slot.maxCharsPerItem, factTag ? profile.maxCharsBySlot[factTag] : undefined, ...auxiliaryFactLimits]
-      .filter((limit): limit is number => typeof limit === "number" && limit > 0);
-    const maxChars = Math.min(...limits);
-    return Array.from({ length: slot.itemCapacity }, (_, itemIndex) => ({ slot, itemIndex, maxChars, catalogIndex }));
-  });
 }
 
 interface Combination {
@@ -269,9 +227,9 @@ function betterPlan(left: SearchPlan | undefined, right: SearchPlan): SearchPlan
   return right.items.length < left.items.length ? right : left;
 }
 
-function searchDisplayPlan(source: SourceDocument, profile: TemplateProfile): { plan?: SearchPlan; positions: EffectivePosition[] } {
+function searchDisplayPlan(source: SourceDocument, profile: TemplateProfile): { plan?: SearchPlan; positions: EffectiveProfilePosition[] } {
   const facts = source.facts;
-  const positions = effectivePositions(profile);
+  const positions = effectiveProfilePositions(profile);
   const anchors = facts.map((fact) => extractCanonicalAnchors(fact.text));
   const candidates = facts.map((fact, index) => extractionCandidates(fact, anchors[index]));
   const combinationCache = new Map<string, Combination | undefined>();
@@ -305,7 +263,7 @@ function searchDisplayPlan(source: SourceDocument, profile: TemplateProfile): { 
 
     for (let end = factIndex + 1; end <= facts.length; end += 1) {
       const factsInGroup = facts.slice(factIndex, end);
-      const role = groupRole(factsInGroup);
+      const role = groundedRoleForFacts(factsInGroup);
       if (!profile.supportedRoles.includes(role) || !position.slot.acceptedRoles.includes(role)) continue;
       const compacted = range(factIndex, end, position.maxChars);
       if (!compacted) continue;
@@ -324,41 +282,6 @@ function searchDisplayPlan(source: SourceDocument, profile: TemplateProfile): { 
   };
 
   return { plan: visit(0, 0, 0, 0), positions };
-}
-
-const ROLE_TITLES: Record<SemanticRole, string> = {
-  headline: "页面主题",
-  conclusion: "核心结论",
-  fact: "关键事实",
-  metric: "量化指标",
-  process: "实施流程",
-  comparison: "对比分析",
-  evidence: "事实依据",
-  visual: "视觉说明",
-};
-
-function planVisualAsset(
-  context: GroundedDisplayContext,
-  groups: PageContentGroup[],
-  factsById: Map<string, SourceFact>,
-): PageBlueprint["assets"] {
-  if (context.profile.imageSlots.maxAssets < 1) return [];
-  const explanatory = groups.find((group) => group.role === "process" && group.sourceFactIds.length >= 3)
-    ?? groups.find((group) => group.role === "comparison" && group.sourceFactIds.length >= 3);
-  if (!explanatory) return [];
-  const promptSource = explanatory.sourceFactIds.map((factId) => factsById.get(factId)?.text ?? "").filter(Boolean).join(" ");
-  const prompt = `Create a restrained professional bid-document illustration for "${context.title}" grounded in this source sequence: ${promptSource}. Show clear spatial or procedural relationships; no text, no logo, no watermark.`;
-  if (prompt.length > 1_200) return [];
-  return [{
-    id: `p${context.pageNumber}-img-001`,
-    role: "visual",
-    groupId: explanatory.id,
-    prompt,
-    alt: `${context.title}专业示意图`.slice(0, 120),
-    sourceFactIds: explanatory.sourceFactIds,
-    width: 1792,
-    height: 1024,
-  }];
 }
 
 export function verifyGroundedDisplay(
@@ -451,21 +374,26 @@ export function planGroundedDisplay(source: SourceDocument, context: GroundedDis
       id,
       order: index,
       role: item.role,
-      title: ROLE_TITLES[item.role],
+      title: groundedTitleForRole(item.role),
       body: item.choices.map((choice) => choice.candidate.displayText).join(ALLOWED_FACT_SEPARATOR),
       sourceSectionIds: [...new Set(facts.map((fact) => fact.sourceSectionId).filter((sectionId) => sourceSectionById.has(sectionId)))],
       sourceFactIds: facts.map((fact) => fact.id),
     };
   });
-  const assets = planVisualAsset(context, groups, new Map(source.facts.map((fact) => [fact.id, fact])));
+  const assets = projectGroundedVisualIntents({
+    pageNumber: context.pageNumber,
+    title: context.title,
+    groups,
+    sourceFacts: source.facts,
+    maxAssets: context.profile.imageSlots.maxAssets,
+  });
   if (assets.length < context.profile.imageSlots.minAssets) {
     capacityError(
       "Profile requires an image but the page has no semantically justified visual group",
       `profile=${context.profile.slug}; minimumAssets=${context.profile.imageSlots.minAssets}; visual candidates require a process or comparison group with at least three source facts.`,
     );
   }
-  const sourceCharacters = source.facts.reduce((total, fact) => total + fact.text.length, 0);
-  const density = source.facts.length <= 2 && sourceCharacters <= 180 ? "low" : source.facts.length <= 6 && sourceCharacters <= 600 ? "medium" : "high";
+  const density = projectGroundedDensity(source.facts);
   const blueprint = pageBlueprintSchema.parse({
     version: 1,
     pageNumber: context.pageNumber,

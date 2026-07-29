@@ -24,6 +24,7 @@ import { materializeSlideSpec } from "../services/page-blueprint-builder.js";
 import { selectTemplate } from "../services/template-selector.js";
 import { solveTemplateSlots, type TemplateSlotSolution } from "../services/template-slot-solver.js";
 import type { DeckStoreApi } from "./deck-store.js";
+import { validatePlanAgainstProfiles } from "../services/plan-profile-validator.js";
 
 type PlanDeckInput = ReturnType<typeof planDeckInputSchema.parse>;
 type PlanDeckOutput = ReturnType<typeof planDeckOutputSchema.parse>;
@@ -340,19 +341,6 @@ function selectProfilePlan(
 
 function templateMatch(candidate: CandidatePlan): DeckTemplateMatch {
   const semanticItemCapacity = candidate.profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
-  const capabilityEvidence = {
-    templateSlug: candidate.profile.slug,
-    themeId: candidate.profile.themeId,
-    profileVersion: candidate.profile.version,
-    blockCapacity: candidate.profile.blockCapacity,
-    semanticItemCapacity,
-    effectiveItemCapacity: candidate.grounded.displayPlan.targetBudget.itemCapacity,
-    effectiveMaxCharsPerItem: candidate.grounded.displayPlan.targetBudget.maxCharsPerItem,
-    minimumBodyFontPt: candidate.profile.minimumBodyFontPt,
-    maxRasterAreaRatio: candidate.profile.maxRasterAreaRatio,
-    pageBindings: candidate.pageBindings,
-    metadataBindings: candidate.metadataBindings.map(({ field, tag, maxChars }) => ({ field, tag, maxChars })),
-  };
   return {
     themeId: candidate.profile.themeId,
     profileVersion: candidate.profile.version,
@@ -367,7 +355,8 @@ function templateMatch(candidate: CandidatePlan): DeckTemplateMatch {
     maxRasterAreaRatio: candidate.profile.maxRasterAreaRatio,
     pageBindings: candidate.pageBindings,
     metadataBindings: candidate.metadataBindings,
-    profileCapabilityHash: hashCanonical(capabilityEvidence),
+    profileSnapshot: candidate.profile,
+    profileCapabilityHash: hashCanonical(candidate.profile),
     assignments: candidate.solution.assignments,
     capacityUse: candidate.solution.capacityUse,
     transformations: candidate.solution.transformations,
@@ -382,7 +371,12 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
   const sourceText = input.sourceMarkdown ?? input.sourceText;
   if (!sourceText) planningError("Deck source string is missing", "Provide exactly one sourceMarkdown or sourceText string.");
   const active = await deps.deckStore.createOrResumePlan({ requestId: input.requestId, canonicalInput: input });
-  if (active.plan !== undefined) return planDeckOutputSchema.parse(active.plan);
+  if (active.plan !== undefined) {
+    const resumed = planDeckOutputSchema.parse(active.plan);
+    const validation = validatePlanAgainstProfiles(resumed.plannedDeck, deps.profiles);
+    if (!validation.passed) planningError("Persisted plan profile capabilities no longer match the loaded catalog", validation.issues.join("; "));
+    return resumed;
+  }
 
   const partitions = deps.partitionDeckSource({ sourceText, pageNumbers: input.pageNumbers });
   const slides = partitions.map((partition, pageIndex) => {
@@ -409,6 +403,10 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
     pageNumbers: input.pageNumbers,
     slides,
   });
+  const profileValidation = validatePlanAgainstProfiles(plannedDeck, deps.profiles);
+  if (!profileValidation.passed) {
+    planningError("Planned deck profile capabilities do not match the loaded catalog", profileValidation.issues.join("; "));
+  }
   const assets = slides.flatMap((slide) => slide.plannedSpec.assets);
   const output = planDeckOutputSchema.parse({
     plannedDeck,

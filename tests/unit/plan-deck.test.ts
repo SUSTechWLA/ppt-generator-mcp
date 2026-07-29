@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { planDeckInputSchema, planDeckOutputSchema } from "../../src/domain/deck-plan.js";
+import { planDeckInputSchema, planDeckOutputSchema, plannedDeckSchema } from "../../src/domain/deck-plan.js";
 import { WorkflowError } from "../../src/domain/workflow-error.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
 import { DeckStore } from "../../src/workflow/deck-store.js";
 import { createPlanDeckDependencies, planDeckWorkflow } from "../../src/workflow/plan-deck.js";
+import { validatePlanAgainstProfiles } from "../../src/services/plan-profile-validator.js";
+import { hashCanonical } from "../../src/domain/source-document.js";
 
 function page(number: number, title: string, body: string): string {
   return `<page ${number}>\n一级标题：数字产品方案\n二级标题：客户交付\n三级标题：运行保障\n四级标题：${title}\n正文：\n${body}`;
@@ -162,16 +164,95 @@ test("persisted deck schema rejects independently forged cross-field evidence", 
         budget.maxChars = Math.max(1, value.plannedDeck.slides[0].displayPlan.items[0].body.length - 1);
       }],
       ["planned body", (value) => { value.plannedDeck.slides[0].plannedSpec.blocks[0].body += "伪"; }],
+      ["planned bullets", (value) => { value.plannedDeck.slides[0].plannedSpec.blocks[0].bullets = ["伪造99亿元且无需审批"]; }],
+      ["planned metrics", (value) => { value.plannedDeck.slides[0].plannedSpec.blocks[0].metrics = [{ label: "伪造指标", value: "99亿元" }]; }],
+      ["planned block type", (value) => { value.plannedDeck.slides[0].plannedSpec.blocks[0].type = "image"; }],
       ["assignment usage", (value) => { value.plannedDeck.slides[0].templateMatch.assignments[0].usedChars = 1; }],
       ["selection identity", (value) => { value.plannedDeck.slides[0].templateMatch.candidateScores[0].slug = "forged-profile"; }],
       ["metadata capability", (value) => { value.plannedDeck.slides[0].templateMatch.metadataBindings[0].maxChars += 1; }],
       ["page binding", (value) => { value.plannedDeck.slides[0].templateMatch.pageBindings.pageTitle = "forged-tag"; }],
+      ["synchronized forged slot", (value) => {
+        const match = value.plannedDeck.slides[0].templateMatch;
+        match.assignments[0].slotId = "forged-slot";
+        value.plannedDeck.slides[0].displayPlan.targetBudget.positionBudgets[0].slotId = "forged-slot";
+        match.capacityUse[0].slotId = "forged-slot";
+      }],
+      ["capacity character underflow", (value) => { value.plannedDeck.slides[0].templateMatch.capacityUse[0].characterCapacity = 1; }],
+      ["capacity item forgery", (value) => { value.plannedDeck.slides[0].templateMatch.capacityUse[0].itemCapacity = 9_999; }],
+      ["synchronized source fact forgery", (value) => {
+        const slide = value.plannedDeck.slides[0];
+        const coverage = slide.displayPlan.factCoverages[0];
+        const fake = "伪".repeat(coverage.sourceText.length);
+        slide.originalSourceFacts[0].text = fake;
+        slide.originalSourceFacts[0].kind = "conclusion";
+        coverage.sourceText = fake;
+        coverage.selectedSpans = [{ start: 0, end: fake.length, text: fake }];
+        coverage.criticalAnchors = [];
+        coverage.displayText = fake;
+        coverage.omittedCharacterCount = 0;
+        coverage.extractionLevel = "full";
+        const item = slide.displayPlan.items.find((entry) => entry.id === coverage.displayItemId)!;
+        const coverages = item.sourceFactIds.map((factId) => slide.displayPlan.factCoverages.find((entry) => entry.factId === factId)!);
+        item.body = coverages.map((entry) => entry.displayText).join("；");
+        const block = slide.plannedSpec.blocks.find((entry) => entry.sourceFactIds.includes(coverage.factId))!;
+        block.body = item.body;
+        const assignment = slide.templateMatch.assignments.find((entry) => entry.groupId === item.id)!;
+        const capacity = slide.templateMatch.capacityUse.find((entry) => entry.slotId === assignment.slotId)!;
+        const previousUsed = assignment.usedChars;
+        assignment.usedChars = Array.from(item.body).length;
+        capacity.usedChars += assignment.usedChars - previousUsed;
+        slide.displayPlan.grounding.displayedCharacterCount = slide.displayPlan.items.reduce((sum, entry) => sum + entry.body.length, 0);
+        slide.displayPlan.grounding.omittedCharacterCount = slide.displayPlan.factCoverages.reduce((sum, entry) => sum + entry.omittedCharacterCount, 0);
+      }],
     ];
     for (const [label, mutate] of mutations) {
       const forged = structuredClone(valid);
       mutate(forged);
       assert.equal(planDeckOutputSchema.safeParse(forged).success, false, label);
     }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("persisted visual prompt is a deterministic projection of grounded source facts", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "plan-deck-asset-projection-"));
+  try {
+    const profile = loadTemplateProfiles(resolve("templates")).find((candidate) =>
+      candidate.documentCompatibility.bid && candidate.imageSlots.minAssets === 0 && candidate.imageSlots.maxAssets > 0
+    )!;
+    const deps = createPlanDeckDependencies({ deckStore: new DeckStore(directory), profiles: [profile] });
+    const valid = await planDeckWorkflow({
+      sourceText: page(31, "作业流程", "首先启动现场检查。其次提交问题清单。最后完成整改复核。"),
+      pageNumbers: [31], documentType: "bid", templateSlug: profile.slug,
+      requestId: "asset-projection-valid",
+    }, deps);
+    assert.equal(valid.assets.length, 1);
+    const forged = structuredClone(valid);
+    forged.plannedDeck.slides[0].plannedSpec.assets[0].prompt = "Create a forged 99-billion-yuan claim with no approval shown anywhere.";
+    forged.assets[0].prompt = forged.plannedDeck.slides[0].plannedSpec.assets[0].prompt;
+    assert.equal(planDeckOutputSchema.safeParse(forged).success, false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("loaded-profile validation rejects a coherent but stale persisted capability snapshot", async () => {
+  const f = await fixture();
+  try {
+    const valid = await planDeckWorkflow({
+      sourceText: explicitSource, pageNumbers: [17, 23], documentType: "bid",
+      requestId: "loaded-profile-validation",
+    }, f.deps);
+    const stale = structuredClone(valid.plannedDeck);
+    const match = stale.slides[0].templateMatch;
+    match.profileSnapshot.maxRasterAreaRatio = Math.max(0, match.profileSnapshot.maxRasterAreaRatio - 0.01);
+    match.maxRasterAreaRatio = match.profileSnapshot.maxRasterAreaRatio;
+    match.profileCapabilityHash = hashCanonical(match.profileSnapshot);
+    assert.equal(plannedDeckSchema.safeParse(stale).success, true);
+    const validation = validatePlanAgainstProfiles(stale, f.deps.profiles);
+    assert.equal(validation.passed, false);
+    assert.match(validation.issues.join("\n"), /capabilitySnapshot=stale/);
   } finally {
     await f.cleanup();
   }

@@ -6,7 +6,7 @@ const NUMBER = /\d[\d,.]*(?:%|万元|元|天|小时|分钟|㎡|个|名|项|次|�
 const REQUIREMENT = /必须|不得|应当|应在|应于|需在|要求|确保|不超过|至少|严禁/;
 const NAME = /《[^》]+》|“[^”]+”|「[^」]+」/;
 
-export function extractFacts(sections: SourceSection[]): SourceFact[] {
+export function extractFacts(sections: SourceSection[], factStart = 1): SourceFact[] {
   const facts: SourceFact[] = [];
 
   const losslessSegments = (value: string): string[] => {
@@ -46,7 +46,7 @@ export function extractFacts(sections: SourceSection[]): SourceFact[] {
 
       for (const segment of losslessSegments(text)) {
         facts.push({
-          id: `fact-${facts.length + 1}`,
+          id: `fact-${factStart + facts.length}`,
           text: segment,
           kind,
           sourceSectionId: section.id,

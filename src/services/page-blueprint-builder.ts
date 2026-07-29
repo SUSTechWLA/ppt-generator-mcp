@@ -5,7 +5,8 @@ import {
   type PageContentGroup,
   type SemanticRole,
 } from "../domain/page-blueprint.js";
-import { slideSpecSchema, type SlideBlockType, type SlideSpec } from "../domain/slide-spec.js";
+import type { SlideSpec } from "../domain/slide-spec.js";
+import { projectBlueprintSlideSpec } from "../domain/slide-projection.js";
 import {
   sourceDocumentSchema,
   type SourceDocument,
@@ -268,67 +269,9 @@ export function buildPageBlueprint(
   });
 }
 
-function blockTypeFor(role: SemanticRole): SlideBlockType {
-  if (role === "metric") return "metric";
-  if (role === "process") return "process";
-  if (role === "comparison") return "table";
-  if (role === "visual") return "image";
-  return "text";
-}
-
-function metricValues(body: string): Array<{ label: string; value: string }> {
-  const values = body.match(new RegExp(METRIC_CUE.source, "g")) ?? [];
-  return values.slice(0, 6).map((value) => ({
-    label: "正文指标",
-    value: value.slice(0, 30),
-  }));
-}
-
-function slideTitle(title: string): string {
-  const compact = title.trim().slice(0, 40);
-  return compact.length >= 4 ? compact : `${compact}概览`.slice(0, 40);
-}
-
 export function materializeSlideSpec(rawBlueprint: PageBlueprint): SlideSpec {
   const blueprint = pageBlueprintSchema.parse(rawBlueprint);
-  const blockIdByGroup = new Map<string, string>();
-  const blocks = blueprint.groups.map((group, index) => {
-    const blockId = `block-${index + 1}`;
-    blockIdByGroup.set(group.id, blockId);
-    return {
-      id: blockId,
-      type: blockTypeFor(group.role),
-      title: group.title.slice(0, 30),
-      body: group.body,
-      bullets: [],
-      metrics: metricValues(group.body),
-      sourceFactIds: group.sourceFactIds,
-      semanticRole: group.role,
-    };
-  });
-  const assets = blueprint.assets.map((asset) => ({
-    id: asset.id,
-    type: "image" as const,
-    blockId: blockIdByGroup.get(asset.groupId) ?? "",
-    prompt: asset.prompt,
-    alt: asset.alt,
-    sourceFactIds: asset.sourceFactIds,
-    width: asset.width,
-    height: asset.height,
-  }));
-
-  const spec = slideSpecSchema.parse({
-    title: slideTitle(blueprint.title),
-    conclusion: "本页内容按原文事实顺序组织呈现。",
-    blocks,
-    assets,
-    sourceFactIds: blueprint.sourceFactIds,
-    designIntent: {
-      tone: "professional",
-      density: blueprint.density,
-      visualRatio: assets.length === 0 ? 0 : 0.18,
-    },
-  });
+  const spec = projectBlueprintSlideSpec(blueprint);
 
   const materializedFactIds = spec.blocks.flatMap((block) => block.sourceFactIds);
   if (materializedFactIds.length !== blueprint.sourceFactIds.length

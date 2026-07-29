@@ -6,6 +6,7 @@ export const criticalAnchorKindSchema = z.enum([
   "negation",
   "time",
   "name",
+  "subject",
   "approval",
   "condition",
   "obligation",
@@ -34,16 +35,20 @@ const PATTERNS: Array<{ kind: CriticalAnchorKind; expression: RegExp }> = [
 export function extractCanonicalAnchors(text: string): CanonicalCriticalAnchor[] {
   const anchors: CanonicalCriticalAnchor[] = [];
   const seen = new Set<string>();
+  const addAnchor = (kind: CriticalAnchorKind, start: number, end: number): void => {
+    if (end <= start) return;
+    const key = `${kind}:${start}:${end}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    anchors.push({ kind, start, end, text: text.slice(start, end) });
+  };
   for (const { kind, expression } of PATTERNS) {
     expression.lastIndex = 0;
     for (const match of text.matchAll(expression)) {
       const start = match.index;
       const value = match[0];
       if (start === undefined || !value) continue;
-      const key = `${kind}:${start}:${start + value.length}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      anchors.push({ kind, start, end: start + value.length, text: value });
+      addAnchor(kind, start, start + value.length);
     }
   }
   const numericExpression = /(?:\d[\d,.]*|[零一二三四五六七八九十百千万两]+)/gu;
@@ -55,10 +60,47 @@ export function extractCanonicalAnchors(text: string): CanonicalCriticalAnchor[]
     if (!associated?.[1] || associated.index === undefined) continue;
     const relativeUnitStart = associated[0].lastIndexOf(associated[1]);
     const start = tailStart + associated.index + relativeUnitStart;
-    const key = `unit:${start}:${start + associated[1].length}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    anchors.push({ kind: "unit", start, end: start + associated[1].length, text: associated[1] });
+    addAnchor("unit", start, start + associated[1].length);
+  }
+
+  // Unknown Chinese proper names cannot be recognized reliably from suffixes.
+  // Preserve the structural subject before the first predicate instead.
+  const firstClauseEnd = text.search(/[，,；;。！？!?]/u);
+  const firstClause = text.slice(0, firstClauseEnd >= 0 ? firstClauseEnd : text.length);
+  const predicate = firstClause.match(/(?:作为|承担|负责|提供|覆盖|实施|开展|执行|完成|启动|到场|提交|审核|审批|保留|配置|设置|建立|形成|实现|保障|确保|要求|必须|应当|应在|应于|须|需在|将|位于|坐落于|包括|包含|列举|分别为|(?:应|需|可)(?=在|于|按|每日|每周|每月|及时|立即|确保|完成|提供|开展|执行|配置|保持|建立))/u);
+  let hasStructuralSubject = false;
+  if (predicate?.index !== undefined && predicate.index > 0) {
+    const rawPrefix = firstClause.slice(0, predicate.index);
+    const leading = rawPrefix.match(/^\s*(?:此外|另外|同时|其中|上述|前述)?\s*/u)?.[0].length ?? 0;
+    let start = leading;
+    let end = predicate.index;
+    while (start < end && /\s/u.test(text[start])) start += 1;
+    while (end > start && /\s/u.test(text[end - 1])) end -= 1;
+    if (end > start && /[\p{Script=Han}A-Za-z0-9]/u.test(text.slice(start, end))) {
+      addAnchor("subject", start, end);
+      hasStructuralSubject = true;
+    }
+  }
+  if (!hasStructuralSubject) {
+    const lexicalPrefix = firstClause.match(/^\s*(?:此外|另外|同时|其中|上述|前述)?\s*([\p{Script=Han}A-Za-z0-9][\p{Script=Han}A-Za-z0-9·_-]{0,11})/u);
+    if (lexicalPrefix?.[1] && lexicalPrefix.index !== undefined) {
+      const start = lexicalPrefix.index + lexicalPrefix[0].lastIndexOf(lexicalPrefix[1]);
+      addAnchor("subject", start, start + lexicalPrefix[1].length);
+    }
+  }
+
+  // Enumeration/location structures can carry names outside the leading
+  // subject. Preserve each complete short clause rather than guessing NER.
+  const structuralClause = /(?:包括|包含|列举|分别为|位于|坐落于|覆盖范围|服务范围)/u;
+  let clauseStart = 0;
+  for (let index = 0; index <= text.length; index += 1) {
+    if (index < text.length && !/[，,；;。！？!?]/u.test(text[index])) continue;
+    let start = clauseStart;
+    let end = index;
+    while (start < end && /\s/u.test(text[start])) start += 1;
+    while (end > start && /\s/u.test(text[end - 1])) end -= 1;
+    if (end > start && structuralClause.test(text.slice(start, end))) addAnchor("subject", start, end);
+    clauseStart = index + 1;
   }
   return anchors.sort((left, right) => left.start - right.start || left.end - right.end || left.kind.localeCompare(right.kind));
 }

@@ -2,8 +2,14 @@ import * as z from "zod/v4";
 import { documentTypeSchema, pageMetadataSchema } from "./document-context.js";
 import { displayPlanSchema } from "./display-plan.js";
 import { generateSlideOutputSchema } from "./quality-report.js";
-import { externalAssetInputSchema, hashCanonical, qualitySettingsSchema, sourceFactSchema, sourceSectionInputSchema } from "./source-document.js";
+import { externalAssetInputSchema, hashCanonical, qualitySettingsSchema, sourceFactSchema, sourceSectionInputSchema, type SourceSection } from "./source-document.js";
 import { assetSpecSchema, slideSpecSchema } from "./slide-spec.js";
+import { templateProfileSchema } from "./template-profile.js";
+import { effectiveProfilePositions, orderedProfileSlots } from "./profile-capability.js";
+import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, projectGroundedVisualIntents, projectSlideSpec } from "./slide-projection.js";
+import { extractFacts } from "../services/fact-extractor.js";
+import { pageBlueprintSchema } from "./page-blueprint.js";
+import { solveTemplateSlots } from "../services/template-slot-solver.js";
 
 const sourceChoice = {
   sourceMarkdown: z.string().trim().min(20).max(120_000).optional(),
@@ -102,6 +108,7 @@ export const deckTemplateMatchSchema = z.object({
   maxRasterAreaRatio: z.number().min(0).max(1),
   pageBindings: persistedPageBindingsSchema,
   metadataBindings: z.array(metadataBindingEvidenceSchema).min(9).max(11),
+  profileSnapshot: templateProfileSchema,
   profileCapabilityHash: z.string().regex(/^[0-9a-f]{64}$/),
   assignments: z.array(slotAssignmentSchema),
   capacityUse: z.array(slotCapacityUseSchema),
@@ -117,6 +124,10 @@ export const deckTemplateMatchSchema = z.object({
 
 function orderedEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function canonicalEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function metadataExpectedValues(slide: z.infer<typeof deckSlidePlanSchema>): Record<z.infer<typeof metadataFieldSchema>, string[]> {
@@ -138,20 +149,7 @@ function metadataExpectedValues(slide: z.infer<typeof deckSlidePlanSchema>): Rec
 }
 
 function capabilityFingerprint(slide: z.infer<typeof deckSlidePlanSchema>): string {
-  const match = slide.templateMatch;
-  return hashCanonical({
-    templateSlug: slide.templateSlug,
-    themeId: match.themeId,
-    profileVersion: match.profileVersion,
-    blockCapacity: match.blockCapacity,
-    semanticItemCapacity: match.semanticItemCapacity,
-    effectiveItemCapacity: match.effectiveItemCapacity,
-    effectiveMaxCharsPerItem: match.effectiveMaxCharsPerItem,
-    minimumBodyFontPt: match.minimumBodyFontPt,
-    maxRasterAreaRatio: match.maxRasterAreaRatio,
-    pageBindings: match.pageBindings,
-    metadataBindings: match.metadataBindings.map(({ field, tag, maxChars }) => ({ field, tag, maxChars })),
-  });
+  return hashCanonical(slide.templateMatch.profileSnapshot);
 }
 
 export const deckSlidePlanSchema = z.object({
@@ -192,6 +190,27 @@ export const deckSlidePlanSchema = z.object({
     || slide.templateMatch.minimumBodyFontPt !== slide.displayPlan.targetBudget.minimumBodyFontPt) {
     context.addIssue({ code: "custom", message: "Template match capability evidence must equal the display target budget", path: ["templateMatch"] });
   }
+  const profile = slide.templateMatch.profileSnapshot;
+  const positions = effectiveProfilePositions(profile);
+  const semanticItemCapacity = profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
+  if (profile.slug !== slide.templateSlug
+    || profile.themeId !== slide.templateMatch.themeId
+    || profile.version !== slide.templateMatch.profileVersion
+    || profile.blockCapacity !== slide.templateMatch.blockCapacity
+    || semanticItemCapacity !== slide.templateMatch.semanticItemCapacity
+    || profile.minimumBodyFontPt !== slide.templateMatch.minimumBodyFontPt
+    || profile.maxRasterAreaRatio !== slide.templateMatch.maxRasterAreaRatio
+    || !canonicalEqual(profile.pageBindings, slide.templateMatch.pageBindings)) {
+    context.addIssue({ code: "custom", message: "Template identity and capabilities must equal the persisted strict profile snapshot", path: ["templateMatch", "profileSnapshot"] });
+  }
+  const expectedEffectiveItems = Math.min(profile.blockCapacity, positions.length);
+  if (slide.displayPlan.targetBudget.blockCapacity !== profile.blockCapacity
+    || slide.displayPlan.targetBudget.semanticPositionCapacity !== positions.length
+    || slide.displayPlan.targetBudget.factBindingPositionCapacity !== positions.length
+    || slide.displayPlan.targetBudget.itemCapacity !== expectedEffectiveItems
+    || slide.templateMatch.effectiveItemCapacity !== expectedEffectiveItems) {
+    context.addIssue({ code: "custom", message: "Display capacities must be derived from the strict profile snapshot", path: ["displayPlan", "targetBudget"] });
+  }
   if (slide.originalSourceSectionIds.length !== slide.sourceSections.length
     || new Set(slide.originalSourceSectionIds).size !== slide.originalSourceSectionIds.length) {
     context.addIssue({ code: "custom", message: "Original section IDs must map source sections exactly once", path: ["originalSourceSectionIds"] });
@@ -208,7 +227,10 @@ export const deckSlidePlanSchema = z.object({
   }
   for (const [index, item] of slide.displayPlan.items.entries()) {
     const block = slide.plannedSpec.blocks[index];
+    const itemFacts = item.sourceFactIds.map((factId) => factsById.get(factId)).filter((fact): fact is NonNullable<typeof fact> => Boolean(fact));
+    const expectedRole = itemFacts.length > 0 ? groundedRoleForFacts(itemFacts) : undefined;
     if (!block || block.id !== `block-${index + 1}` || item.id !== `group-${index + 1}`
+      || item.role !== expectedRole || item.title !== groundedTitleForRole(item.role)
       || block.semanticRole !== item.role || block.title !== item.title || block.body !== item.body
       || !orderedEqual(block.sourceFactIds, item.sourceFactIds)) {
       context.addIssue({ code: "custom", message: "Display items and planned blocks must be exact deterministic projections", path: ["plannedSpec", "blocks", index] });
@@ -220,6 +242,15 @@ export const deckSlidePlanSchema = z.object({
       || Array.from(item.body).length > budget.maxChars || assignment.role !== item.role
       || !orderedEqual(assignment.sourceFactIds, item.sourceFactIds)) {
       context.addIssue({ code: "custom", message: "Position budget and slot assignment evidence must match visible content", path: ["templateMatch", "assignments"] });
+    }
+    const profilePosition = budget && positions.find((position) =>
+      position.slot.id === budget.slotId && position.itemIndex === budget.itemIndex
+    );
+    if (!profilePosition || !assignment
+      || budget?.maxChars !== profilePosition.maxChars
+      || assignment.maxChars !== profilePosition.slot.maxCharsPerItem
+      || !profilePosition.slot.acceptedRoles.includes(item.role)) {
+      context.addIssue({ code: "custom", message: "Position and assignment must reference a compatible profile snapshot slot", path: ["displayPlan", "targetBudget", "positionBudgets", index] });
     }
   }
   if (slide.displayPlan.targetBudget.positionBudgets.length !== slide.displayPlan.items.length
@@ -238,16 +269,29 @@ export const deckSlidePlanSchema = z.object({
     context.addIssue({ code: "custom", message: "Display target budget must use the tightest persisted capabilities", path: ["displayPlan", "targetBudget"] });
   }
   const capacitySlots = new Set(slide.templateMatch.capacityUse.map((capacity) => capacity.slotId));
+  const orderedSlots = orderedProfileSlots(profile);
   if (capacitySlots.size !== slide.templateMatch.capacityUse.length
-    || slide.templateMatch.assignments.some((assignment) => !capacitySlots.has(assignment.slotId))) {
-    context.addIssue({ code: "custom", message: "Capacity evidence must cover every assigned semantic slot", path: ["templateMatch", "capacityUse"] });
+    || slide.templateMatch.assignments.some((assignment) => !capacitySlots.has(assignment.slotId))
+    || slide.templateMatch.capacityUse.length !== orderedSlots.length
+    || slide.templateMatch.capacityUse.some((capacity, index) => capacity.slotId !== orderedSlots[index]?.id)) {
+    context.addIssue({ code: "custom", message: "Capacity evidence must cover every profile slot exactly once in canonical order", path: ["templateMatch", "capacityUse"] });
   }
   for (const [index, capacity] of slide.templateMatch.capacityUse.entries()) {
+    const slot = orderedSlots[index];
     const assigned = slide.templateMatch.assignments.filter((assignment) => assignment.slotId === capacity.slotId);
     if (capacity.usedItems !== assigned.length
       || capacity.usedChars !== assigned.reduce((total, assignment) => total + assignment.usedChars, 0)
-      || capacity.itemCapacity < capacity.usedItems) {
+      || !slot || capacity.slotId !== slot.id
+      || capacity.itemCapacity !== slot.itemCapacity
+      || capacity.characterCapacity !== slot.itemCapacity * slot.maxCharsPerItem
+      || capacity.usedItems > capacity.itemCapacity
+      || capacity.usedChars > capacity.characterCapacity) {
       context.addIssue({ code: "custom", message: "Slot capacity totals must equal assignment evidence", path: ["templateMatch", "capacityUse", index] });
+    }
+  }
+  for (const [index, slot] of orderedSlots.entries()) {
+    if (slot.required && !slide.templateMatch.assignments.some((assignment) => assignment.slotId === slot.id)) {
+      context.addIssue({ code: "custom", message: "Every required profile slot must receive an assignment", path: ["templateMatch", "profileSnapshot", "semanticSlots", index] });
     }
   }
   const expectedMetadata = metadataExpectedValues(slide);
@@ -262,7 +306,9 @@ export const deckSlidePlanSchema = z.object({
   }
   for (const [index, binding] of slide.templateMatch.metadataBindings.entries()) {
     if (slide.templateMatch.pageBindings[binding.field] !== binding.tag
-      || !orderedEqual(binding.values, expectedMetadata[binding.field])) {
+      || !orderedEqual(binding.values, expectedMetadata[binding.field])
+      || profile.pageBindings[binding.field] !== binding.tag
+      || profile.maxCharsBySlot[binding.tag] !== binding.maxChars) {
       context.addIssue({ code: "custom", message: "Metadata evidence must equal emitted page values and tags", path: ["templateMatch", "metadataBindings", index] });
     }
   }
@@ -272,6 +318,27 @@ export const deckSlidePlanSchema = z.object({
   }
   if (slide.templateMatch.profileCapabilityHash !== capabilityFingerprint(slide)) {
     context.addIssue({ code: "custom", message: "Profile capability evidence fingerprint mismatch", path: ["templateMatch", "profileCapabilityHash"] });
+  }
+  const expectedVisualIntents = projectGroundedVisualIntents({
+    pageNumber: slide.page.number,
+    title: slide.page.subsectionTitle,
+    groups: slide.displayPlan.items,
+    sourceFacts: slide.originalSourceFacts,
+    maxAssets: profile.imageSlots.maxAssets,
+  });
+  if (expectedVisualIntents.length < profile.imageSlots.minAssets
+    || expectedVisualIntents.length > profile.imageSlots.maxAssets) {
+    context.addIssue({ code: "custom", message: "Deterministic grounded assets do not satisfy the profile image cardinality", path: ["plannedSpec", "assets"] });
+  }
+  const expectedSpec = projectSlideSpec({
+    title: slide.page.subsectionTitle,
+    density: projectGroundedDensity(slide.originalSourceFacts),
+    groups: slide.displayPlan.items,
+    assets: expectedVisualIntents,
+    sourceFactIds: slide.originalSourceFactIds,
+  });
+  if (!canonicalEqual(slide.plannedSpec, expectedSpec)) {
+    context.addIssue({ code: "custom", message: "Planned spec must be the complete deterministic projection of grounded items and assets", path: ["plannedSpec"] });
   }
   if (slide.plannedSpec.assets.some((asset) => !asset.id.startsWith(`p${slide.page.number}-`))) {
     context.addIssue({ code: "custom", message: "Every planned asset must be scoped to its page", path: ["plannedSpec", "assets"] });
@@ -299,6 +366,78 @@ export const plannedDeckSchema = z.object({
   if (deck.preferredThemeId && deck.slides.some((slide) => slide.templateMatch.themeId !== deck.preferredThemeId)) {
     context.addIssue({ code: "custom", message: "Every selected profile must belong to the preferred theme", path: ["slides"] });
   }
+  let nextSectionId = 1;
+  let nextFactId = 1;
+  for (const [slideIndex, slide] of deck.slides.entries()) {
+    const expectedSectionIds = slide.sourceSections.map((_, index) => `section-${nextSectionId + index}`);
+    const canonicalSections: SourceSection[] = slide.sourceSections.map((section, index) => ({
+      id: expectedSectionIds[index],
+      heading: section.heading,
+      body: section.body,
+      keyPoints: section.keyPoints ?? [],
+      order: index,
+    }));
+    const expectedFacts = extractFacts(canonicalSections, nextFactId);
+    if (!orderedEqual(slide.originalSourceSectionIds, expectedSectionIds)
+      || !canonicalEqual(slide.originalSourceFacts, expectedFacts)
+      || !orderedEqual(slide.originalSourceFactIds, expectedFacts.map((fact) => fact.id))
+      || canonicalSections.length !== 1
+      || slide.page.subsectionTitle !== canonicalSections[0]?.heading) {
+      context.addIssue({
+        code: "custom",
+        message: "Original facts must be deterministically re-extracted from immutable source sections and global source order",
+        path: ["slides", slideIndex, "originalSourceFacts"],
+      });
+    }
+    nextSectionId += canonicalSections.length;
+    nextFactId += expectedFacts.length;
+
+    const profile = slide.templateMatch.profileSnapshot;
+    const compatible = profile.documentCompatibility[deck.documentType];
+    if (!compatible) {
+      context.addIssue({ code: "custom", message: "Persisted profile does not support the deck document type", path: ["slides", slideIndex, "templateMatch", "profileSnapshot"] });
+    }
+    const factsById = new Map(slide.originalSourceFacts.map((fact) => [fact.id, fact]));
+    const groups = slide.displayPlan.items.map((item) => ({
+      ...item,
+      sourceSectionIds: [...new Set(item.sourceFactIds.map((factId) => factsById.get(factId)?.sourceSectionId).filter((id): id is string => Boolean(id)))],
+    }));
+    const assets = projectGroundedVisualIntents({
+      pageNumber: slide.page.number,
+      title: slide.page.subsectionTitle,
+      groups,
+      sourceFacts: slide.originalSourceFacts,
+      maxAssets: profile.imageSlots.maxAssets,
+    });
+    const blueprintResult = pageBlueprintSchema.safeParse({
+      version: 1,
+      pageNumber: slide.page.number,
+      title: slide.page.subsectionTitle,
+      documentType: deck.documentType,
+      groups,
+      sourceFactIds: slide.originalSourceFactIds,
+      density: projectGroundedDensity(slide.originalSourceFacts),
+      visualNeed: assets.length > 0 ? "supporting" : "none",
+      assets,
+    });
+    if (!blueprintResult.success) {
+      context.addIssue({ code: "custom", message: "Persisted grounded items cannot rebuild a valid canonical blueprint", path: ["slides", slideIndex, "displayPlan"] });
+      continue;
+    }
+    const expectedSolution = solveTemplateSlots(blueprintResult.data, profile);
+    const actualSolution = {
+      feasible: slide.templateMatch.unmatched.length === 0 && slide.templateMatch.unrepresentedFactIds.length === 0,
+      assignments: slide.templateMatch.assignments,
+      capacityUse: slide.templateMatch.capacityUse,
+      transformations: slide.templateMatch.transformations,
+      unmatched: slide.templateMatch.unmatched,
+      representedFactIds: slide.templateMatch.representedFactIds,
+      unrepresentedFactIds: slide.templateMatch.unrepresentedFactIds,
+    };
+    if (!canonicalEqual(actualSolution, expectedSolution)) {
+      context.addIssue({ code: "custom", message: "Template assignments and capacity totals must equal the deterministic solver result", path: ["slides", slideIndex, "templateMatch"] });
+    }
+  }
 });
 
 export const planDeckOutputSchema = z.object({
@@ -312,6 +451,8 @@ export const planDeckOutputSchema = z.object({
     context.addIssue({ code: "custom", message: "Top-level assets must equal page-scoped planned assets", path: ["assets"] });
   }
 });
+
+export type PlannedDeck = z.infer<typeof plannedDeckSchema>;
 
 export const generateDeckInputSchema = z.object({
   deckPlanId: z.string().uuid(),

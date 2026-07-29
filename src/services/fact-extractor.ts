@@ -1,4 +1,5 @@
 import type { SourceFact, SourceSection } from "../domain/source-document.js";
+import { isSynthesizedKeyPointBody } from "./semantic-source-content.js";
 import { segmentSemanticText } from "./semantic-text-segmenter.js";
 
 const NUMBER = /\d[\d,.]*(?:%|万元|元|天|小时|分钟|㎡|个|名|项|次|年|月|日)?/;
@@ -10,7 +11,10 @@ export function extractFacts(sections: SourceSection[]): SourceFact[] {
   const seen = new Set<string>();
 
   for (const section of sections) {
-    const candidates = [section.body, ...section.keyPoints]
+    const semanticValues = isSynthesizedKeyPointBody(section)
+      ? section.keyPoints
+      : [section.body, ...section.keyPoints];
+    const candidates = semanticValues
       .flatMap((value) => segmentSemanticText(value).map((segment) => segment.text));
 
     for (const candidate of candidates) {

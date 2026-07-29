@@ -1,5 +1,6 @@
 import type { SourceDocument, SourceSection, SourceSectionInput } from "../domain/source-document.js";
 import { WorkflowError } from "../domain/workflow-error.js";
+import { isSynthesizedKeyPointBody } from "./semantic-source-content.js";
 import { segmentSemanticText } from "./semantic-text-segmenter.js";
 
 export interface PagePartition {
@@ -112,8 +113,7 @@ function unitsForSection(section: SourceSection, source: SourceDocument): Semant
   const seen = new Set<string>();
   let cursor = 0;
   const bodyParagraphs = paragraphs(section.body);
-  const bodyIsKeyPointJoin = section.keyPoints.length > 0
-    && normalizeSentence(section.body) === normalizeSentence(section.keyPoints.join("；"));
+  const bodyIsKeyPointJoin = isSynthesizedKeyPointBody(section);
 
   const appendUnit = (
     kind: UnitKind,
@@ -380,22 +380,7 @@ function draftForPart(group: SectionGroup, part: PagePart, partIndex: number): P
   };
 }
 
-function distanceToDraft(sourceSection: SourceSection, factText: string, draft: PageDraft): number {
-  const target = sourceSection.body.indexOf(factText);
-  const positions = draft.units
-    .filter((unit) => unit.sourceSectionId === sourceSection.id)
-    .map((unit) => {
-      if (target >= unit.start && target <= unit.end) return 0;
-      if (target < unit.start) return unit.start - target;
-      return target - unit.end;
-    });
-
-  return positions.length > 0 ? Math.min(...positions) : Number.POSITIVE_INFINITY;
-}
-
 function assignFactIds(source: SourceDocument, drafts: PageDraft[]): void {
-  const sectionsById = new Map(source.sections.map((section) => [section.id, section]));
-
   for (const fact of source.facts) {
     const matchingDraft = drafts.find((draft) => draft.originalSourceSectionIds.includes(fact.sourceSectionId)
       && draft.units.some((unit) => unit.sourceSectionId === fact.sourceSectionId && matchesFact(unit.text, fact.text)));
@@ -405,18 +390,10 @@ function assignFactIds(source: SourceDocument, drafts: PageDraft[]): void {
       continue;
     }
 
-    const sourceSection = sectionsById.get(fact.sourceSectionId);
-    const sameSectionDrafts = drafts.filter((draft) => draft.originalSourceSectionIds.includes(fact.sourceSectionId));
-    if (!sourceSection || sameSectionDrafts.length === 0) {
-      paginationError(
-        `Fact ${fact.id} cannot be mapped to a source partition`,
-        "Normalize the source again and ensure every fact has a source section.",
-      );
-    }
-
-    const nearestDraft = sameSectionDrafts.sort((left, right) => distanceToDraft(sourceSection, fact.text, left)
-      - distanceToDraft(sourceSection, fact.text, right))[0];
-    nearestDraft.originalSourceFactIds.push(fact.id);
+    paginationError(
+      `Fact ${fact.id} does not exactly match a semantic source unit`,
+      "Normalize the source again and ensure fact extraction and pagination use the same semantic boundaries.",
+    );
   }
 }
 

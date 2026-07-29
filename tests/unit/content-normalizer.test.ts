@@ -51,3 +51,23 @@ test("normalizes plain text without headings instead of crashing", () => {
   assert.equal(document.sections[0].heading, "正文");
   assert.ok(document.facts.length >= 2);
 });
+
+for (const scenario of [
+  {
+    name: "terminal punctuation",
+    sourceText: "# 清单\n- 重置设备。\n- 检查线路。",
+    facts: ["重置设备。", "检查线路。"],
+  },
+  {
+    name: "no terminal punctuation",
+    sourceText: "# 清单\n- 重置全部设备\n- 检查所有线路",
+    facts: ["重置全部设备", "检查所有线路"],
+  },
+] as const) {
+  test(`normalizes a bullet-only section from canonical key points with ${scenario.name}`, () => {
+    const document = normalizeSource({ sourceText: scenario.sourceText });
+
+    assert.equal(document.facts.length, 2);
+    assert.deepEqual(document.facts.map((fact) => fact.text), scenario.facts);
+  });
+}

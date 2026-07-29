@@ -5,6 +5,7 @@ import test from "node:test";
 import { WorkflowError } from "../../src/domain/workflow-error.js";
 import { normalizeSource } from "../../src/services/content-normalizer.js";
 import { paginateSource } from "../../src/services/semantic-paginator.js";
+import { segmentSemanticText } from "../../src/services/semantic-text-segmenter.js";
 
 const markdown = `### 项目人员配备要求响应
 必须配置1名固定项目对接人员，且不得随意变更。
@@ -122,6 +123,47 @@ test("paginator aligns ASCII semicolon list clauses with source facts", () => {
   );
 });
 
+for (const scenario of [
+  {
+    name: "terminal punctuation",
+    sourceText: "# 清单\n- 重置设备。\n- 检查线路。",
+    facts: ["重置设备。", "检查线路。"],
+  },
+  {
+    name: "no terminal punctuation",
+    sourceText: "# 清单\n- 重置全部设备\n- 检查所有线路",
+    facts: ["重置全部设备", "检查所有线路"],
+  },
+] as const) {
+  test(`paginator maps canonical bullet facts to their exact page-local units with ${scenario.name}`, () => {
+    const source = normalizeSource({ sourceText: scenario.sourceText });
+    const pages = paginateSource(source, [97, 98]);
+    const factsById = new Map(source.facts.map((fact) => [fact.id, fact.text]));
+
+    assert.deepEqual(source.facts.map((fact) => fact.text), scenario.facts);
+    assert.deepEqual(pages.map((page) => page.originalSourceFactIds), [["fact-1"], ["fact-2"]]);
+    for (const page of pages) {
+      const pageFactTexts = page.originalSourceFactIds.map((factId) => factsById.get(factId));
+      const pageUnitTexts = page.sourceSections.flatMap((section) => segmentSemanticText(section.body).map((segment) => segment.text));
+      assert.deepEqual(pageFactTexts, pageUnitTexts);
+    }
+  });
+}
+
+test("paginator rejects a fact that has no exact semantic unit instead of assigning the nearest page", () => {
+  const source = normalizeSource({
+    sections: [{ heading: "Checklist", body: "Inspect power. Inspect network." }],
+  });
+  const facts = source.facts.map((fact) => fact.id === "fact-2" ? { ...fact, text: "Unmatched fact." } : fact);
+
+  assert.throws(
+    () => paginateSource({ ...source, facts }, [99]),
+    (error: unknown) => error instanceof WorkflowError
+      && error.stage === "paginate_source"
+      && /does not exactly match a semantic source unit/.test(error.message),
+  );
+});
+
 test("paginator keeps protected ASCII periods out of fragment facts and pages", () => {
   const source = normalizeSource({
     sections: [{
@@ -230,6 +272,40 @@ const contextualPeriodCases = [
     body: "The U.S. Postal Service responds. The U.S. Response complete.",
     facts: ["The U.S. Postal Service responds.", "The U.S.", "Response complete."],
     pageNumbers: [201, 202, 203],
+  },
+  {
+    name: "company suffix chains and categorized proper-name continuations",
+    body: "Acme Co. Ltd. provides service. Acme Corp. International provides service. Acme Corp. Response complete.",
+    facts: [
+      "Acme Co. Ltd. provides service.",
+      "Acme Corp. International provides service.",
+      "Acme Corp.",
+      "Response complete.",
+    ],
+    pageNumbers: [201, 202, 203, 204],
+  },
+  {
+    name: "numbered street addresses with secondary units",
+    body: "Mail to 123 Main St. Suite 4. Mail to 8 Oak St. Unit 2. Mail to 10 Pine St. Response complete.",
+    facts: [
+      "Mail to 123 Main St. Suite 4.",
+      "Mail to 8 Oak St. Unit 2.",
+      "Mail to 10 Pine St.",
+      "Response complete.",
+    ],
+    pageNumbers: [201, 202, 203, 204],
+  },
+  {
+    name: "organizational adjectives after initialisms",
+    body: "The U.S. Federal policy applies. The U.S. Federal. Review complete. The U.S. Response pending.",
+    facts: [
+      "The U.S. Federal policy applies.",
+      "The U.S. Federal.",
+      "Review complete.",
+      "The U.S.",
+      "Response pending.",
+    ],
+    pageNumbers: [201, 202, 203, 204, 205],
   },
 ] as const;
 

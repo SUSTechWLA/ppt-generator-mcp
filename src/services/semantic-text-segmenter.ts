@@ -13,14 +13,42 @@ const QUOTE_PAIRS: Readonly<Record<string, string>> = {
   "《": "》",
 };
 
-// Generic English policy for period roles that cannot be resolved from punctuation alone.
+// Generic English categories for period roles that cannot be resolved from punctuation alone.
 const ENGLISH_PERIOD_POLICY = {
   titleAbbreviations: new Set(["dr", "mr", "mrs", "ms", "prof"]),
   labelAbbreviations: new Set(["eq", "fig", "no", "sec", "vol"]),
   companySuffixAbbreviations: new Set(["co", "corp", "inc", "llc", "ltd", "plc"]),
-  addressAbbreviations: new Set(["ft", "mt", "st"]),
+  placeNameAbbreviations: new Set(["ft", "mt", "st"]),
+  streetSuffixAbbreviations: new Set(["ave", "blvd", "ct", "hwy", "ln", "pkwy", "pl", "rd", "st"]),
+  secondaryAddressUnits: new Set(["apt", "apartment", "bldg", "building", "floor", "room", "suite", "unit"]),
   locationPrepositions: new Set(["at", "from", "in", "near", "to"]),
   continuationInitialisms: new Set(["eg", "ie"]),
+  organizationalGeographicAdjectives: new Set([
+    "central",
+    "eastern",
+    "federal",
+    "global",
+    "international",
+    "municipal",
+    "national",
+    "northern",
+    "provincial",
+    "regional",
+    "southern",
+    "state",
+    "western",
+    "worldwide",
+  ]),
+  companyNameContinuations: new Set([
+    "group",
+    "holdings",
+    "industries",
+    "partners",
+    "services",
+    "solutions",
+    "systems",
+    "technologies",
+  ]),
   organizationContinuations: new Set([
     "administration",
     "agency",
@@ -110,6 +138,16 @@ function isTitleCaseWord(value: string): boolean {
   return /^\p{Lu}[\p{L}\p{N}]*$/u.test(value);
 }
 
+function isAddressAbbreviation(abbreviation: string): boolean {
+  return ENGLISH_PERIOD_POLICY.placeNameAbbreviations.has(abbreviation)
+    || ENGLISH_PERIOD_POLICY.streetSuffixAbbreviations.has(abbreviation);
+}
+
+function hasNumberedStreetContext(value: string, abbreviationStart: number, segmentStart: number): boolean {
+  const prefix = value.slice(segmentStart, abbreviationStart);
+  return /(?:^|\s)\d+[\p{L}]?(?:[-/]\d+)?(?:\s+\p{Lu}[\p{L}\p{N}'-]*)+\s*$/u.test(prefix);
+}
+
 function isContextualNumberedMarker(value: string, index: number, segmentStart: number): boolean {
   let start = index;
   while (start > 0 && /\d/.test(value[start - 1])) start -= 1;
@@ -132,18 +170,29 @@ function isClosedClassAbbreviation(value: string, index: number, segmentStart: n
     return ENGLISH_PERIOD_POLICY.titleAbbreviations.has(abbreviation)
       || ENGLISH_PERIOD_POLICY.labelAbbreviations.has(abbreviation)
       || ENGLISH_PERIOD_POLICY.companySuffixAbbreviations.has(abbreviation)
-      || ENGLISH_PERIOD_POLICY.addressAbbreviations.has(abbreviation);
+      || isAddressAbbreviation(abbreviation);
   }
   if (ENGLISH_PERIOD_POLICY.titleAbbreviations.has(abbreviation)) return nextToken.length > 0;
   if (ENGLISH_PERIOD_POLICY.labelAbbreviations.has(abbreviation)) {
     return /^\d/.test(nextToken) || /^[A-Z]$/.test(nextToken);
   }
-  if (!ENGLISH_PERIOD_POLICY.addressAbbreviations.has(abbreviation) || !isTitleCaseWord(nextToken)) return false;
+  const normalizedNextToken = nextToken.toLowerCase();
+  if (ENGLISH_PERIOD_POLICY.companySuffixAbbreviations.has(abbreviation)) {
+    return ENGLISH_PERIOD_POLICY.companySuffixAbbreviations.has(normalizedNextToken)
+      || ENGLISH_PERIOD_POLICY.organizationalGeographicAdjectives.has(normalizedNextToken)
+      || ENGLISH_PERIOD_POLICY.companyNameContinuations.has(normalizedNextToken);
+  }
+  if (!isAddressAbbreviation(abbreviation) || !isTitleCaseWord(nextToken)) return false;
 
   const abbreviationStart = index - abbreviation.length;
-  if (value.slice(segmentStart, abbreviationStart).trim() === "") return true;
+  const isPlaceNamePrefix = ENGLISH_PERIOD_POLICY.placeNameAbbreviations.has(abbreviation);
+  if (isPlaceNamePrefix && value.slice(segmentStart, abbreviationStart).trim() === "") return true;
   const previousIndex = previousNonWhitespaceIndex(value, abbreviationStart - 1);
-  return ENGLISH_PERIOD_POLICY.locationPrepositions.has(wordBefore(value, previousIndex + 1).toLowerCase());
+  if (isPlaceNamePrefix
+    && ENGLISH_PERIOD_POLICY.locationPrepositions.has(wordBefore(value, previousIndex + 1).toLowerCase())) return true;
+  return ENGLISH_PERIOD_POLICY.streetSuffixAbbreviations.has(abbreviation)
+    && hasNumberedStreetContext(value, abbreviationStart, segmentStart)
+    && ENGLISH_PERIOD_POLICY.secondaryAddressUnits.has(normalizedNextToken);
 }
 
 function initialismContinues(value: string, index: number, initialism: string): boolean {
@@ -152,7 +201,9 @@ function initialismContinues(value: string, index: number, initialism: string): 
   if (ENGLISH_PERIOD_POLICY.continuationInitialisms.has(initialism.toLowerCase())) return true;
   if (/[\p{Ll}\p{N}]/u.test(value[nextIndex])) return true;
   const nextToken = wordAt(value, nextIndex);
-  if (ENGLISH_PERIOD_POLICY.organizationContinuations.has(nextToken.toLowerCase())) return true;
+  const normalizedNextToken = nextToken.toLowerCase();
+  if (ENGLISH_PERIOD_POLICY.organizationContinuations.has(normalizedNextToken)
+    || ENGLISH_PERIOD_POLICY.organizationalGeographicAdjectives.has(normalizedNextToken)) return true;
   const followingIndex = nextNonWhitespaceIndex(value, nextIndex + nextToken.length);
   return isTitleCaseWord(nextToken) && isTitleCaseWord(wordAt(value, followingIndex));
 }

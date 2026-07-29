@@ -141,8 +141,16 @@ test("semantic segmenter preserves source traceability without punctuation-only 
     "Wait. ... Continue checks.",
     "Acme Co., Ltd. provides service.",
     "Acme Inc. Response complete.",
+    "Acme Co. Ltd. provides service.",
+    "Acme Corp. International provides service.",
+    "Acme Corp. Response complete.",
     "Meet at St. Louis office.",
+    "Mail to 123 Main St. Suite 4.",
+    "Mail to 8 Oak St. Unit 2.",
+    "Mail to 10 Pine St. Response complete.",
     "The U.S. Postal Service responds.",
+    "The U.S. Federal policy applies.",
+    "The U.S. Federal. Review complete.",
   ];
   const allowedShortClauses = new Set(["等待……"]);
 
@@ -201,5 +209,39 @@ test("semantic segmenter keeps multi-token proper names after initialisms", () =
     { text: "The U.S. Postal Service responds.", start: 0, end: 33, gapBefore: "" },
     { text: "The U.S.", start: 34, end: 42, gapBefore: " " },
     { text: "Response complete.", start: 43, end: 61, gapBefore: " " },
+  ]);
+});
+
+test("semantic segmenter uses company suffix chains and categorized proper-name continuations", () => {
+  assert.deepEqual(segmentSemanticText(
+    "Acme Co. Ltd. provides service. Acme Corp. International provides service. Acme Corp. Response complete.",
+  ).map((segment) => segment.text), [
+    "Acme Co. Ltd. provides service.",
+    "Acme Corp. International provides service.",
+    "Acme Corp.",
+    "Response complete.",
+  ]);
+});
+
+test("semantic segmenter uses numbered street context only for secondary address units", () => {
+  assert.deepEqual(segmentSemanticText(
+    "Mail to 123 Main St. Suite 4. Mail to 8 Oak St. Unit 2. Mail to 10 Pine St. Response complete.",
+  ).map((segment) => segment.text), [
+    "Mail to 123 Main St. Suite 4.",
+    "Mail to 8 Oak St. Unit 2.",
+    "Mail to 10 Pine St.",
+    "Response complete.",
+  ]);
+});
+
+test("semantic segmenter uses organizational adjectives after initialisms without swallowing later sentences", () => {
+  assert.deepEqual(segmentSemanticText(
+    "The U.S. Federal policy applies. The U.S. Federal. Review complete. The U.S. Response pending.",
+  ).map((segment) => segment.text), [
+    "The U.S. Federal policy applies.",
+    "The U.S. Federal.",
+    "Review complete.",
+    "The U.S.",
+    "Response pending.",
   ]);
 });

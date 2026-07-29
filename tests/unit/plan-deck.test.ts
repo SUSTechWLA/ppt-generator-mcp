@@ -272,6 +272,58 @@ test("persisted visual prompt is a deterministic projection of grounded source f
   }
 });
 
+test("asset prompt evidence is fingerprint-bound and a coherent capability transplant is rejected by the loaded catalog", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "plan-deck-prompt-evidence-"));
+  try {
+    const profiles = loadTemplateProfiles(resolve("templates"));
+    const profile = profiles.find((candidate) => candidate.slug === "green-infographic-bid-a4-landscape")!;
+    const deps = createPlanDeckDependencies({ deckStore: new DeckStore(directory), profiles });
+    const valid = await planDeckWorkflow({
+      sourceText: page(205, "作业流程", "首先启动现场检查。其次提交问题清单。最后完成整改复核。"),
+      pageNumbers: [205],
+      documentType: "bid",
+      templateSlug: profile.slug,
+      quality: { minScore: 90, maxAttempts: 3 },
+      requestId: "prompt-evidence-valid",
+    }, deps);
+    const match = valid.plannedDeck.slides[0].templateMatch;
+    assert.deepEqual(match.assetPromptBindings, { figureRef: "figure-ref" });
+    assert.equal(match.assetPromptBindingEvidence.length, 1);
+    assert.equal(match.metadataBindings.some((binding) => binding.field === "figureRef"), false);
+
+    const legacy = structuredClone(valid.plannedDeck);
+    delete (legacy.slides[0].templateMatch as Partial<typeof legacy.slides[0]["templateMatch"]>).assetPromptBindingEvidence;
+    legacy.planFingerprint = hashPlannedDeckFingerprint(legacy);
+    assert.equal(plannedDeckSchema.safeParse(legacy).success, false,
+      "legacy image plans without prompt capability evidence must re-plan instead of silently migrating");
+
+    const forgedEvidence = structuredClone(valid.plannedDeck);
+    const forgedBinding = forgedEvidence.slides[0].templateMatch.assetPromptBindingEvidence[0];
+    forgedBinding.values = ["伪造引用"];
+    forgedBinding.usedChars = [4];
+    forgedEvidence.planFingerprint = hashPlannedDeckFingerprint(forgedEvidence);
+    assert.equal(plannedDeckSchema.safeParse(forgedEvidence).success, false, "prompt evidence must equal the deterministic asset projection");
+
+    const transplanted = structuredClone(valid.plannedDeck);
+    const transplantedMatch = transplanted.slides[0].templateMatch;
+    const oldTag = transplantedMatch.assetPromptBindings!.figureRef!;
+    const newTag = "asset-reference";
+    transplantedMatch.assetPromptBindings!.figureRef = newTag;
+    transplantedMatch.profileSnapshot.assetPromptBindings!.figureRef = newTag;
+    transplantedMatch.profileSnapshot.maxCharsBySlot[newTag] = transplantedMatch.profileSnapshot.maxCharsBySlot[oldTag];
+    delete transplantedMatch.profileSnapshot.maxCharsBySlot[oldTag];
+    transplantedMatch.assetPromptBindingEvidence[0].tag = newTag;
+    transplantedMatch.profileCapabilityHash = hashCanonical(transplantedMatch.profileSnapshot);
+    transplanted.planFingerprint = hashPlannedDeckFingerprint(transplanted);
+    assert.equal(plannedDeckSchema.safeParse(transplanted).success, true, "a coherent snapshot remains internally self-consistent");
+    const validation = validatePlanAgainstProfiles(transplanted, profiles);
+    assert.equal(validation.passed, false);
+    assert.match(validation.issues.join("\n"), /capabilitySnapshot=stale/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("loaded-profile validation rejects a coherent but stale persisted capability snapshot", async () => {
   const f = await fixture();
   try {

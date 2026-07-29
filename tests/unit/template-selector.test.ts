@@ -126,7 +126,7 @@ test("optional-image selection rejects page-title cap plus one but accepts activ
   const withImage = makeSlideSpec({ assetCount: 1 });
   withImage.designIntent.visualRatio = base.maxRasterAreaRatio;
   withImage.title = "页".repeat(base.maxCharsBySlot[base.pageBindings.pageTitle]);
-  withImage.blocks[0].title = "图".repeat(base.maxCharsBySlot[base.pageBindings.figureRef!]);
+  withImage.blocks[0].title = "图".repeat(base.maxCharsBySlot[base.assetPromptBindings!.figureRef!]);
   withImage.assets[0].alt = "场".repeat(base.maxCharsBySlot[base.pageBindings.imageCaption!]);
   assert.equal(selectTemplate(withImage, profiles, base.slug, "bid", base.themeId).slug, base.slug);
 });
@@ -405,6 +405,88 @@ test("loader rejects two semantic slots that emit to the same placeholder tag", 
     assert.throws(() => loadTemplateProfiles(fixture.directory), /duplicate.*placeholder|multiple bindings|target tag/i);
   } finally {
     await fixture.cleanup();
+  }
+});
+
+type PromptCapableProfile = TemplateProfile & { assetPromptBindings?: { figureRef?: string } };
+
+function promptReferenceProfile(profiles: TemplateProfile[]): TemplateProfile {
+  return profiles.find((profile) => profile.slug === "green-infographic-bid-a4-landscape")!;
+}
+
+test("loader requires prompt-only references to be owned exactly once by each non-rendered image directive", async () => {
+  const omitted = await temporaryCatalog((profile, html) => {
+    delete (profile as PromptCapableProfile).assetPromptBindings;
+    return { profile, html };
+  }, promptReferenceProfile);
+  try {
+    assert.throws(() => loadTemplateProfiles(omitted.directory), /undeclared placeholders: figure-ref/i);
+  } finally {
+    await omitted.cleanup();
+  }
+
+  const outside = await temporaryCatalog((profile, html) => {
+    const promptProfile = profile as PromptCapableProfile;
+    delete promptProfile.pageBindings.figureRef;
+    promptProfile.assetPromptBindings = { figureRef: "figure-ref" };
+    const dom = new JSDOM(html);
+    const reference = dom.window.document.querySelector("figure-ref")!;
+    dom.window.document.querySelector(".bid-page")!.append(reference);
+    return { profile, html: serializeTemplateMutation(dom, html) };
+  }, promptReferenceProfile);
+  try {
+    assert.throws(
+      () => loadTemplateProfiles(outside.directory),
+      /prompt.*(?:inside|within|owned).*(?:directive|image)|directive.*prompt/i,
+    );
+  } finally {
+    await outside.cleanup();
+  }
+
+  const falseCardinality = await temporaryCatalog((profile, html) => {
+    const promptProfile = profile as PromptCapableProfile;
+    delete promptProfile.pageBindings.figureRef;
+    promptProfile.assetPromptBindings = { figureRef: "figure-ref" };
+    return { profile, html: html.replace("</figures>\n        <figcaption", "<figure-ref>duplicate</figure-ref></figures>\n        <figcaption") };
+  }, promptReferenceProfile);
+  try {
+    assert.throws(
+      () => loadTemplateProfiles(falseCardinality.directory),
+      /prompt.*(?:cardinality|exactly|one)|cardinality.*prompt/i,
+    );
+  } finally {
+    await falseCardinality.cleanup();
+  }
+});
+
+test("loader rejects confused visible and prompt-only ownership but accepts a genuinely visible figure reference", async () => {
+  const shared = await temporaryCatalog((profile, html) => {
+    profile.pageBindings.figureRef = "figure-ref";
+    return { profile, html };
+  }, promptReferenceProfile);
+  try {
+    assert.throws(
+      () => loadTemplateProfiles(shared.directory),
+      /duplicate.*placeholder|shared.*binding|visible.*prompt|prompt.*visible/i,
+    );
+  } finally {
+    await shared.cleanup();
+  }
+
+  const visible = await temporaryCatalog((profile, html) => {
+    delete (profile as PromptCapableProfile).assetPromptBindings;
+    profile.pageBindings.figureRef = "figure-ref";
+    const dom = new JSDOM(html);
+    const reference = dom.window.document.querySelector("figure-ref")!;
+    dom.window.document.querySelector(".bid-page")!.append(reference);
+    return { profile, html: serializeTemplateMutation(dom, html) };
+  }, promptReferenceProfile);
+  try {
+    const [loaded] = loadTemplateProfiles(visible.directory);
+    assert.equal(loaded.pageBindings.figureRef, "figure-ref");
+    assert.equal((loaded as PromptCapableProfile).assetPromptBindings, undefined);
+  } finally {
+    await visible.cleanup();
   }
 });
 

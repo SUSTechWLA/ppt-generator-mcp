@@ -9,6 +9,7 @@ import { JSDOM } from "jsdom";
 import { loadTemplate } from "../../src/lib/template-parser.js";
 import { renderPage } from "../../src/services/page-renderer.js";
 import { composeSlide } from "../../src/services/slide-composer.js";
+import { mapSlideContent } from "../../src/services/slide-content-mapper.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
 import { makeGeneratedAssets, makeSlideSpec } from "../helpers/domain-fixtures.js";
 
@@ -100,8 +101,11 @@ test("optional image projection rejects only the page title cap plus one and pre
 
   const withImage = makeSlideSpec({ assetCount: 1 });
   withImage.title = "页".repeat(titleCap);
-  withImage.blocks[0].title = "图".repeat(optionalProfile.maxCharsBySlot[optionalProfile.pageBindings.figureRef!]);
+  withImage.blocks[0].title = "图".repeat(optionalProfile.maxCharsBySlot[optionalProfile.assetPromptBindings!.figureRef!]);
   withImage.assets[0].alt = "场".repeat(optionalProfile.maxCharsBySlot[optionalProfile.pageBindings.imageCaption!]);
+  const mapped = mapSlideContent(withImage, loadTemplate(templatesDir, optionalProfile.slug), optionalProfile);
+  assert.deepEqual(mapped[optionalProfile.assetPromptBindings!.figureRef!], [withImage.blocks[0].title],
+    "the prompt-only reference must be filled before its containing figures directive is replaced");
   const composed = await composeSlide({
     spec: withImage,
     template: optionalTemplate,

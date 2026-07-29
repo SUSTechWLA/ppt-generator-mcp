@@ -21,7 +21,6 @@ const DEFAULT_PAGE_BINDINGS: TemplateProfile["pageBindings"] = {
   subsectionTitle: "subsection-title",
   summaryText: "summary-text",
   imageCaption: "image-caption",
-  figureRef: "figure-ref",
 };
 
 const ROLE_LABELS: Record<SemanticRole, string> = {
@@ -102,6 +101,10 @@ function pageContent(spec: SlideSpec, page: PageMetadata | undefined, profile: T
   }
   if (images.assets.length > 0 && bindings.figureRef && count(template, bindings.figureRef) > 0) {
     values[bindings.figureRef] = exactValues(template, bindings.figureRef, images.figureRefs);
+  }
+  const promptReferenceTag = profile.assetPromptBindings?.figureRef;
+  if (images.assets.length > 0 && promptReferenceTag && count(template, promptReferenceTag) > 0) {
+    values[promptReferenceTag] = exactValues(template, promptReferenceTag, images.figureRefs);
   }
   return values;
 }

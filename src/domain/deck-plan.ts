@@ -4,7 +4,7 @@ import { displayPlanSchema } from "./display-plan.js";
 import { generateSlideOutputSchema } from "./quality-report.js";
 import { externalAssetInputSchema, hashCanonical, qualitySettingsSchema, sourceFactSchema, sourceSectionInputSchema, type SourceSection } from "./source-document.js";
 import { assetSpecSchema, slideSpecSchema } from "./slide-spec.js";
-import { templateProfileSchema } from "./template-profile.js";
+import { assetPromptBindingsSchema, templateProfileSchema } from "./template-profile.js";
 import { effectiveProfilePositions, orderedProfileSlots } from "./profile-capability.js";
 import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, projectGroundedVisualIntents, projectSlideSpec } from "./slide-projection.js";
 import { extractFacts } from "../services/fact-extractor.js";
@@ -100,6 +100,24 @@ const metadataBindingEvidenceSchema = z.object({
   }
 });
 
+const assetPromptBindingEvidenceSchema = z.object({
+  field: z.literal("figureRef"),
+  tag: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  directiveTag: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  directiveCount: z.number().int().min(1).max(12),
+  values: z.array(z.string().max(500)).max(12),
+  usedChars: z.array(z.number().int().nonnegative()).max(12),
+  maxChars: z.number().int().positive().max(500),
+}).strict().superRefine((binding, context) => {
+  if (binding.values.length !== binding.usedChars.length
+    || binding.values.some((value, index) => Array.from(value).length !== binding.usedChars[index])) {
+    context.addIssue({ code: "custom", message: "Asset prompt character evidence must equal emitted values", path: ["usedChars"] });
+  }
+  if (binding.usedChars.some((used) => used > binding.maxChars)) {
+    context.addIssue({ code: "custom", message: "Asset prompt value exceeds its profile binding capacity", path: ["values"] });
+  }
+});
+
 export const deckTemplateMatchSchema = z.object({
   themeId: z.string().regex(/^[a-z0-9-]+$/),
   profileVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
@@ -114,6 +132,8 @@ export const deckTemplateMatchSchema = z.object({
   maxRasterAreaRatio: z.number().min(0).max(1),
   pageBindings: persistedPageBindingsSchema,
   metadataBindings: z.array(metadataBindingEvidenceSchema).min(9).max(11),
+  assetPromptBindings: assetPromptBindingsSchema.optional(),
+  assetPromptBindingEvidence: z.array(assetPromptBindingEvidenceSchema).max(1),
   profileSnapshot: templateProfileSchema,
   profileCapabilityHash: z.string().regex(/^[0-9a-f]{64}$/),
   assignments: z.array(slotAssignmentSchema),
@@ -206,7 +226,8 @@ export const deckSlidePlanSchema = z.object({
     || semanticItemCapacity !== slide.templateMatch.semanticItemCapacity
     || profile.minimumBodyFontPt !== slide.templateMatch.minimumBodyFontPt
     || profile.maxRasterAreaRatio !== slide.templateMatch.maxRasterAreaRatio
-    || !canonicalEqual(profile.pageBindings, slide.templateMatch.pageBindings)) {
+    || !canonicalEqual(profile.pageBindings, slide.templateMatch.pageBindings)
+    || !canonicalEqual(profile.assetPromptBindings, slide.templateMatch.assetPromptBindings)) {
     context.addIssue({ code: "custom", message: "Template identity and capabilities must equal the persisted strict profile snapshot", path: ["templateMatch", "profileSnapshot"] });
   }
   const expectedEffectiveItems = Math.min(profile.blockCapacity, positions.length);
@@ -316,6 +337,25 @@ export const deckSlidePlanSchema = z.object({
       || profile.pageBindings[binding.field] !== binding.tag
       || profile.maxCharsBySlot[binding.tag] !== binding.maxChars) {
       context.addIssue({ code: "custom", message: "Metadata evidence must equal emitted page values and tags", path: ["templateMatch", "metadataBindings", index] });
+    }
+  }
+  const requiredPromptFields = Object.entries(slide.templateMatch.assetPromptBindings ?? {})
+    .filter(([, tag]) => tag !== undefined)
+    .map(([field]) => field);
+  const promptEvidenceFields = slide.templateMatch.assetPromptBindingEvidence.map((binding) => binding.field);
+  if (new Set(promptEvidenceFields).size !== promptEvidenceFields.length
+    || requiredPromptFields.length !== promptEvidenceFields.length
+    || requiredPromptFields.some((field) => !promptEvidenceFields.includes(field as "figureRef"))) {
+    context.addIssue({ code: "custom", message: "Asset prompt evidence must cover every declared prompt binding exactly once", path: ["templateMatch", "assetPromptBindingEvidence"] });
+  }
+  for (const [index, binding] of slide.templateMatch.assetPromptBindingEvidence.entries()) {
+    if (slide.templateMatch.assetPromptBindings?.[binding.field] !== binding.tag
+      || !orderedEqual(binding.values, expectedMetadata[binding.field])
+      || profile.assetPromptBindings?.[binding.field] !== binding.tag
+      || profile.maxCharsBySlot[binding.tag] !== binding.maxChars
+      || binding.directiveTag !== profile.imageSlots.placeholderTag
+      || binding.directiveCount !== profile.imageSlots.placeholderCount) {
+      context.addIssue({ code: "custom", message: "Asset prompt evidence must equal emitted directive values and profile capabilities", path: ["templateMatch", "assetPromptBindingEvidence", index] });
     }
   }
   const selectedCandidate = slide.templateMatch.candidateScores.find((candidate) => candidate.slug === slide.templateSlug);

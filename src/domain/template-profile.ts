@@ -101,6 +101,15 @@ export const pageBindingsSchema = z.object({
   figureRef: placeholderTagSchema.optional(),
 }).strict();
 
+/**
+ * Bindings consumed while constructing a non-rendered asset directive. These
+ * values are deliberately separate from pageBindings because the directive is
+ * replaced by the generated asset before the final DOM is evaluated.
+ */
+export const assetPromptBindingsSchema = z.object({
+  figureRef: placeholderTagSchema.optional(),
+}).strict().refine((bindings) => Object.keys(bindings).length > 0, "Asset prompt bindings cannot be empty");
+
 export const imageSlotsSchema = z.object({
   placeholderTag: placeholderTagSchema,
   placeholderCount: z.number().int().min(0).max(12),
@@ -132,6 +141,7 @@ export const templateProfileSchema = z.object({
   auxiliaryGroups: z.array(auxiliaryGroupSchema).max(24).optional(),
   overlapExemptions: z.array(overlapExemptionSchema).max(8).optional(),
   pageBindings: pageBindingsSchema,
+  assetPromptBindings: assetPromptBindingsSchema.optional(),
   blockCapacity: z.number().int().min(1).max(12),
   supportedBlocks: z.array(slideBlockTypeSchema).min(1),
   imageSlots: imageSlotsSchema,

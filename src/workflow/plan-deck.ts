@@ -103,9 +103,19 @@ interface CandidatePlan {
   solution: TemplateSlotSolution;
   plannedSpec: SlideSpec;
   pageBindings: TemplateProfile["pageBindings"];
+  assetPromptBindings?: TemplateProfile["assetPromptBindings"];
   metadataBindings: Array<{
     field: keyof TemplateProfile["pageBindings"];
     tag: string;
+    values: string[];
+    usedChars: number[];
+    maxChars: number;
+  }>;
+  assetPromptBindingEvidence: Array<{
+    field: keyof NonNullable<TemplateProfile["assetPromptBindings"]>;
+    tag: string;
+    directiveTag: string;
+    directiveCount: number;
     values: string[];
     usedChars: number[];
     maxChars: number;
@@ -313,7 +323,45 @@ function planForProfile(
     }
     return { field: typedField, tag, values: emitted, usedChars, maxChars };
   });
-  return { profile, grounded, selection, solution, plannedSpec, pageBindings: profile.pageBindings, metadataBindings };
+  const assetPromptBindingEvidence = Object.entries(profile.assetPromptBindings ?? {}).map(([field, tag]) => {
+    const typedField = field as keyof NonNullable<TemplateProfile["assetPromptBindings"]>;
+    const maxChars = profile.maxCharsBySlot[tag];
+    if (!maxChars) {
+      planningError(
+        "Profile asset prompt binding has no declared character capacity",
+        `profile=${profile.slug}; field=${field}; tag=${tag}`,
+      );
+    }
+    const emitted = values[typedField];
+    const usedChars = emitted.map((value) => Array.from(value).length);
+    const overflow = usedChars.find((used) => used > maxChars);
+    if (overflow !== undefined) {
+      planningError(
+        "Asset prompt metadata does not fit the candidate profile",
+        `profile=${profile.slug}; field=${field}; tag=${tag}; used=${overflow}; max=${maxChars}`,
+      );
+    }
+    return {
+      field: typedField,
+      tag,
+      directiveTag: profile.imageSlots.placeholderTag,
+      directiveCount: profile.imageSlots.placeholderCount,
+      values: emitted,
+      usedChars,
+      maxChars,
+    };
+  });
+  return {
+    profile,
+    grounded,
+    selection,
+    solution,
+    plannedSpec,
+    pageBindings: profile.pageBindings,
+    ...(profile.assetPromptBindings ? { assetPromptBindings: profile.assetPromptBindings } : {}),
+    metadataBindings,
+    assetPromptBindingEvidence,
+  };
 }
 
 function selectProfilePlan(
@@ -357,6 +405,8 @@ function templateMatch(candidate: CandidatePlan): DeckTemplateMatch {
     maxRasterAreaRatio: candidate.profile.maxRasterAreaRatio,
     pageBindings: candidate.pageBindings,
     metadataBindings: candidate.metadataBindings,
+    ...(candidate.assetPromptBindings ? { assetPromptBindings: candidate.assetPromptBindings } : {}),
+    assetPromptBindingEvidence: candidate.assetPromptBindingEvidence,
     profileSnapshot: candidate.profile,
     profileCapabilityHash: hashCanonical(candidate.profile),
     assignments: candidate.solution.assignments,

@@ -126,6 +126,9 @@ function declaredBindingEmissions(profile: TemplateProfile): BindingEmission[] {
     const count = field === "imageCaption" || field === "figureRef" ? profile.imageSlots.placeholderCount : 1;
     emissions.push({ tag, count, source: `page binding ${field}` });
   }
+  for (const [field, tag] of Object.entries(profile.assetPromptBindings ?? {})) {
+    emissions.push({ tag, count: profile.imageSlots.placeholderCount, source: `asset prompt binding ${field}` });
+  }
   return emissions;
 }
 
@@ -174,6 +177,35 @@ function validateImageContainerSelector(template: ReturnType<typeof loadTemplate
     }
     if (protectedLandmarks.some((landmark) => container === landmark || container.contains(landmark))) {
       throw new Error(`Template profile ${profile.slug} image container selector ${selector} contains a required semantic landmark`);
+    }
+  }
+}
+
+function ownedTagCount(owner: Element, tag: string): number {
+  return Number(owner.matches(tag)) + owner.querySelectorAll(tag).length;
+}
+
+function validateAssetPromptBindings(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
+  const doc = new JSDOM(template.html).window.document;
+  const directiveTag = profile.imageSlots.placeholderTag;
+  const directives = Array.from(doc.querySelectorAll(directiveTag));
+  const promptEntries = Object.entries(profile.assetPromptBindings ?? {});
+
+  for (const [field, tag] of promptEntries) {
+    const references = Array.from(doc.querySelectorAll(tag));
+    if (references.length !== directives.length
+      || directives.some((directive) => ownedTagCount(directive, tag) !== 1)) {
+      throw new Error(`Template profile ${profile.slug} asset prompt binding ${field} must occur exactly once inside each ${directiveTag} directive`);
+    }
+    if (references.some((reference) => !reference.closest(directiveTag))) {
+      throw new Error(`Template profile ${profile.slug} asset prompt binding ${field} must be owned inside the non-rendered ${directiveTag} directive boundary`);
+    }
+  }
+
+  for (const [field, tag] of Object.entries(profile.pageBindings)) {
+    const visibleBindings = Array.from(doc.querySelectorAll(tag));
+    if (visibleBindings.some((binding) => binding.closest(directiveTag))) {
+      throw new Error(`Template profile ${profile.slug} render-visible page binding ${field} cannot share prompt ownership inside the non-rendered ${directiveTag} directive`);
     }
   }
 }
@@ -339,6 +371,7 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   for (const profile of profiles) {
     if (!actual.has(profile.slug)) throw new Error(`Template profile has no matching HTML: ${profile.slug}`);
     const template = loadTemplate(templatesDir, profile.slug);
+    validateAssetPromptBindings(template, profile);
     const emissions = declaredBindingEmissions(profile);
     const emissionsByTag = new Map<string, BindingEmission[]>();
     for (const emission of emissions) emissionsByTag.set(emission.tag, [...(emissionsByTag.get(emission.tag) ?? []), emission]);
@@ -351,7 +384,7 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
     if (missing.length > 0) throw new Error(`Template profile ${profile.slug} declares missing placeholders: ${[...new Set(missing)].join(", ")}`);
     const undeclared = template.placeholders
       .map((placeholder) => placeholder.tag)
-      .filter((tag) => !["figures", "icon"].includes(tag) && !declaredTags.includes(tag));
+      .filter((tag) => ![profile.imageSlots.placeholderTag, "icon"].includes(tag) && !declaredTags.includes(tag));
     if (undeclared.length > 0) throw new Error(`Template profile ${profile.slug} has undeclared placeholders: ${[...new Set(undeclared)].join(", ")}`);
     for (const tag of declaredTags) {
       if (!profile.maxCharsBySlot[tag]) throw new Error(`Template profile ${profile.slug} has no character capacity for bound placeholder ${tag}`);
@@ -458,6 +491,7 @@ function emittedCapacityErrors(content: PageBlueprint | SlideSpec, profile: Temp
     const images = projectOptionalImages(content);
     for (const caption of images.captions) check(profile.pageBindings.imageCaption, caption);
     for (const reference of images.figureRefs) check(profile.pageBindings.figureRef, reference);
+    for (const reference of images.figureRefs) check(profile.assetPromptBindings?.figureRef, reference);
   }
   const items = "version" in content
     ? content.groups.map((group) => ({ title: group.title, body: group.body, role: group.role, bullets: [] as string[], metrics: [] as string[] }))

@@ -51,6 +51,84 @@ async function fixture(t: test.TestContext) {
   return { client, dependencies };
 }
 
+test("production MCP delivers every pre-paginated test.md page with independent QA and deck consistency", async (t) => {
+  const { client } = await fixture(t);
+  const sourceText = await readFile(resolve("../../test.md"), "utf8");
+  const plannedCall = await client.callTool({
+    name: "plan_deck",
+    arguments: {
+      sourceText,
+      pageNumbers: [59, 60, 61, 62],
+      documentType: "bid",
+      preferredThemeId: "green-infographic-v1",
+      quality: { minScore: 90, maxAttempts: 3 },
+      requestId: "mcp-real-test-md-plan",
+    },
+  });
+  assert.equal(plannedCall.isError, undefined, JSON.stringify(plannedCall.content));
+  const plan = plannedCall.structuredContent as {
+    plannedDeck: {
+      deckPlanId: string;
+      pageNumbers: number[];
+      slides: Array<{
+        page: { number: number };
+        templateMatch: {
+          pageBindings: { figureRef?: string };
+          metadataBindings: Array<{ field: string }>;
+          assetPromptBindings?: { figureRef?: string };
+          assetPromptBindingEvidence: Array<{ field: string; values: string[] }>;
+        };
+      }>;
+    };
+    assets: Array<{ id: string }>;
+  };
+  assert.deepEqual(plan.plannedDeck.pageNumbers, [59, 60, 61, 62]);
+  assert.equal(plan.assets.length, 4);
+  for (const slide of plan.plannedDeck.slides) {
+    assert.equal(slide.templateMatch.pageBindings.figureRef, undefined);
+    assert.equal(slide.templateMatch.metadataBindings.some((binding) => binding.field === "figureRef"), false);
+    assert.deepEqual(slide.templateMatch.assetPromptBindings, { figureRef: "figure-ref" });
+    assert.equal(slide.templateMatch.assetPromptBindingEvidence.length, 1);
+  }
+
+  const generatedCall = await client.callTool({
+    name: "generate_deck",
+    arguments: {
+      deckPlanId: plan.plannedDeck.deckPlanId,
+      externalAssets: plan.assets.map((asset) => ({ id: asset.id, dataUrl: externalDataUrl })),
+      requestId: "mcp-real-test-md-run",
+    },
+  });
+  assert.equal(generatedCall.isError, undefined, JSON.stringify(generatedCall.content));
+  const generated = generatedCall.structuredContent as {
+    status: string;
+    pages: Array<{
+      pageNumber: number;
+      runId: string;
+      quality: { score: number; threshold: number; hardGatePassed: boolean };
+    }>;
+    consistency: { passed: boolean; issues: string[] };
+  };
+  assert.equal(generated.status, "delivered", JSON.stringify(generated.consistency));
+  assert.deepEqual(generated.pages.map((pageResult) => pageResult.pageNumber), [59, 60, 61, 62]);
+  assert.ok(generated.pages.every((pageResult) => pageResult.quality.hardGatePassed
+    && pageResult.quality.threshold === 90
+    && pageResult.quality.score >= pageResult.quality.threshold));
+  assert.deepEqual(generated.consistency, { passed: true, issues: [] });
+
+  for (const pageResult of generated.pages) {
+    const htmlCall = await client.callTool({
+      name: "get_deck",
+      arguments: { id: pageResult.runId, view: "artifact", artifact: "final.html" },
+    });
+    assert.equal(htmlCall.isError, undefined, JSON.stringify(htmlCall.content));
+    const html = (htmlCall.structuredContent as { result: { data: string } }).result.data;
+    assert.equal((html.match(/data-slide-page=/g) ?? []).length, 1);
+    assert.match(html, new RegExp(`data-slide-page=["']${pageResult.pageNumber}["']`));
+    assert.doesNotMatch(html, /<figures|<figure-ref|data-page-field=["']figureRef["']/i);
+  }
+});
+
 test("production MCP resumes an image deck from needs_assets and does not rerun its delivered page", async (t) => {
   const { client, dependencies } = await fixture(t);
   const planned = await client.callTool({

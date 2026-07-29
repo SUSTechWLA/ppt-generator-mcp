@@ -1,7 +1,7 @@
 [
   {
     "slug": "green-infographic-bid-a4-landscape",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "themeId": "green-infographic-v1",
     "designContract": {
       "version": 1,
@@ -67,9 +67,9 @@
       "topicTitle": "topic-title",
       "subsectionTitle": "subsection-title",
       "summaryText": "summary-text",
-      "imageCaption": "image-caption",
-      "figureRef": "figure-ref"
+      "imageCaption": "image-caption"
     },
+    "assetPromptBindings": { "figureRef": "figure-ref" },
     "blockCapacity": 5,
     "supportedBlocks": ["text", "image", "table", "process", "metric"],
     "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 0, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
@@ -84,7 +84,7 @@
   },
   {
     "slug": "green-infographic-bid-a4-landscape-text-image",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "themeId": "green-infographic-v1",
     "designContract": {
       "version": 1,
@@ -130,9 +130,9 @@
       "topicTitle": "topic-title",
       "subsectionTitle": "subsection-title",
       "summaryText": "summary-text",
-      "imageCaption": "image-caption",
-      "figureRef": "figure-ref"
+      "imageCaption": "image-caption"
     },
+    "assetPromptBindings": { "figureRef": "figure-ref" },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "image", "process", "metric"],
     "imageSlots": { "placeholderTag": "figures", "placeholderCount": 4, "minAssets": 4, "maxAssets": 4, "unusedPolicy": "remove-container", "containerSelector": "figure" },
@@ -367,7 +367,7 @@
   },
   {
     "slug": "green-infographic-bid-a4-landscape-table-text-image",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "themeId": "green-infographic-v1",
     "designContract": {
       "version": 1,
@@ -429,9 +429,9 @@
       "topicTitle": "topic-title",
       "subsectionTitle": "subsection-title",
       "summaryText": "summary-text",
-      "imageCaption": "image-caption",
-      "figureRef": "figure-ref"
+      "imageCaption": "image-caption"
     },
+    "assetPromptBindings": { "figureRef": "figure-ref" },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "table", "image", "metric"],
     "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 1, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },

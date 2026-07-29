@@ -2,6 +2,15 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { chromium } from "playwright";
 import { hasExecutableDom } from "../lib/html-security.js";
+import type { SemanticLandmark } from "../domain/template-profile.js";
+import { SEMANTIC_LANDMARKS } from "./template-landmarks.js";
+
+export interface RenderRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface RenderElement {
   id: string;
@@ -19,6 +28,33 @@ export interface RenderElement {
   contrastRatio: number;
   contrastMeasurable: boolean;
   largeText: boolean;
+  bodyText: boolean;
+}
+
+export interface RenderStructure {
+  pageNumber?: string;
+  profile?: { slug: string; version: string; themeId: string; format: string };
+  designTokens: {
+    fontFamily: string;
+    textColor: string;
+    backgroundColor: string;
+    fontScale: string;
+    spacingScale: string;
+    contrastMode: "normal" | "high";
+  };
+  landmarkCounts: Record<SemanticLandmark, number>;
+  landmarkRects: Record<SemanticLandmark, RenderRect[]>;
+  pageFields: Record<string, string[]>;
+  semanticItems: Array<{
+    blockId: string;
+    slotId: string;
+    sourceFactIds: string[];
+    visibleText: string;
+    factText: string;
+    factTextOwnerCount: number;
+    visibleFactTextOwnerCount: number;
+  }>;
+  blankComponents: string[];
 }
 
 export interface RenderResult {
@@ -36,10 +72,14 @@ export interface RenderResult {
     luminanceVariance: number;
     isVector: boolean;
     displayedArea: number;
+    clippedArea: number;
+    cssVisible: boolean;
   }>;
   rasterAreaRatio: number;
+  raster: { visibleCount: number; unionArea: number; unionAreaRatio: number };
   bodyScroll: { width: number; height: number };
   occupiedRatio: number;
+  structure: RenderStructure;
   layout: {
     containmentViolations: Array<{ targetId: string; ancestorId: string; overflowPx?: number }>;
     collisions: Array<{ firstId: string; secondId: string; overlapArea: number }>;
@@ -86,7 +126,7 @@ export async function renderPage(input: {
     // The callback executes in Chromium, so expose the identity helper there too.
     await page.evaluate("globalThis.__name = (target) => target");
 
-    const measured = await page.evaluate(async ({ overlapPairs }) => {
+    const measured = await page.evaluate(async ({ overlapPairs, landmarks }) => {
       const parseColor = (value: string): [number, number, number, number] | null => {
         const match = value.match(/rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)(?:[, /]+([\d.]+))?\)/);
         return match ? [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])] : null;
@@ -115,12 +155,75 @@ export async function renderPage(input: {
         return { color: [255, 255, 255], measurable: true };
       };
 
+      const isCssVisible = (element: Element): boolean => {
+        let current: Element | null = element;
+        while (current) {
+          const style = getComputedStyle(current);
+          if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity || "1") <= 0.001) return false;
+          current = current.parentElement;
+        }
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0.5 && rect.height > 0.5;
+      };
+
+      const clippedRect = (element: Element): { x: number; y: number; width: number; height: number } | null => {
+        const rect = element.getBoundingClientRect();
+        let left = Math.max(0, rect.left);
+        let top = Math.max(0, rect.top);
+        let right = Math.min(1123, rect.right);
+        let bottom = Math.min(794, rect.bottom);
+        let ancestor = element.parentElement;
+        while (ancestor && ancestor !== document.body) {
+          const style = getComputedStyle(ancestor);
+          const ancestorRect = ancestor.getBoundingClientRect();
+          if (style.overflowX !== "visible") {
+            left = Math.max(left, ancestorRect.left);
+            right = Math.min(right, ancestorRect.right);
+          }
+          if (style.overflowY !== "visible") {
+            top = Math.max(top, ancestorRect.top);
+            bottom = Math.min(bottom, ancestorRect.bottom);
+          }
+          ancestor = ancestor.parentElement;
+        }
+        return right - left > 0.5 && bottom - top > 0.5
+          ? { x: left, y: top, width: right - left, height: bottom - top }
+          : null;
+      };
+
+      const unionArea = (rectangles: Array<{ x: number; y: number; width: number; height: number }>): number => {
+        const edges = [...new Set(rectangles.flatMap((rect) => [rect.x, rect.x + rect.width]))].sort((left, right) => left - right);
+        let total = 0;
+        for (let index = 0; index < edges.length - 1; index += 1) {
+          const left = edges[index];
+          const right = edges[index + 1];
+          if (right <= left) continue;
+          const intervals = rectangles
+            .filter((rect) => rect.x < right && rect.x + rect.width > left)
+            .map((rect) => [rect.y, rect.y + rect.height] as [number, number])
+            .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+          let covered = 0;
+          let activeStart: number | undefined;
+          let activeEnd: number | undefined;
+          for (const [start, end] of intervals) {
+            if (activeStart === undefined || activeEnd === undefined) {
+              activeStart = start;
+              activeEnd = end;
+            } else if (start <= activeEnd) activeEnd = Math.max(activeEnd, end);
+            else {
+              covered += activeEnd - activeStart;
+              activeStart = start;
+              activeEnd = end;
+            }
+          }
+          if (activeStart !== undefined && activeEnd !== undefined) covered += activeEnd - activeStart;
+          total += covered * (right - left);
+        }
+        return total;
+      };
+
       const allVisibleElements = Array.from(document.body.querySelectorAll<HTMLElement>("*"))
-        .filter((element) => {
-          const rect = element.getBoundingClientRect();
-          const style = getComputedStyle(element);
-          return rect.width > 0.5 && rect.height > 0.5 && style.visibility !== "hidden" && style.display !== "none";
-        });
+        .filter(isCssVisible);
       const directTextNodes = (element: Element) => Array.from(element.childNodes)
         .filter((node): node is Text => node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim()));
       const rectValue = (rect: DOMRect) => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
@@ -237,10 +340,12 @@ export async function renderPage(input: {
             contrastRatio: contrast(foreground, background.color),
             contrastMeasurable: background.measurable,
             largeText: fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700),
+            bodyText: element.matches("p, li, td, th, figcaption, [data-fact-text-owner]")
+              || Boolean(element.closest("[data-fact-text-owner]")),
           };
         });
 
-      const images = await Promise.all(Array.from(document.images).map(async (image) => {
+      const imageMeasurements = await Promise.all(Array.from(document.images).map(async (image) => {
         let opaqueRatio = 0;
         let luminanceVariance = 0;
         if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
@@ -266,6 +371,8 @@ export async function renderPage(input: {
         }
         const src = image.currentSrc || image.src;
         const rect = image.getBoundingClientRect();
+        const cssVisible = isCssVisible(image);
+        const clipped = cssVisible ? clippedRect(image) : null;
         return {
           src,
           complete: image.complete,
@@ -275,23 +382,103 @@ export async function renderPage(input: {
           luminanceVariance,
           isVector: src.startsWith("data:image/svg+xml"),
           displayedArea: Math.max(0, rect.width) * Math.max(0, rect.height),
+          clippedArea: clipped ? clipped.width * clipped.height : 0,
+          cssVisible,
+          clipped,
         };
       }));
 
+      const images = imageMeasurements.map(({ clipped: _clipped, ...image }) => image);
+
+      const pageRoot = document.querySelector<HTMLElement>("[data-slide-page]");
+      const pageStyle = pageRoot ? getComputedStyle(pageRoot) : getComputedStyle(document.body);
+      const rootStyle = getComputedStyle(document.documentElement);
+      const profileAttributes = pageRoot ? {
+        slug: pageRoot.getAttribute("data-template-slug") ?? "",
+        version: pageRoot.getAttribute("data-template-version") ?? "",
+        themeId: pageRoot.getAttribute("data-theme-id") ?? "",
+        format: pageRoot.getAttribute("data-document-format") ?? "",
+      } : undefined;
+      const profile = profileAttributes && Object.values(profileAttributes).every(Boolean) ? profileAttributes : undefined;
+      const landmarkCounts = Object.fromEntries(landmarks.map((landmark) => {
+        const matches = Array.from(document.querySelectorAll<HTMLElement>(`[data-page-landmark="${landmark}"]`)).filter(isCssVisible);
+        return [landmark, matches.length];
+      })) as Record<SemanticLandmark, number>;
+      const landmarkRects = Object.fromEntries(landmarks.map((landmark) => [landmark, Array.from(document.querySelectorAll<HTMLElement>(`[data-page-landmark="${landmark}"]`))
+        .filter(isCssVisible)
+        .map((element) => rectValue(element.getBoundingClientRect()))])) as Record<SemanticLandmark, RenderRect[]>;
+      const pageFields: Record<string, string[]> = {};
+      for (const field of Array.from(document.querySelectorAll<HTMLElement>("[data-page-field]"))) {
+        const name = field.getAttribute("data-page-field");
+        const technicalDocumentTitle = name === "pageTitle" && field.tagName === "TITLE";
+        if (!technicalDocumentTitle && !isCssVisible(field)) continue;
+        const value = (technicalDocumentTitle ? field.textContent : field.innerText)?.trim() ?? "";
+        if (!name || !value) continue;
+        pageFields[name] = [...(pageFields[name] ?? []), value];
+      }
+      if (!pageFields.pageTitle && document.title.trim()) pageFields.pageTitle = [document.title.trim()];
+      const semanticItems = Array.from(document.querySelectorAll<HTMLElement>("[data-semantic-slot][data-block-id]"))
+        .filter(isCssVisible)
+        .map((element) => {
+          const owners = Array.from(element.querySelectorAll<HTMLElement>("[data-fact-text-owner]"));
+          const visibleOwners = owners.filter(isCssVisible);
+          return {
+            blockId: element.getAttribute("data-block-id") ?? "",
+            slotId: element.getAttribute("data-semantic-slot") ?? "",
+            sourceFactIds: (element.getAttribute("data-source-fact-ids") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+            visibleText: element.innerText.trim(),
+            factText: visibleOwners.map((owner) => owner.innerText.trim()).filter(Boolean).join("\n"),
+            factTextOwnerCount: owners.length,
+            visibleFactTextOwnerCount: visibleOwners.length,
+          };
+        });
+      const blankComponents = Array.from(document.querySelectorAll<HTMLElement>("[data-component]"))
+        .filter(isCssVisible)
+        .filter((component) => {
+          if (component.innerText.trim()) return false;
+          return !Array.from(component.querySelectorAll<HTMLElement>("img, svg, canvas"))
+            .some((graphic) => isCssVisible(graphic) && Boolean(clippedRect(graphic)));
+        })
+        .map((component, index) => component.dataset.blockId || component.dataset.component || component.id || `component-${index + 1}`);
+
+      const visibleRasterRects = imageMeasurements
+        .filter((image) => !image.isVector && image.cssVisible && image.clipped)
+        .map((image) => image.clipped!);
+      const rasterUnionArea = unionArea(visibleRasterRects);
+
       const area = elements.reduce((sum, element) => sum + Math.min(element.rect.width * element.rect.height, 1123 * 794), 0);
-      const rasterArea = images
-        .filter((image) => !image.isVector)
-        .reduce((sum, image) => sum + image.displayedArea, 0);
       return {
         pageCount: document.querySelectorAll("[data-slide-page]").length,
         elements,
         images,
-        rasterAreaRatio: Math.min(1, rasterArea / (1123 * 794)),
+        rasterAreaRatio: Math.min(1, rasterUnionArea / (1123 * 794)),
+        raster: {
+          visibleCount: visibleRasterRects.length,
+          unionArea: rasterUnionArea,
+          unionAreaRatio: Math.min(1, rasterUnionArea / (1123 * 794)),
+        },
         bodyScroll: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight },
         occupiedRatio: Math.min(1, area / (1123 * 794)),
+        structure: {
+          ...(pageRoot?.getAttribute("data-slide-page") ? { pageNumber: pageRoot.getAttribute("data-slide-page")! } : {}),
+          ...(profile ? { profile } : {}),
+          designTokens: {
+            fontFamily: pageStyle.fontFamily,
+            textColor: pageStyle.color,
+            backgroundColor: pageStyle.backgroundColor,
+            fontScale: rootStyle.getPropertyValue("--workflow-font-scale").trim() || "1",
+            spacingScale: rootStyle.getPropertyValue("--workflow-spacing-scale").trim() || "1",
+            contrastMode: (document.documentElement.getAttribute("data-contrast") === "high" ? "high" : "normal") as "high" | "normal",
+          },
+          landmarkCounts,
+          landmarkRects,
+          pageFields,
+          semanticItems,
+          blankComponents,
+        },
         layout: { containmentViolations, collisions },
       };
-    }, { overlapPairs: validatedOverlapPairs });
+    }, { overlapPairs: validatedOverlapPairs, landmarks: SEMANTIC_LANDMARKS });
 
     await page.screenshot({ path: input.screenshotPath, type: "png", fullPage: false, animations: "disabled" });
     await context.close();

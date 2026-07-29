@@ -11,6 +11,7 @@ import { fillPlaceholders } from "../tools/fill-placeholders.js";
 import { mapSlideContent } from "./slide-content-mapper.js";
 import { projectOptionalImages } from "./optional-image-projection.js";
 import { executableDomViolations } from "../lib/html-security.js";
+import { SEMANTIC_LANDMARK_SELECTORS } from "./template-landmarks.js";
 
 export interface ComposeSlideInput {
   spec: SlideSpec;
@@ -168,7 +169,18 @@ function injectAssets(doc: Document, spec: SlideSpec, profile: TemplateProfile, 
 function applyMarkersAndTokens(doc: Document, input: ComposeSlideInput): void {
   const pages = doc.querySelectorAll(".bid-page");
   if (pages.length !== 1) throw new Error(`Template must contain exactly one .bid-page; found ${pages.length}`);
-  pages[0].setAttribute("data-slide-page", String(input.page?.number ?? 1));
+  const page = pages[0];
+  page.setAttribute("data-slide-page", String(input.page?.number ?? 1));
+  page.setAttribute("data-template-slug", input.profile.slug);
+  page.setAttribute("data-template-version", input.profile.version);
+  page.setAttribute("data-theme-id", input.profile.themeId);
+  page.setAttribute("data-document-format", input.profile.format);
+  for (const landmark of input.profile.requiredLandmarks) {
+    const candidates = Array.from(page.querySelectorAll(SEMANTIC_LANDMARK_SELECTORS[landmark]));
+    const matches = candidates.filter((candidate) => !candidates.some((owner) => owner !== candidate && owner.contains(candidate)));
+    if (matches.length !== 1) throw new Error(`Required landmark ${landmark} must resolve exactly once after pruning; found ${matches.length}`);
+    matches[0].setAttribute("data-page-landmark", landmark);
+  }
   const root = doc.documentElement;
   root.style.setProperty("--workflow-font-scale", String(input.designTokens?.fontScale ?? 1));
   root.style.setProperty("--workflow-spacing-scale", String(input.designTokens?.spacingScale ?? 1));
@@ -186,6 +198,16 @@ function scanResiduals(html: string): string[] {
 function prepareTemplateHtml(template: ParsedTemplate, profile: TemplateProfile, solution: TemplateSlotSolution): string {
   const dom = new JSDOM(template.html);
   const doc = dom.window.document;
+  for (const [field, tag] of Object.entries(profile.pageBindings)) {
+    if (!tag) continue;
+    for (const placeholder of Array.from(doc.querySelectorAll(tag))) {
+      const owner = placeholder.parentElement;
+      if (!owner) throw new Error(`Page binding ${field} has no stable DOM owner`);
+      const existing = owner.getAttribute("data-page-field");
+      if (existing && existing !== field) throw new Error(`Page bindings ${existing} and ${field} cannot share one text owner`);
+      owner.setAttribute("data-page-field", field);
+    }
+  }
   for (const slot of profile.semanticSlots) {
     const elements = Array.from(doc.querySelectorAll(`[data-semantic-slot="${slot.id}"]`));
     if (elements.length !== slot.itemCapacity) {
@@ -199,7 +221,24 @@ function prepareTemplateHtml(template: ParsedTemplate, profile: TemplateProfile,
     elements.forEach((element, index) => {
       const assignment = assignments.get(index);
       if (!assignment) element.remove();
-      else element.setAttribute("data-block-id", assignment.groupId);
+      else {
+        element.setAttribute("data-block-id", assignment.groupId);
+        element.setAttribute("data-source-fact-ids", assignment.sourceFactIds.join(","));
+        const factTag = slot.bindings[slot.factBearingBinding];
+        const factPlaceholders = factTag ? Array.from(element.querySelectorAll(factTag)) : [];
+        const factPlaceholder = factPlaceholders[slot.factBearingValueIndex];
+        if (!factPlaceholder) throw new Error(`Semantic slot ${slot.id}[${index}] has no declared fact-bearing placeholder`);
+        const factOwner = factPlaceholder.parentElement;
+        if (!factOwner) throw new Error(`Semantic slot ${slot.id}[${index}] has no stable fact-bearing text owner`);
+        if (factOwner === element) {
+          const marker = doc.createElement("span");
+          marker.setAttribute("data-fact-text-owner", "true");
+          factPlaceholder.replaceWith(marker);
+          marker.append(factPlaceholder);
+        } else {
+          factOwner.setAttribute("data-fact-text-owner", "true");
+        }
+      }
     });
   }
   const assignedCount = solution.assignments.length;

@@ -138,6 +138,9 @@ export function createProductionDependencies(
             maxRasterAreaRatio: Math.min(profile.maxRasterAreaRatio, policy.maxRasterAreaRatio),
             maximumRasterAssets: policy.maxImageAssets,
             minimumBodyFontPt: Math.max(profile.minimumBodyFontPt, policy.minimumBodyFontPt),
+            profile,
+            documentPolicy: policy,
+            ...(workflowInput.page ? { expectedPageNumber: workflowInput.page.number } : {}),
           });
           const quality = await evaluateSlide({
             source: workflowInput.source,

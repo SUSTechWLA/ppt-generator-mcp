@@ -16,6 +16,7 @@ import { WorkflowError } from "../domain/workflow-error.js";
 import { listTemplates, loadTemplate } from "../lib/template-parser.js";
 import { solveTemplateSlots } from "./template-slot-solver.js";
 import { projectOptionalImages } from "./optional-image-projection.js";
+import { SEMANTIC_LANDMARK_SELECTORS } from "./template-landmarks.js";
 
 const DENSITIES = ["low", "medium", "high"] as const;
 
@@ -140,14 +141,6 @@ function actualPlaceholderCount(template: ReturnType<typeof loadTemplate>, tag: 
 
 const SIMPLE_LOCAL_SELECTOR = /^(?:[a-z][a-z0-9-]*|[.#][A-Za-z_][A-Za-z0-9_-]*)$/;
 const FORBIDDEN_IMAGE_CONTAINER_SELECTORS = new Set(["html", "body", "article", "main", ".bid-page"]);
-const LANDMARK_SELECTORS: Record<SemanticLandmark, string> = {
-  "page-header": "header, .page-header, .visual-header",
-  "chapter-band": ".chapter-band, chapter-label",
-  "subsection-title": ".subsection-title, subsection-title",
-  "summary-band": ".summary-band, .visual-summary, [data-component=\"summary-band\"]",
-  "page-footer": "footer, .page-footer, .visual-footer",
-};
-
 function validateImageContainerSelector(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
   if (profile.imageSlots.unusedPolicy !== "remove-container") return;
   const selector = profile.imageSlots.containerSelector;
@@ -174,7 +167,7 @@ function validateImageContainerSelector(template: ReturnType<typeof loadTemplate
     doc.body,
     ...Array.from(doc.querySelectorAll("article, .bid-page, [data-slide-page], [data-page-number]")),
   ]);
-  const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark])));
+  const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(SEMANTIC_LANDMARK_SELECTORS[landmark])));
   for (const container of distinct) {
     if (pageRoots.has(container)) {
       throw new Error(`Template profile ${profile.slug} image container selector ${selector} resolves to a page root`);
@@ -192,7 +185,7 @@ function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, prof
     doc.body,
     ...Array.from(doc.querySelectorAll("article, main, .bid-page, .body-grid, [data-slide-page], [data-page-number]")),
   ]);
-  const landmarkNodes = new Set(profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark]))));
+  const landmarkNodes = new Set(profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(SEMANTIC_LANDMARK_SELECTORS[landmark]))));
   const semanticNodes = new Set(Array.from(doc.querySelectorAll("[data-semantic-slot]")));
   const imagePlaceholders = Array.from(doc.querySelectorAll(profile.imageSlots.placeholderTag));
   const imageContainers = profile.imageSlots.containerSelector
@@ -287,7 +280,7 @@ function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, prof
 function validateOverlapExemptions(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
   if (!profile.overlapExemptions?.length) return;
   const doc = new JSDOM(template.html).window.document;
-  const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(LANDMARK_SELECTORS[landmark])));
+  const protectedLandmarks = profile.requiredLandmarks.flatMap((landmark) => Array.from(doc.querySelectorAll(SEMANTIC_LANDMARK_SELECTORS[landmark])));
   const claimedNodes = new Set<Element>();
   for (const exemption of profile.overlapExemptions) {
     const images = Array.from(doc.querySelectorAll(exemption.imageSelector));

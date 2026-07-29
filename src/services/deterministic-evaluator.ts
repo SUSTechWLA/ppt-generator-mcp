@@ -1,5 +1,8 @@
+import type { DisplayPlan } from "../domain/display-plan.js";
 import type { QualityIssue } from "../domain/quality-report.js";
+import type { TemplateProfile } from "../domain/template-profile.js";
 import type { RenderResult } from "./page-renderer.js";
+import type { DocumentTemplatePolicy } from "./template-selector.js";
 
 export interface DeterministicReport {
   safeToReturn: boolean;
@@ -11,6 +14,29 @@ export interface DeterministicEvaluationPolicy {
   maxRasterAreaRatio?: number;
   maximumRasterAssets?: number;
   minimumBodyFontPt?: number;
+  profile?: TemplateProfile;
+  documentPolicy?: DocumentTemplatePolicy;
+  expectedPageNumber?: number;
+  expectedMetadataBindings?: Array<{ field: string; values: string[] }>;
+  displayPlan?: DisplayPlan;
+}
+
+function strictMinimum(values: Array<number | undefined>, fallback: number): number {
+  const available = values.filter((value): value is number => value !== undefined);
+  return available.length > 0 ? Math.min(...available) : fallback;
+}
+
+function strictMaximum(values: Array<number | undefined>, fallback: number): number {
+  const available = values.filter((value): value is number => value !== undefined);
+  return available.length > 0 ? Math.max(...available) : fallback;
+}
+
+function normalizedVisibleText(value: string): string {
+  return value.replace(/\s+/gu, "").trim();
+}
+
+function orderedEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function evaluateDeterministic(render: RenderResult, policy: DeterministicEvaluationPolicy = {}): DeterministicReport {
@@ -23,74 +49,97 @@ export function evaluateDeterministic(render: RenderResult, policy: Deterministi
     if (unsafe) safeToReturn = false;
   };
 
-  if (!render.signals.screenshotCreated) issue({ severity: "error", category: "technical", evidence: "浏览器未生成预览图", suggestedAction: "重新渲染页面" }, true);
-  if (render.pageCount !== 1) issue({ severity: "error", category: "structure", evidence: `页面标记数量为 ${render.pageCount}，要求恰好一页`, suggestedAction: "仅保留一个 data-slide-page 页面" }, true);
-  if (render.signals.hasScripts) issue({ severity: "error", category: "technical", evidence: "最终 HTML 包含可执行脚本", suggestedAction: "移除全部脚本" }, true);
-  if (render.signals.hasExecutableDom && !render.signals.hasScripts) issue({ severity: "error", category: "technical", evidence: "最终 HTML 包含事件处理器、嵌入文档或其他可执行 DOM", suggestedAction: "移除全部可执行 DOM 入口" }, true);
-  if (render.signals.networkRequests.length > 0) issue({ severity: "error", category: "technical", evidence: `页面尝试加载 ${render.signals.networkRequests.length} 个远程资源`, suggestedAction: "将资源内联为 data URL" }, true);
-  if (render.signals.hasSecretLikeText) issue({ severity: "error", category: "technical", evidence: "页面疑似包含密钥或令牌", suggestedAction: "从交付件中移除敏感配置" }, true);
-  if (render.signals.hasUnresolvedPlaceholders) issue({ severity: "error", category: "structure", evidence: "页面仍包含模板占位符", suggestedAction: "补齐内容和资产映射" });
+  if (!render.signals.screenshotCreated) issue({ severity: "error", category: "technical", evidence: "\u6d4f\u89c8\u5668\u672a\u751f\u6210\u9884\u89c8\u56fe", suggestedAction: "\u91cd\u65b0\u6e32\u67d3\u9875\u9762" }, true);
+  if (render.pageCount !== 1) issue({ severity: "error", category: "structure", evidence: `\u9875\u9762\u6807\u8bb0\u6570\u91cf\u4e3a ${render.pageCount}\uff0c\u8981\u6c42\u6070\u597d\u4e00\u9875`, suggestedAction: "\u4ec5\u4fdd\u7559\u4e00\u4e2a data-slide-page \u9875\u9762" }, true);
+  if (render.signals.hasScripts) issue({ severity: "error", category: "technical", evidence: "\u6700\u7ec8 HTML \u5305\u542b\u53ef\u6267\u884c\u811a\u672c", suggestedAction: "\u79fb\u9664\u5168\u90e8\u811a\u672c" }, true);
+  if (render.signals.hasExecutableDom && !render.signals.hasScripts) issue({ severity: "error", category: "technical", evidence: "\u6700\u7ec8 HTML \u5305\u542b\u4e8b\u4ef6\u5904\u7406\u5668\u3001\u5d4c\u5165\u6587\u6863\u6216\u5176\u4ed6\u53ef\u6267\u884c DOM", suggestedAction: "\u79fb\u9664\u5168\u90e8\u53ef\u6267\u884c DOM \u5165\u53e3" }, true);
+  if (render.signals.networkRequests.length > 0) issue({ severity: "error", category: "technical", evidence: `\u9875\u9762\u5c1d\u8bd5\u52a0\u8f7d ${render.signals.networkRequests.length} \u4e2a\u8fdc\u7a0b\u8d44\u6e90`, suggestedAction: "\u5c06\u8d44\u6e90\u5185\u8054\u4e3a data URL" }, true);
+  if (render.signals.hasSecretLikeText) issue({ severity: "error", category: "technical", evidence: "\u9875\u9762\u7591\u4f3c\u5305\u542b\u5bc6\u94a5\u6216\u4ee4\u724c", suggestedAction: "\u4ece\u4ea4\u4ed8\u4ef6\u4e2d\u79fb\u9664\u654f\u611f\u914d\u7f6e" }, true);
+  if (render.signals.hasUnresolvedPlaceholders) issue({ severity: "error", category: "structure", evidence: "\u9875\u9762\u4ecd\u5305\u542b\u6a21\u677f\u5360\u4f4d\u7b26", suggestedAction: "\u8865\u9f50\u5185\u5bb9\u548c\u8d44\u4ea7\u6620\u5c04" });
 
-  if (render.bodyScroll.width > render.viewport.width + 1 || render.bodyScroll.height > render.viewport.height + 1) {
-    issue({ severity: "error", category: "layout", evidence: `页面滚动尺寸 ${render.bodyScroll.width}×${render.bodyScroll.height} 超过画布`, suggestedAction: "压缩内容或切换更高容量模板" });
+  if (policy.expectedPageNumber !== undefined && render.structure.pageNumber !== String(policy.expectedPageNumber)) {
+    issue({ severity: "error", category: "structure", evidence: `\u6e32\u67d3\u9875\u7801 ${render.structure.pageNumber ?? "\u7f3a\u5931"} \u4e0e\u8ba1\u5212 ${policy.expectedPageNumber} \u4e0d\u4e00\u81f4`, suggestedAction: "\u4f7f\u7528\u663e\u5f0f\u9875\u8ba1\u5212\u7684\u9875\u7801" });
+  }
+  if (policy.profile) {
+    const actual = render.structure.profile;
+    if (!actual || actual.slug !== policy.profile.slug || actual.version !== policy.profile.version
+      || actual.themeId !== policy.profile.themeId || actual.format !== policy.profile.format) {
+      issue({ severity: "error", category: "structure", evidence: "\u6e32\u67d3 HTML \u7684\u6a21\u677f\u3001\u4e3b\u9898\u6216\u683c\u5f0f\u5143\u6570\u636e\u4e0e\u6240\u9009 profile \u4e0d\u4e00\u81f4", suggestedAction: "\u4ece\u6240\u9009 profile \u91cd\u65b0\u7ec4\u88c5\u9875\u9762" });
+    }
+    if (policy.documentPolicy && !policy.profile.documentCompatibility[policy.documentPolicy.documentType]) {
+      issue({ severity: "error", category: "structure", evidence: `\u6240\u9009 profile \u4e0d\u652f\u6301 ${policy.documentPolicy.documentType} \u6587\u6863`, suggestedAction: "\u9009\u62e9\u6587\u6863\u7b56\u7565\u517c\u5bb9 profile" });
+    }
+  }
+  const requiredLandmarks = [...new Set([...(policy.profile?.requiredLandmarks ?? []), ...(policy.documentPolicy?.requiredLandmarks ?? [])])];
+  for (const landmark of requiredLandmarks) {
+    const count = render.structure.landmarkCounts[landmark] ?? 0;
+    if (count !== 1) issue({ severity: "error", category: "structure", evidence: `\u5fc5\u9700\u5730\u6807 ${landmark} \u7684\u53ef\u89c1\u6570\u91cf\u4e3a ${count}\uff0c\u8981\u6c42\u6070\u597d 1 \u4e2a`, suggestedAction: "\u6062\u590d profile \u58f0\u660e\u7684\u552f\u4e00\u8bed\u4e49\u5730\u6807" });
+  }
+  for (const component of render.structure.blankComponents) {
+    issue({ severity: "error", category: "structure", targetId: component, evidence: `\u526a\u679d\u540e\u4ecd\u5b58\u5728\u7a7a\u767d\u53ef\u89c1\u7ec4\u4ef6 ${component}`, suggestedAction: "\u79fb\u9664\u7a7a\u767d\u7ec4\u4ef6\u6216\u5b8c\u6210\u5176\u5185\u5bb9\u6620\u5c04" });
+  }
+  for (const expected of policy.expectedMetadataBindings ?? []) {
+    const actual = (render.structure.pageFields[expected.field] ?? []).map(normalizedVisibleText);
+    const wanted = expected.values.map(normalizedVisibleText).filter(Boolean);
+    if (!orderedEqual(actual, wanted)) issue({ severity: "error", category: "structure", targetId: expected.field, evidence: `\u53ef\u89c1\u9875\u5143\u6570\u636e ${expected.field} \u4e0e\u5f53\u9875\u6301\u4e45\u5316\u8ba1\u5212\u4e0d\u4e00\u81f4`, suggestedAction: "\u6309\u5f53\u9875 metadata binding \u91cd\u65b0\u586b\u5145" });
+  }
+  if (policy.displayPlan) {
+    const expectedItems = policy.displayPlan.items;
+    const actualItems = render.structure.semanticItems;
+    if (actualItems.length !== expectedItems.length) issue({ severity: "error", category: "structure", evidence: `\u53ef\u89c1\u8bed\u4e49\u9879\u6570 ${actualItems.length} \u4e0e\u8ba1\u5212 ${expectedItems.length} \u4e0d\u4e00\u81f4`, suggestedAction: "\u6062\u590d\u6bcf\u4e2a\u5df2\u5206\u914d\u8bed\u4e49\u69fd\u4e14\u79fb\u9664\u91cd\u590d\u9879" });
+    for (const [index, expected] of expectedItems.entries()) {
+      const actual = actualItems[index];
+      const budget = policy.displayPlan.targetBudget.positionBudgets.find((entry) => entry.displayItemId === expected.id);
+      if (!actual || !actual.blockId || actual.slotId !== budget?.slotId || !orderedEqual(actual.sourceFactIds, expected.sourceFactIds)) {
+        issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u69fd\u4f4d\u6216 source fact \u5f52\u5c5e\u4e0d\u662f\u8ba1\u5212\u7684\u552f\u4e00\u6709\u5e8f\u6620\u5c04`, suggestedAction: "\u4f7f\u7528\u8ba1\u5212\u4e2d\u7684 slot/item/fact \u6620\u5c04\u91cd\u65b0\u7ec4\u88c5" });
+        continue;
+      }
+      if (actual.factTextOwnerCount !== 1 || actual.visibleFactTextOwnerCount !== 1) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u5fc5\u987b\u6709\u4e14\u4ec5\u6709\u4e00\u4e2a\u53ef\u89c1 fact-bearing text owner`, suggestedAction: "\u79fb\u9664\u9690\u85cf\u6216\u91cd\u590d\u4e8b\u5b9e\u6587\u672c\u5bb9\u5668" });
+      if (normalizedVisibleText(actual.factText) !== normalizedVisibleText(expected.body)) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u8bed\u4e49\u9879 ${expected.id} \u7684\u53ef\u89c1\u4e8b\u5b9e\u6587\u672c\u4e0d\u7b49\u4e8e grounded display text\uff0c\u53ef\u80fd\u7f3a\u5931\u5173\u952e\u9528\u70b9\u6216\u542b\u672a\u5f52\u56e0\u6570\u5b57/\u540d\u79f0`, suggestedAction: "\u4ec5\u6e32\u67d3 displayPlan \u7684\u62bd\u53d6\u5f0f\u6587\u672c" });
+      for (const factId of expected.sourceFactIds) {
+        const coverage = policy.displayPlan.factCoverages.find((candidate) => candidate.factId === factId);
+        for (const anchor of coverage?.criticalAnchors ?? []) {
+          if (!actual.factText.includes(anchor.text)) issue({ severity: "error", category: "fidelity", targetId: expected.id, evidence: `\u53ef\u89c1\u6587\u672c\u7f3a\u5c11 ${factId} \u7684\u5173\u952e ${anchor.kind} \u9528\u70b9`, suggestedAction: "\u6062\u590d displayPlan \u4fdd\u7559\u7684\u5173\u952e\u6e90\u6587\u5b50\u4e32" });
+        }
+      }
+    }
+    const actualFactOrder = actualItems.flatMap((item) => item.sourceFactIds);
+    const expectedFactOrder = expectedItems.flatMap((item) => item.sourceFactIds);
+    if (!orderedEqual(actualFactOrder, expectedFactOrder)) issue({ severity: "error", category: "fidelity", evidence: "\u53ef\u89c1\u8bed\u4e49\u9879\u672a\u5c06\u6240\u6709\u8ba1\u5212 fact ID \u6070\u597d\u4e00\u6b21\u4e14\u6309\u539f\u987a\u5e8f\u5c55\u793a", suggestedAction: "\u6309 displayPlan \u987a\u5e8f\u4fee\u590d fact \u6620\u5c04" });
+    if (new Set(actualItems.map((item) => item.blockId)).size !== actualItems.length) issue({ severity: "error", category: "structure", evidence: "\u53ef\u89c1\u8bed\u4e49\u9879\u7684 DOM block owner \u6807\u8bc6\u5fc5\u987b\u552f\u4e00", suggestedAction: "\u4e3a\u6bcf\u4e2a\u5206\u914d\u9879\u4fdd\u7559\u552f\u4e00 block owner" });
+    for (const slot of policy.profile?.semanticSlots.filter((candidate) => candidate.required) ?? []) {
+      if (!actualItems.some((item) => item.slotId === slot.id)) issue({ severity: "error", category: "structure", targetId: slot.id, evidence: `\u5fc5\u9700\u8bed\u4e49\u69fd ${slot.id} \u5728\u526a\u679d\u540e\u7f3a\u5931`, suggestedAction: "\u4e3a\u5fc5\u9700\u69fd\u4fdd\u7559\u81f3\u5c11\u4e00\u4e2a\u5df2\u5206\u914d\u9879" });
+    }
   }
 
-  for (const violation of render.layout.containmentViolations) {
-    issue({ severity: "error", category: "layout", targetId: violation.targetId, evidence: `可见内容超出或被祖先容器 ${violation.ancestorId} 裁切`, suggestedAction: "调整容器容量、字号或间距" });
-  }
-  for (const collision of render.layout.collisions) {
-    issue({ severity: "error", category: "layout", targetId: collision.firstId, evidence: `可见内容与 ${collision.secondId} 发生重叠碰撞`, suggestedAction: "调整布局轨道或缩短目标内容" });
-  }
+  if (render.bodyScroll.width > render.viewport.width + 1 || render.bodyScroll.height > render.viewport.height + 1) issue({ severity: "error", category: "layout", evidence: `\u9875\u9762\u6eda\u52a8\u5c3a\u5bf8 ${render.bodyScroll.width}\u00d7${render.bodyScroll.height} \u8d85\u8fc7\u753b\u5e03`, suggestedAction: "\u538b\u7f29\u5185\u5bb9\u6216\u5207\u6362\u66f4\u9ad8\u5bb9\u91cf\u6a21\u677f" });
+  for (const violation of render.layout.containmentViolations) issue({ severity: "error", category: "layout", targetId: violation.targetId, evidence: `\u53ef\u89c1\u5185\u5bb9\u8d85\u51fa\u6216\u88ab\u7956\u5148\u5bb9\u5668 ${violation.ancestorId} \u88c1\u5207`, suggestedAction: "\u8c03\u6574\u5bb9\u5668\u5bb9\u91cf\u3001\u5b57\u53f7\u6216\u95f4\u8ddd" });
+  for (const collision of render.layout.collisions) issue({ severity: "error", category: "layout", targetId: collision.firstId, evidence: `\u53ef\u89c1\u5185\u5bb9\u4e0e ${collision.secondId} \u53d1\u751f\u91cd\u53e0\u78b0\u649e`, suggestedAction: "\u8c03\u6574\u5e03\u5c40\u8f68\u9053\u6216\u7f29\u77ed\u76ee\u6807\u5185\u5bb9" });
 
-  const minimumBodyFontPt = policy.minimumBodyFontPt ?? 8.5;
+  const minimumBodyFontPt = strictMaximum([policy.minimumBodyFontPt, policy.profile?.minimumBodyFontPt, policy.documentPolicy?.minimumBodyFontPt], 8.5);
   const minimumBodyFontPx = minimumBodyFontPt * (96 / 72);
-  if (policy.maxRasterAreaRatio !== undefined && render.rasterAreaRatio > policy.maxRasterAreaRatio + 0.001) {
-    issue({
-      severity: "error",
-      category: "asset",
-      evidence: `位图面积占比 ${(render.rasterAreaRatio * 100).toFixed(1)}% 超过上限 ${(policy.maxRasterAreaRatio * 100).toFixed(1)}%`,
-      suggestedAction: "缩小位图容器或切换低位图占比模板",
-    });
-  }
-  const rasterAssetCount = render.images.filter((image) => !image.isVector).length;
-  if (policy.maximumRasterAssets !== undefined && rasterAssetCount > policy.maximumRasterAssets) {
-    issue({
-      severity: "error",
-      category: "asset",
-      evidence: `位图资产数量 ${rasterAssetCount} 超过上限 ${policy.maximumRasterAssets}`,
-      suggestedAction: "减少位图资产或切换兼容模板",
-    });
-  }
+  const maxRasterAreaRatio = strictMinimum([policy.maxRasterAreaRatio, policy.profile?.maxRasterAreaRatio, policy.documentPolicy?.maxRasterAreaRatio], 1);
+  if (render.rasterAreaRatio > maxRasterAreaRatio + 0.001) issue({ severity: "error", category: "asset", evidence: `\u4f4d\u56fe\u9762\u79ef\u5360\u6bd4 ${(render.rasterAreaRatio * 100).toFixed(1)}% \u8d85\u8fc7\u4e0a\u9650 ${(maxRasterAreaRatio * 100).toFixed(1)}%`, suggestedAction: "\u7f29\u5c0f\u4f4d\u56fe\u5bb9\u5668\u6216\u5207\u6362\u4f4e\u4f4d\u56fe\u5360\u6bd4\u6a21\u677f" });
+  const maximumRasterAssets = strictMinimum([policy.maximumRasterAssets, policy.profile?.imageSlots.maxAssets, policy.documentPolicy?.maxImageAssets], Number.MAX_SAFE_INTEGER);
+  if (render.raster.visibleCount > maximumRasterAssets) issue({ severity: "error", category: "asset", evidence: `\u53ef\u89c1\u4f4d\u56fe\u8d44\u4ea7\u6570\u91cf ${render.raster.visibleCount} \u8d85\u8fc7\u4e0a\u9650 ${maximumRasterAssets}`, suggestedAction: "\u51cf\u5c11\u4f4d\u56fe\u8d44\u4ea7\u6216\u5207\u6362\u517c\u5bb9\u6a21\u677f" });
 
   for (const element of render.elements) {
     const { rect } = element;
-    if (rect.x < -1 || rect.y < -1 || rect.x + rect.width > render.viewport.width + 1 || rect.y + rect.height > render.viewport.height + 1) {
-      issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} 超出安全画布边界`, suggestedAction: "调整模板间距或缩短目标内容" });
-    }
+    if (rect.x < -1 || rect.y < -1 || rect.x + rect.width > render.viewport.width + 1 || rect.y + rect.height > render.viewport.height + 1) issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} \u8d85\u51fa\u5b89\u5168\u753b\u5e03\u8fb9\u754c`, suggestedAction: "\u8c03\u6574\u6a21\u677f\u95f4\u8ddd\u6216\u7f29\u77ed\u76ee\u6807\u5185\u5bb9" });
     const clippedHorizontally = element.overflowX !== "visible" && element.scrollWidth > element.clientWidth + 1;
     const clippedVertically = element.overflowY !== "visible" && element.scrollHeight > element.clientHeight + 1;
-    if (clippedHorizontally || clippedVertically) {
-      issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} 存在文本滚动溢出`, suggestedAction: "定向改写该模块或切换模板" });
-    }
-    if (element.text && element.fontSize + 0.05 < minimumBodyFontPx) {
-      issue({ severity: "error", category: "readability", targetId: element.id, evidence: `字号 ${element.fontSize.toFixed(1)}px 低于 ${minimumBodyFontPt}pt 最小可读值`, suggestedAction: "提高字号并压缩文案" });
-    }
+    if (clippedHorizontally || clippedVertically) issue({ severity: "error", category: "layout", targetId: element.id, evidence: `${element.tag} \u5b58\u5728\u6587\u672c\u6eda\u52a8\u6ea2\u51fa`, suggestedAction: "\u5b9a\u5411\u6539\u5199\u8be5\u6a21\u5757\u6216\u5207\u6362\u6a21\u677f" });
+    if (element.text && element.bodyText && element.fontSize + 0.001 < minimumBodyFontPx) issue({ severity: "error", category: "readability", targetId: element.id, evidence: `\u5b57\u53f7 ${element.fontSize.toFixed(2)}px \u4f4e\u4e8e ${minimumBodyFontPt}pt \u6700\u5c0f\u53ef\u8bfb\u503c`, suggestedAction: "\u63d0\u9ad8\u5b57\u53f7\u5e76\u538b\u7f29\u6587\u6848" });
     const minimumContrast = element.largeText ? 3 : 4.5;
-    if (element.text && element.contrastMeasurable && element.contrastRatio < minimumContrast) {
-      issue({ severity: "error", category: "readability", targetId: element.id, evidence: `文字对比度 ${element.contrastRatio.toFixed(2)}:1 低于 ${minimumContrast}:1`, suggestedAction: "启用高对比配色" });
-    }
+    if (element.text && element.contrastMeasurable && element.contrastRatio < minimumContrast) issue({ severity: "error", category: "readability", targetId: element.id, evidence: `\u6587\u5b57\u5bf9\u6bd4\u5ea6 ${element.contrastRatio.toFixed(2)}:1 \u4f4e\u4e8e ${minimumContrast}:1`, suggestedAction: "\u542f\u7528\u9ad8\u5bf9\u6bd4\u914d\u8272" });
   }
 
   for (const [index, image] of render.images.entries()) {
-    if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0 || image.opaqueRatio < 0.02) {
-      issue({ severity: "error", category: "asset", targetId: `image-${index + 1}`, evidence: "图片未加载或有效像素不足", suggestedAction: "重新注入有效图片资产" }, true);
-    } else if (!image.isVector && image.luminanceVariance < 0.0005) {
-      issue({ severity: "warning", category: "asset", targetId: `image-${index + 1}`, evidence: "图片视觉变化过低，可能是占位色块", suggestedAction: "检查或重新生成图片" });
-    }
+    if (!/^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/i.test(image.src)) issue({ severity: "error", category: "asset", targetId: `image-${index + 1}`, evidence: "\u56fe\u7247\u4e0d\u662f\u5141\u8bb8\u7684\u5185\u8054\u672c\u5730\u4f4d\u56fe\u6216\u77e2\u91cf\u8d44\u4ea7", suggestedAction: "\u5c06\u5df2\u9a8c\u8bc1\u56fe\u7247\u5185\u8054\u4e3a data URL" }, true);
+    else if (!image.complete || image.naturalWidth === 0 || image.naturalHeight === 0 || image.opaqueRatio < 0.02) issue({ severity: "error", category: "asset", targetId: `image-${index + 1}`, evidence: "\u56fe\u7247\u672a\u52a0\u8f7d\u6216\u6709\u6548\u50cf\u7d20\u4e0d\u8db3", suggestedAction: "\u91cd\u65b0\u6ce8\u5165\u6709\u6548\u56fe\u7247\u8d44\u4ea7" }, true);
+    else if (!image.isVector && image.luminanceVariance < 0.0005) issue({ severity: "warning", category: "asset", targetId: `image-${index + 1}`, evidence: "\u56fe\u7247\u89c6\u89c9\u53d8\u5316\u8fc7\u4f4e\uff0c\u53ef\u80fd\u662f\u5360\u4f4d\u8272\u5757", suggestedAction: "\u68c0\u67e5\u6216\u91cd\u65b0\u751f\u6210\u56fe\u7247" });
   }
-  if (render.occupiedRatio < 0.05 || render.occupiedRatio > 0.95) {
-    issue({ severity: "warning", category: "layout", evidence: `内容占用率 ${(render.occupiedRatio * 100).toFixed(1)}% 异常`, suggestedAction: "检查页面信息密度" });
-  }
+  if (render.occupiedRatio < 0.05 || render.occupiedRatio > 0.95) issue({ severity: "warning", category: "layout", evidence: `\u5185\u5bb9\u5360\u7528\u7387 ${(render.occupiedRatio * 100).toFixed(1)}% \u5f02\u5e38`, suggestedAction: "\u68c0\u67e5\u9875\u9762\u4fe1\u606f\u5bc6\u5ea6" });
 
   return { safeToReturn, hardGatePassed: hardGatePassed && safeToReturn, issues };
 }

@@ -22,7 +22,7 @@ export const slideBlockSchema = z.object({
 }).strict();
 
 export const assetSpecSchema = z.object({
-  id: z.string().regex(/^(?:img|icon)-\d{3}$/),
+  id: z.string().regex(/^(?:p\d+-)?(?:img|icon)-\d{3}$/),
   type: z.enum(["image", "icon"]),
   blockId: z.string().regex(/^block-\d+$/),
   prompt: z.string().trim().min(10).max(1_200),

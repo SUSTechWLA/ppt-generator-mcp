@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import * as z from "zod/v4";
+import { documentTypeSchema, pageMetadataSchema } from "./document-context.js";
 import { slideSpecSchema } from "./slide-spec.js";
 
 export const sourceSectionInputSchema = z.object({
@@ -14,7 +15,7 @@ export const qualitySettingsSchema = z.object({
 }).strict().default({ minScore: 85, maxAttempts: 3 });
 
 export const externalAssetInputSchema = z.object({
-  id: z.string().regex(/^(?:img|icon)-\d{3}$/),
+  id: z.string().regex(/^(?:p\d+-)?(?:img|icon)-\d{3}$/),
   dataUrl: z.string().min(32).max(20_000_000).regex(/^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/),
 }).strict();
 
@@ -25,6 +26,8 @@ export const generateSlideInputSchema = z.object({
   audience: z.string().trim().max(200).optional(),
   plannedSpec: slideSpecSchema.optional(),
   externalAssets: z.array(externalAssetInputSchema).max(6).optional(),
+  documentType: documentTypeSchema.optional(),
+  page: pageMetadataSchema.optional(),
   quality: qualitySettingsSchema,
   requestId: z.string().trim().min(8).max(128).optional(),
 }).strict().superRefine((value, context) => {

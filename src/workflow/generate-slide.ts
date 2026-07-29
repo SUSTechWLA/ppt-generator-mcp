@@ -32,7 +32,7 @@ export interface WorkflowDependencies {
   runStore: RunStore;
   profiles: TemplateProfile[];
   normalizeSource(input: GenerateSlideRequest): SourceDocument;
-  buildSlideSpec(source: SourceDocument, audience?: string): Promise<SlideSpec>;
+  buildSlideSpec(source: SourceDocument, audience?: string, documentType?: DocumentType): Promise<SlideSpec>;
   selectTemplate(spec: SlideSpec, forcedSlug?: string, documentType?: DocumentType, preferredThemeId?: string): TemplateSelection;
   generateAssets(runId: string, specs: AssetSpec[], externalAssets?: ExternalAsset[]): Promise<GeneratedAsset[]>;
   composeSlide(spec: SlideSpec, selection: TemplateSelection, assets: GeneratedAsset[], page?: PageMetadata): Promise<ComposeResult>;
@@ -94,7 +94,7 @@ export async function generateSlideWorkflow(rawInput: unknown, deps: WorkflowDep
       validateFactReferences(source, input.plannedSpec);
       return input.plannedSpec;
     }
-    return deps.buildSlideSpec(source, input.audience);
+    return deps.buildSlideSpec(source, input.audience, input.documentType);
   });
   const selection = await runStage(deps.runStore, run, "select_template", () => deps.selectTemplate(spec, input.templateSlug, input.documentType, input.preferredThemeId));
   const assets = await runStage(deps.runStore, run, "generate_assets", () => deps.generateAssets(run.runId, spec.assets, input.externalAssets));

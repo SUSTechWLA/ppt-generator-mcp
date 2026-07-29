@@ -53,6 +53,14 @@ export const auxiliaryCapacitySchema = z.object({
   valuesPerItem: z.number().int().min(1).max(8),
 }).strict();
 
+export const auxiliaryGroupSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9-]*$/),
+  bindingFields: z.array(z.string().min(1)).min(1),
+  itemCapacity: z.number().int().min(1).max(24),
+  itemSelector: z.string().trim().min(1).max(120),
+  connectorSelector: z.string().trim().min(1).max(120).optional(),
+}).strict();
+
 export const pageBindingsSchema = z.object({
   pageTitle: placeholderTagSchema,
   pageNumber: placeholderTagSchema,
@@ -95,6 +103,7 @@ export const templateProfileSchema = z.object({
   semanticSlots: z.array(semanticSlotSchema).min(1).max(12),
   auxiliaryBindings: slotBindingsSchema.optional(),
   auxiliaryCapacities: z.record(z.string(), auxiliaryCapacitySchema).optional(),
+  auxiliaryGroups: z.array(auxiliaryGroupSchema).max(24).optional(),
   pageBindings: pageBindingsSchema,
   blockCapacity: z.number().int().min(1).max(12),
   supportedBlocks: z.array(slideBlockTypeSchema).min(1),
@@ -146,6 +155,26 @@ export const templateProfileSchema = z.object({
   const auxiliaryCapacityFields = Object.keys(profile.auxiliaryCapacities ?? {}).sort();
   if (auxiliaryFields.join("|") !== auxiliaryCapacityFields.join("|")) {
     context.addIssue({ code: "custom", message: "Every auxiliary binding must declare cardinality and expansion", path: ["auxiliaryCapacities"] });
+  }
+  const groupIds = (profile.auxiliaryGroups ?? []).map((group) => group.id);
+  if (new Set(groupIds).size !== groupIds.length) {
+    context.addIssue({ code: "custom", message: "Auxiliary group IDs must be unique", path: ["auxiliaryGroups"] });
+  }
+  for (const [index, group] of (profile.auxiliaryGroups ?? []).entries()) {
+    for (const field of group.bindingFields) {
+      if (!profile.auxiliaryBindings || !(field in profile.auxiliaryBindings)) {
+        context.addIssue({ code: "custom", message: `Auxiliary group field ${field} must reference a declared auxiliary binding`, path: ["auxiliaryGroups", index, "bindingFields"] });
+      }
+    }
+  }
+  for (const [field, capacity] of Object.entries(profile.auxiliaryCapacities ?? {})) {
+    if (capacity.itemCapacity <= 1) continue;
+    const coveredCapacity = (profile.auxiliaryGroups ?? [])
+      .filter((group) => group.bindingFields.includes(field))
+      .reduce((total, group) => total + group.itemCapacity, 0);
+    if (coveredCapacity !== capacity.itemCapacity) {
+      context.addIssue({ code: "custom", message: `Repeated auxiliary binding ${field} must be fully covered by pruning groups`, path: ["auxiliaryGroups"] });
+    }
   }
 });
 

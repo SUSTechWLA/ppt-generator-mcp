@@ -53,7 +53,7 @@ function parseXmlCommentHeader(html: string): Partial<TemplateMeta> {
 
   const lines = comment.split("\n");
   for (const line of lines) {
-    const m = line.match(/^@(\S+)\s+(.+)$/);
+    const m = line.match(/^\s*@(\S+)\s+(.+)$/);
     if (m) {
       meta[m[1]] = m[2].trim();
     }
@@ -208,9 +208,17 @@ export function listTemplates(
         const commentMeta = parseXmlCommentHeader(first80Lines);
         const dom = new JSDOM(html);
         const htmlMeta = parseMetaTags(dom.window.document);
+        const commentSlug = commentMeta.slug?.trim() ?? "";
+        const htmlSlug = htmlMeta.slug?.trim() ?? "";
+        if (!commentSlug && !htmlSlug) {
+          throw new Error(`Template HTML is missing an embedded template slug: ${path.relative(templatesDir, fullPath)}`);
+        }
+        if (commentSlug && htmlSlug && commentSlug !== htmlSlug) {
+          throw new Error(`Template HTML has conflicting embedded template slugs: ${path.relative(templatesDir, fullPath)}`);
+        }
 
         const meta: TemplateMeta = {
-          slug: commentMeta.slug || htmlMeta.slug || "",
+          slug: commentSlug || htmlSlug,
           name: commentMeta.name || htmlMeta.name || "",
           description: commentMeta.description || htmlMeta.description || "",
           usecase: commentMeta.usecase?.length
@@ -230,6 +238,15 @@ export function listTemplates(
   }
 
   scanDir(templatesDir);
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const template of result) {
+    if (seen.has(template.slug)) duplicates.add(template.slug);
+    seen.add(template.slug);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(`Template catalog contains duplicate embedded template slugs: ${[...duplicates].sort().join(", ")}`);
+  }
   return result;
 }
 
@@ -242,9 +259,7 @@ export function loadTemplate(
 ): ParsedTemplate {
   // Find the template file
   const templates = listTemplates(templatesDir);
-  // Prioritize exact slug match, fall back to partial path match
-  const tpl = templates.find((t) => t.slug === slug)
-    || templates.find((t) => t.filePath.includes(slug));
+  const tpl = templates.find((t) => t.slug === slug);
 
   if (!tpl) {
     throw new Error(

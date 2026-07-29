@@ -184,6 +184,28 @@ function validateImageContainerSelector(template: ReturnType<typeof loadTemplate
   }
 }
 
+function validateAuxiliaryGroups(template: ReturnType<typeof loadTemplate>, profile: TemplateProfile): void {
+  const doc = new JSDOM(template.html).window.document;
+  for (const group of profile.auxiliaryGroups ?? []) {
+    for (const selector of [group.itemSelector, group.connectorSelector].filter((value): value is string => Boolean(value))) {
+      if (!SIMPLE_LOCAL_SELECTOR.test(selector) || FORBIDDEN_IMAGE_CONTAINER_SELECTORS.has(selector.toLowerCase())) {
+        throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} has an unsafe or malformed selector`);
+      }
+    }
+    const capacity = group.itemCapacity;
+    const itemCount = doc.querySelectorAll(group.itemSelector).length;
+    if (itemCount !== capacity) {
+      throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} item selector count ${itemCount} does not match capacity ${capacity}`);
+    }
+    if (group.connectorSelector) {
+      const connectorCount = doc.querySelectorAll(group.connectorSelector).length;
+      if (connectorCount !== Math.max(0, capacity - 1)) {
+        throw new Error(`Template profile ${profile.slug} auxiliary group ${group.id} connector selector count ${connectorCount} does not match capacity ${capacity}`);
+      }
+    }
+  }
+}
+
 export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
   const catalogs = findProfileCatalogs(templatesDir);
   if (catalogs.length === 0) {
@@ -251,6 +273,7 @@ export function loadTemplateProfiles(templatesDir: string): TemplateProfile[] {
       throw new Error(`Template profile ${profile.slug} image slot capacity ${profile.imageSlots.placeholderCount} does not match HTML count ${actualImageSlots}`);
     }
     validateImageContainerSelector(template, profile);
+    validateAuxiliaryGroups(template, profile);
   }
   for (const slug of actual) {
     if (!slugs.includes(slug)) throw new Error(`HTML template has no approved profile: ${slug}`);

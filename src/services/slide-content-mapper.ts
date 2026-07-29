@@ -146,7 +146,18 @@ export function mapSlideContent(
       if (!cardinality) throw new Error(`Auxiliary binding ${field} has no declared cardinality`);
       const maximum = cardinality.itemCapacity * cardinality.valuesPerItem;
       const available = count(template, tag);
-      if (available > 0) append(mapped, tag, valuesFor(field, blocks.slice(0, cardinality.itemCapacity), roles.slice(0, cardinality.itemCapacity), cardinality.valuesPerItem).slice(0, maximum));
+      if (available > 0) {
+        const groups = (profile.auxiliaryGroups ?? []).filter((group) => group.bindingFields.includes(field));
+        const values = groups.length > 0
+          ? groups.flatMap((group) => valuesFor(
+              field,
+              blocks.slice(0, group.itemCapacity),
+              roles.slice(0, group.itemCapacity),
+              cardinality.valuesPerItem,
+            ))
+          : valuesFor(field, blocks.slice(0, cardinality.itemCapacity), roles.slice(0, cardinality.itemCapacity), cardinality.valuesPerItem);
+        append(mapped, tag, values.slice(0, maximum));
+      }
     }
   }
 

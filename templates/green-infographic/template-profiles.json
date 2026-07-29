@@ -35,6 +35,13 @@
       "nodeLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
       "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
+    "auxiliaryGroups": [
+      { "id": "process", "bindingFields": ["stepLabel"], "itemCapacity": 5, "itemSelector": ".process-step", "connectorSelector": ".process-arrow" },
+      { "id": "timeline", "bindingFields": ["stageLabel", "stageNumber"], "itemCapacity": 4, "itemSelector": ".timeline-stage" },
+      { "id": "capability", "bindingFields": ["itemLabel"], "itemCapacity": 3, "itemSelector": ".capability-item" },
+      { "id": "organization", "bindingFields": ["nodeLabel"], "itemCapacity": 3, "itemSelector": ".org-level", "connectorSelector": ".org-connector" },
+      { "id": "summary", "bindingFields": ["bullet"], "itemCapacity": 3, "itemSelector": ".summary-item" }
+    ],
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -82,6 +89,9 @@
     ],
     "auxiliaryBindings": { "bullet": "bullet" },
     "auxiliaryCapacities": { "bullet": { "itemCapacity": 3, "valuesPerItem": 1 } },
+    "auxiliaryGroups": [
+      { "id": "summary", "bindingFields": ["bullet"], "itemCapacity": 3, "itemSelector": ".summary-item" }
+    ],
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -133,6 +143,11 @@
       "itemLabel": { "itemCapacity": 4, "valuesPerItem": 1 },
       "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
+    "auxiliaryGroups": [
+      { "id": "process", "bindingFields": ["stepLabel"], "itemCapacity": 4, "itemSelector": ".process-step", "connectorSelector": ".process-arrow" },
+      { "id": "capability", "bindingFields": ["itemLabel"], "itemCapacity": 4, "itemSelector": ".capability-item" },
+      { "id": "summary", "bindingFields": ["bullet"], "itemCapacity": 3, "itemSelector": ".summary-item" }
+    ],
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -183,6 +198,11 @@
       "tableCell": { "itemCapacity": 6, "valuesPerItem": 4 },
       "bullet": { "itemCapacity": 7, "valuesPerItem": 1 }
     },
+    "auxiliaryGroups": [
+      { "id": "matrix-rows", "bindingFields": ["tableCell"], "itemCapacity": 6, "itemSelector": ".data-row" },
+      { "id": "detail-bullets", "bindingFields": ["bullet"], "itemCapacity": 4, "itemSelector": ".detail-bullet" },
+      { "id": "summary", "bindingFields": ["bullet"], "itemCapacity": 3, "itemSelector": ".summary-item" }
+    ],
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -242,6 +262,11 @@
       "stageNumber": { "itemCapacity": 4, "valuesPerItem": 1 },
       "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
+    "auxiliaryGroups": [
+      { "id": "narratives", "bindingFields": ["title", "narrativeBody"], "itemCapacity": 2, "itemSelector": ".narrative-card" },
+      { "id": "timeline", "bindingFields": ["stageLabel", "stageNumber"], "itemCapacity": 4, "itemSelector": ".timeline-stage" },
+      { "id": "summary", "bindingFields": ["bullet"], "itemCapacity": 3, "itemSelector": ".summary-item" }
+    ],
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",
@@ -300,6 +325,11 @@
       "itemLabel": { "itemCapacity": 3, "valuesPerItem": 1 },
       "bullet": { "itemCapacity": 3, "valuesPerItem": 1 }
     },
+    "auxiliaryGroups": [
+      { "id": "narratives", "bindingFields": ["title", "narrativeBody"], "itemCapacity": 2, "itemSelector": ".narrative-card" },
+      { "id": "capability", "bindingFields": ["itemLabel"], "itemCapacity": 3, "itemSelector": ".capability-item" },
+      { "id": "summary", "bindingFields": ["bullet"], "itemCapacity": 3, "itemSelector": ".summary-item" }
+    ],
     "pageBindings": {
       "pageTitle": "page-title",
       "pageNumber": "page-number",

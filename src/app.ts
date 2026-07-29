@@ -12,7 +12,7 @@ import {
 import { generateAssets } from "./services/asset-generator.js";
 import { composeSlide } from "./services/slide-composer.js";
 import { normalizeSource } from "./services/content-normalizer.js";
-import { buildDeterministicSlideSpec } from "./services/deterministic-slide-spec.js";
+import { buildDeterministicSlideSpec, constrainSlideSpecToPlanningPolicy } from "./services/deterministic-slide-spec.js";
 import { evaluateDeterministic } from "./services/deterministic-evaluator.js";
 import { renderPage, type RenderResult } from "./services/page-renderer.js";
 import { executeRepairs } from "./services/repair-executor.js";
@@ -46,9 +46,13 @@ export function createProductionDependencies(
     runStore,
     profiles,
     normalizeSource,
-    buildSlideSpec: async (source, audience) => textProvider
-      ? buildSlideSpec(source, textProvider, audience)
-      : buildDeterministicSlideSpec(source),
+    buildSlideSpec: async (source, audience, documentType) => {
+      const policy = getDocumentTemplatePolicy(documentType ?? "presentation");
+      const planningPolicy = { maxRasterAreaRatio: policy.maxRasterAreaRatio, maxImageAssets: policy.maxImageAssets };
+      return textProvider
+        ? constrainSlideSpecToPlanningPolicy(await buildSlideSpec(source, textProvider, audience), planningPolicy)
+        : buildDeterministicSlideSpec(source, planningPolicy);
+    },
     selectTemplate: (spec, forcedSlug, documentType, preferredThemeId) => selectTemplate(spec, profiles, forcedSlug, documentType, preferredThemeId),
     generateAssets: async (runId, specs, externalAssets) => generateAssets({
       specs,

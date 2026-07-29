@@ -60,3 +60,46 @@ test("Markdown and sections both complete the Agent-mediated MCP workflow", asyn
     assert.doesNotMatch(manifest, /api[_-]?key|Bearer\s+/i);
   }
 });
+
+test("no-LLM production MCP plans and generates an ordinary bid page within document policy", async (t) => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "ppt-bid-acceptance-"));
+  const dependencies = createProductionDependencies(loadAppConfig({ PPT_OUTPUT_ROOT: outputRoot }), { templatesDir: resolve("templates") });
+  const server = createPptMcpServer(dependencies);
+  const client = new Client({ name: "bid-acceptance", version: "1.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  t.after(async () => { await client.close(); await server.close(); });
+
+  const input = {
+    sourceText: "# 服务响应方案\n\n项目建立固定对接窗口。接到指令后30分钟内启动响应。全过程形成可核验记录。",
+    documentType: "bid",
+    preferredThemeId: "green-infographic-v1",
+    quality: { minScore: 85, maxAttempts: 2 },
+  };
+  const plan = await client.callTool({ name: "plan_slide", arguments: input });
+  assert.equal(plan.isError, undefined, JSON.stringify(plan.content));
+  const planned = plan.structuredContent as {
+    plannedSpec: { designIntent: { visualRatio: number } };
+    selectedTemplate: { slug: string };
+    assets: Array<{ id: string }>;
+  };
+  assert.ok(planned.plannedSpec.designIntent.visualRatio <= 0.18);
+  assert.ok(planned.assets.length <= 1);
+
+  const generated = await client.callTool({
+    name: "generate_slide",
+    arguments: {
+      ...input,
+      plannedSpec: planned.plannedSpec,
+      templateSlug: planned.selectedTemplate.slug,
+      externalAssets: planned.assets.map((asset) => ({ id: asset.id, dataUrl: externalDataUrl })),
+      requestId: "ordinary-bid-no-llm",
+    },
+  });
+  assert.equal(generated.isError, undefined, JSON.stringify(generated.content));
+  const result = generated.structuredContent as { status: string; quality: { hardGatePassed: boolean }; artifacts: { htmlPath: string } };
+  assert.equal(result.status, "delivered");
+  assert.equal(result.quality.hardGatePassed, true);
+  const html = await readFile(result.artifacts.htmlPath, "utf8");
+  assert.doesNotMatch(html, /<script|https?:\/\//i);
+});

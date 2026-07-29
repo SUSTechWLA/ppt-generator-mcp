@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { JSDOM } from "jsdom";
 
 import type { GeneratedAsset, SlideSpec } from "../domain/slide-spec.js";
@@ -26,14 +26,36 @@ export interface ComposeResult {
 }
 
 async function inlineCss(doc: Document, templatePath: string): Promise<void> {
+  const familyRoot = await realpath(dirname(templatePath));
   const links = Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'));
   for (const link of links) {
     const href = link.getAttribute("href");
-    if (!href || /^(?:https?:|data:|\/\/)/i.test(href)) throw new Error(`Remote or invalid stylesheet is not allowed: ${href ?? "missing"}`);
-    const cssPath = resolve(dirname(templatePath), href);
+    if (!href
+      || isAbsolute(href)
+      || href.includes("\\")
+      || href.includes("?")
+      || href.includes("#")
+      || href.split("/").includes("..")
+      || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)
+      || !href.toLowerCase().endsWith(".css")) {
+      throw new Error("Stylesheet path must be a relative CSS file inside the template family");
+    }
+    const requestedPath = resolve(familyRoot, href);
+    const requestedDelta = relative(familyRoot, requestedPath);
+    if (requestedDelta === ".." || requestedDelta.startsWith(`..${sep}`) || isAbsolute(requestedDelta)) {
+      throw new Error("Stylesheet path resolves outside the template family");
+    }
+    const cssPath = await realpath(requestedPath);
+    const actualDelta = relative(familyRoot, cssPath);
+    if (actualDelta === ".." || actualDelta.startsWith(`..${sep}`) || isAbsolute(actualDelta)) {
+      throw new Error("Stylesheet symlink resolves outside the template family");
+    }
+    const css = await readFile(cssPath, "utf8");
+    if (/\\|@import\b|\burl\s*\(|\b(?:-webkit-)?image-set\s*\(|(?:https?|file|data):|\/\//i.test(css)) {
+      throw new Error("Unsafe stylesheet resource directive is not allowed");
+    }
     const style = doc.createElement("style");
     style.setAttribute("data-inline-source", href);
-    const css = await readFile(cssPath, "utf8");
     style.textContent = css
       .replace(/(?:\.img-slot|\.icon-slot)[^{]*\{[^}]*\}/g, "")
       .replace(/\/\* Asset slots[^*]*\*\//g, "");
@@ -140,6 +162,19 @@ function prepareTemplateHtml(template: ParsedTemplate, profile: TemplateProfile,
   }
   const assignedCount = solution.assignments.length;
   doc.querySelector(".bid-page")?.setAttribute("data-semantic-item-count", String(assignedCount));
+  for (const group of profile.auxiliaryGroups ?? []) {
+    const capacity = group.itemCapacity;
+    const usedItems = Math.min(assignedCount, capacity);
+    Array.from(doc.querySelectorAll(group.itemSelector)).forEach((element, index) => {
+      if (index >= usedItems) element.remove();
+    });
+    if (group.connectorSelector) {
+      const usedConnectors = Math.max(0, usedItems - 1);
+      Array.from(doc.querySelectorAll(group.connectorSelector)).forEach((element, index) => {
+        if (index >= usedConnectors) element.remove();
+      });
+    }
+  }
   for (const element of Array.from(doc.querySelectorAll("[data-min-semantic-items]"))) {
     const minimum = Number.parseInt(element.getAttribute("data-min-semantic-items") ?? "", 10);
     if (Number.isFinite(minimum) && assignedCount < minimum) element.remove();

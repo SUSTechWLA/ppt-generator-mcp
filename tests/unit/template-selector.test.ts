@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolve } from "node:path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -103,6 +103,19 @@ test("green visual baseline preserves canonical placeholder cardinality", () => 
     },
     { componentTitle: 3, paragraph: 3, stepLabel: 4, itemLabel: 4, bullet: 3, figures: 1 },
   );
+});
+
+test("every repeated auxiliary binding is fully covered by declarative pruning groups", () => {
+  const profiles = loadTemplateProfiles(resolve("templates"));
+  for (const profile of profiles) {
+    for (const [field, capacity] of Object.entries(profile.auxiliaryCapacities ?? {})) {
+      if (capacity.itemCapacity <= 1) continue;
+      const covered = ((profile.auxiliaryGroups ?? []) as Array<{ bindingFields: string[]; itemCapacity?: number }>)
+        .filter((group) => group.bindingFields.includes(field))
+        .reduce((total, group) => total + (group.itemCapacity ?? 0), 0);
+      assert.equal(covered, capacity.itemCapacity, `${profile.slug}.${field} must be covered exactly once across its visible repeated groups`);
+    }
+  }
 });
 
 test("family audit hard-excludes bid profiles above raster or image limits", () => {
@@ -417,6 +430,43 @@ test("loader rejects a bound placeholder without a declared character capacity",
   }));
   try {
     assert.throws(() => loadTemplateProfiles(fixture.directory), /character capacity/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects duplicate embedded template slugs before profile matching", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({ profile, html }));
+  try {
+    const duplicate = await readFile(join(fixture.directory, "fixture.html"), "utf8");
+    await writeFile(join(fixture.directory, "duplicate.html"), duplicate);
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /duplicate.*template slug/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects template HTML without an embedded slug", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile,
+    html: html
+      .replace(/^\s*@slug\s+.*$/m, "")
+      .replace(/<meta\s+name=["']template-slug["'][^>]*>/i, ""),
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /missing.*template slug/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("loader rejects conflicting comment and HTML template slugs", async () => {
+  const fixture = await temporaryCatalog((profile, html) => ({
+    profile,
+    html: html.replace("<head>", '<head><meta name="template-slug" content="conflicting-slug">'),
+  }));
+  try {
+    assert.throws(() => loadTemplateProfiles(fixture.directory), /conflicting.*template slug/i);
   } finally {
     await fixture.cleanup();
   }

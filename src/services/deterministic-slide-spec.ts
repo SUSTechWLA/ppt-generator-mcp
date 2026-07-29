@@ -1,6 +1,11 @@
 import type { SourceDocument, SourceFact } from "../domain/source-document.js";
 import { slideSpecSchema, type SlideBlock, type SlideSpec } from "../domain/slide-spec.js";
 
+export interface SlidePlanningPolicy {
+  maxRasterAreaRatio: number;
+  maxImageAssets: number;
+}
+
 function titleFor(index: number, heading?: string): string {
   const fallback = ["核心要求", "落实机制", "交付校验", "持续保障"][index] ?? `方案要点${index + 1}`;
   return (heading || fallback).trim().slice(0, 30).padEnd(2, "要");
@@ -10,7 +15,21 @@ function factFor(source: SourceDocument, index: number): SourceFact {
   return source.facts[index % source.facts.length];
 }
 
-export function buildDeterministicSlideSpec(source: SourceDocument): SlideSpec {
+export function constrainSlideSpecToPlanningPolicy(spec: SlideSpec, policy: SlidePlanningPolicy): SlideSpec {
+  return slideSpecSchema.parse({
+    ...spec,
+    assets: spec.assets.slice(0, policy.maxImageAssets),
+    designIntent: {
+      ...spec.designIntent,
+      visualRatio: Math.min(spec.designIntent.visualRatio, policy.maxRasterAreaRatio),
+    },
+  });
+}
+
+export function buildDeterministicSlideSpec(
+  source: SourceDocument,
+  policy: SlidePlanningPolicy = { maxRasterAreaRatio: 0.3, maxImageAssets: 1 },
+): SlideSpec {
   if (source.facts.length === 0) throw new Error("Source document contains no facts for slide planning");
   const blockCount = Math.min(4, Math.max(3, source.sections.length));
   const blocks: SlideBlock[] = Array.from({ length: blockCount }, (_, index) => {
@@ -30,7 +49,7 @@ export function buildDeterministicSlideSpec(source: SourceDocument): SlideSpec {
   const factIds = [...new Set(blocks.flatMap((block) => block.sourceFactIds))];
   const title = (source.title || source.sections[0].heading || "项目服务方案").slice(0, 40);
   const conclusion = `围绕${blocks.slice(0, 3).map((block) => block.title).join("、")}形成可执行、可检查的项目响应。`.slice(0, 160);
-  return slideSpecSchema.parse({
+  return constrainSlideSpecToPlanningPolicy(slideSpecSchema.parse({
     title: title.length >= 4 ? title : `${title}方案`,
     eyebrow: "项目方案响应",
     conclusion,
@@ -47,5 +66,5 @@ export function buildDeterministicSlideSpec(source: SourceDocument): SlideSpec {
     }],
     sourceFactIds: factIds,
     designIntent: { tone: "professional", density: blockCount >= 4 ? "high" : "medium", visualRatio: 0.3 },
-  });
+  }), policy);
 }

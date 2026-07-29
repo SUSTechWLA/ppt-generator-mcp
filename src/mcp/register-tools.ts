@@ -50,7 +50,7 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
     outputSchema: planSlideOutputSchema,
   }, async (input) => safeTool(async () => {
     const source = dependencies.normalizeSource(input);
-    const spec = input.plannedSpec ?? await dependencies.buildSlideSpec(source, input.audience);
+    const spec = input.plannedSpec ?? await dependencies.buildSlideSpec(source, input.audience, input.documentType);
     validateFactReferences(source, spec);
     const selection = dependencies.selectTemplate(spec, input.templateSlug, input.documentType, input.preferredThemeId);
     const output = {

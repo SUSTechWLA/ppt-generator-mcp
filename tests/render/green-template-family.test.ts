@@ -10,7 +10,11 @@ import { loadTemplate } from "../../src/lib/template-parser.js";
 import { evaluateDeterministic } from "../../src/services/deterministic-evaluator.js";
 import { renderPage } from "../../src/services/page-renderer.js";
 import { composeSlide } from "../../src/services/slide-composer.js";
+import { evaluateSlide } from "../../src/services/slide-evaluator.js";
+import { executeRepairs, type RepairState } from "../../src/services/repair-executor.js";
 import { getDocumentTemplatePolicy, loadTemplateProfiles, selectTemplate } from "../../src/services/template-selector.js";
+import { runQualityLoop } from "../../src/workflow/quality-loop.js";
+import { makeSourceDocument } from "../helpers/domain-fixtures.js";
 
 const templatesDir = resolve("templates");
 const profiles = loadTemplateProfiles(templatesDir);
@@ -105,3 +109,86 @@ for (const scenario of [
     assert.equal(report.hardGatePassed, true, `${selection.slug}: ${JSON.stringify(report.issues, null, 2)}`);
   });
 }
+
+test("repair design tokens produce measurable layout changes without dropping below 8.5pt", async () => {
+  const templateSlug = "green-infographic-bid-a4-landscape";
+  const profile = profiles.find((candidate) => candidate.slug === templateSlug)!;
+  const template = loadTemplate(templatesDir, templateSlug);
+  const spec = specFor(["text", "text", "text"]);
+  const output = await mkdtemp(join(tmpdir(), "green-token-render-"));
+  const normal = await composeSlide({ spec, profile, template, assets: [] });
+  const repaired = await composeSlide({
+    spec,
+    profile,
+    template,
+    assets: [],
+    designTokens: { fontScale: 0.86, spacingScale: 0.88, contrastMode: "high" },
+  });
+  const normalRender = await renderPage({ html: normal.html, screenshotPath: join(output, "normal.png") });
+  const repairedRender = await renderPage({ html: repaired.html, screenshotPath: join(output, "repaired.png") });
+  const bodyText = spec.blocks[0].body;
+  const normalBody = normalRender.elements.find((element) => element.text === bodyText)!;
+  const repairedBody = repairedRender.elements.find((element) => element.text === bodyText)!;
+  assert.ok(normalBody && repairedBody);
+  assert.ok(repairedBody.fontSize < normalBody.fontSize, `${repairedBody.fontSize} should be below ${normalBody.fontSize}`);
+  assert.ok(repairedBody.fontSize >= 8.5 * (96 / 72) - 0.05, `${repairedBody.fontSize}px must preserve the 8.5pt floor`);
+  assert.notEqual(repairedBody.rect.x, normalBody.rect.x, "spacing token must change computed geometry");
+  assert.ok(repairedBody.contrastRatio > normalBody.contrastRatio, "high-contrast token must improve computed text contrast");
+  assert.notEqual(repairedRender.screenshotDataUrl, normalRender.screenshotDataUrl, "repair must change rendered pixels");
+});
+
+test("real quality loop repairs contrast, re-renders, and terminates at a passing hard gate", async () => {
+  const templateSlug = "green-infographic-bid-a4-landscape";
+  const profile = profiles.find((candidate) => candidate.slug === templateSlug)!;
+  const baseTemplate = loadTemplate(templatesDir, templateSlug);
+  const template = {
+    ...baseTemplate,
+    html: baseTemplate.html.replace(
+      "</head>",
+      "<style>:root:not([data-contrast=\"high\"]){--ink:#dcead8;--green-900:#dcead8;--muted:#dcead8}</style></head>",
+    ),
+  };
+  const spec = specFor(["text", "text", "text"]);
+  const originalBodies = spec.blocks.map((block) => block.body);
+  const output = await mkdtemp(join(tmpdir(), "green-repair-loop-"));
+  const policy = getDocumentTemplatePolicy("bid");
+  const renders = new Map<number, Awaited<ReturnType<typeof renderPage>>>();
+  const initialState: RepairState = {
+    spec,
+    assets: [],
+    templateSlug,
+    designTokens: { fontScale: 1, spacingScale: 1, contrastMode: "normal" },
+    templateSwitched: false,
+  };
+  const source = makeSourceDocument();
+  const result = await runQualityLoop({
+    initialState,
+    minScore: 85,
+    maxAttempts: 3,
+    compose: async ({ state, attempt }) => {
+      const composed = await composeSlide({ spec: state.spec, profile, template, assets: state.assets, designTokens: state.designTokens });
+      const screenshotPath = join(output, `attempt-${attempt}.png`);
+      renders.set(attempt, await renderPage({ html: composed.html, screenshotPath }));
+      return { html: composed.html, screenshotPath };
+    },
+    evaluate: async ({ state, attempt }) => {
+      const render = renders.get(attempt)!;
+      const deterministic = evaluateDeterministic(render, {
+        maxRasterAreaRatio: Math.min(profile.maxRasterAreaRatio, policy.maxRasterAreaRatio),
+        maximumRasterAssets: policy.maxImageAssets,
+        minimumBodyFontPt: Math.max(profile.minimumBodyFontPt, policy.minimumBodyFontPt),
+      });
+      return evaluateSlide({ source, spec: state.spec, render, deterministic });
+    },
+    repair: ({ state, actions }) => executeRepairs({ state, actions, source }),
+  });
+
+  assert.equal(result.status, "delivered");
+  assert.equal(result.selectedAttempt, 2);
+  assert.equal(result.attempts.length, 2);
+  assert.equal(result.attempts[0].quality.hardGatePassed, false);
+  assert.ok(result.attempts[0].quality.issues.some((issue) => issue.category === "readability" && /contrast|对比度/i.test(issue.evidence)));
+  assert.equal(result.attempts[1].state.designTokens.contrastMode, "high");
+  assert.equal(result.attempts[1].quality.hardGatePassed, true);
+  assert.deepEqual(result.attempts[1].state.spec.blocks.map((block) => block.body), originalBodies);
+});

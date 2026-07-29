@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { semanticRoleSchema } from "./page-blueprint.js";
 
 export const slideBlockTypeSchema = z.enum([
   "text",
@@ -19,6 +20,7 @@ export const slideBlockSchema = z.object({
     value: z.string().trim().min(1).max(30),
   }).strict()).max(6),
   sourceFactIds: z.array(z.string().regex(/^fact-\d+$/)).min(1),
+  semanticRole: semanticRoleSchema.optional(),
 }).strict();
 
 export const assetSpecSchema = z.object({
@@ -36,7 +38,7 @@ export const slideSpecSchema = z.object({
   title: z.string().trim().min(4).max(40),
   eyebrow: z.string().trim().max(40).optional(),
   conclusion: z.string().trim().min(4).max(160),
-  blocks: z.array(slideBlockSchema).min(3).max(6),
+  blocks: z.array(slideBlockSchema).min(1).max(12),
   assets: z.array(assetSpecSchema).max(6),
   sourceFactIds: z.array(z.string().regex(/^fact-\d+$/)).min(1),
   designIntent: z.object({

@@ -67,8 +67,8 @@ function planningError(message: string, recovery: string): never {
 
 function roleFor(fact: SourceFact): SemanticRole {
   if (COMPARISON_CUE.test(fact.text)) return "comparison";
-  if (METRIC_CUE.test(fact.text)) return "metric";
   if (PROCESS_CUE.test(fact.text)) return "process";
+  if (METRIC_CUE.test(fact.text)) return "metric";
   if (CONCLUSION_CUE.test(fact.text)) return "conclusion";
   if (fact.kind === "name") return "evidence";
   return "fact";
@@ -301,7 +301,7 @@ export function materializeSlideSpec(rawBlueprint: PageBlueprint): SlideSpec {
       title: group.title.slice(0, 30),
       body: group.body,
       bullets: [],
-      metrics: group.role === "metric" ? metricValues(group.body) : [],
+      metrics: metricValues(group.body),
       sourceFactIds: group.sourceFactIds,
       semanticRole: group.role,
     };

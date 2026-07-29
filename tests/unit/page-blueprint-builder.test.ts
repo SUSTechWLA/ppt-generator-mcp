@@ -66,9 +66,12 @@ test("planner handles an unrelated product roadmap on page 3 deterministically",
   const second = buildPageBlueprint(source, context);
 
   assert.equal(first.pageNumber, 3);
-  assert.ok(first.groups.some((group) => group.role === "process"));
-  assert.ok(first.groups.some((group) => group.role === "metric"));
+  assert.equal(first.groups.length, 1);
+  assert.equal(first.groups[0].role, "process");
   assert.deepEqual(groupedFactIds(first), source.facts.map((fact) => fact.id));
+  assert.ok(
+    materializeSlideSpec(first).blocks[0].metrics.some((metric) => metric.value === "50家"),
+  );
   assert.deepEqual(first, second);
   assert.deepEqual(materializeSlideSpec(first), materializeSlideSpec(second));
 });
@@ -151,6 +154,47 @@ test("planner emits at most one explanatory page-scoped visual intent", () => {
   assert.match(blueprint.assets[0].prompt, /no logo/i);
   assert.match(blueprint.assets[0].prompt, /no watermark/i);
   assert.doesNotMatch(blueprint.assets[0].prompt, /page\s*8|第8页/i);
+});
+
+test("Arabic-numbered steps stay one ordered process and retain their time metric", () => {
+  const source = normalizeSource({
+    sourceText: `# 发布步骤
+步骤1收集需求。步骤2在2小时内完成评审。步骤3执行验证。步骤4正式发布。`,
+  });
+  const blueprint = buildPageBlueprint(source, {
+    pageNumber: 14,
+    title: "发布步骤",
+    documentType: "presentation",
+  });
+  const expectedFactIds = source.facts.map((fact) => fact.id);
+
+  assert.equal(blueprint.groups.length, 1);
+  assert.equal(blueprint.groups[0].role, "process");
+  assert.deepEqual(blueprint.groups[0].sourceFactIds, expectedFactIds);
+  assert.equal(blueprint.visualNeed, "supporting");
+  assert.equal(blueprint.assets.length, 1);
+  assert.deepEqual(groupedFactIds(blueprint), expectedFactIds);
+
+  const spec = materializeSlideSpec(blueprint);
+  assert.equal(spec.blocks.length, 1);
+  assert.equal(spec.blocks[0].type, "process");
+  assert.equal(spec.blocks[0].semanticRole, "process");
+  assert.deepEqual(spec.blocks[0].sourceFactIds, expectedFactIds);
+  assert.ok(spec.blocks[0].metrics.some((metric) => metric.value === "2小时"));
+});
+
+test("pure quantitative facts remain metric content", () => {
+  const source = normalizeSource({
+    sourceText: "# 运营指标\n覆盖率达到95%。月均处理120项请求。",
+  });
+  const blueprint = buildPageBlueprint(source, {
+    pageNumber: 15,
+    title: "运营指标",
+    documentType: "proposal",
+  });
+
+  assert.equal(blueprint.groups.every((group) => group.role === "metric"), true);
+  assert.deepEqual(groupedFactIds(blueprint), source.facts.map((fact) => fact.id));
 });
 
 test("dense source remains bounded without losing or reordering facts", () => {

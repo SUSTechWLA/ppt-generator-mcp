@@ -73,6 +73,11 @@ for (const [kind, unsafeEvidence] of [
   ["credential", "client_secret=review-secret"],
   ["data URL", "data:image/png;base64,TEVBS1lfQkFTRTY0"],
   ["raw Base64", "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB=="],
+  ["recursively encoded URL", "%2568%2574%2574%2570%2573%253A%252F%252Freview.invalid%252Fnested%253Ftoken%253Dnested-secret"],
+  ["folded URL scheme", "h\u200Bt t\tp\r s : / /review.invalid/folded?token=folded-secret"],
+  ["folded file URL", "f\u200B i l e : / / /Users/reviewer/file-secret.txt"],
+  ["forward-slash Windows path", "C:/reviewer/private/forward-secret.txt"],
+  ["recursively encoded credential", "api%255Fkey%253Dencoded-secret"],
 ] as const) {
   test(`normalizes an isolated external review ${kind}`, async () => {
     const review = { review: async () => ({
@@ -90,3 +95,20 @@ for (const [kind, unsafeEvidence] of [
     assert.doesNotMatch(JSON.stringify(result), new RegExp(unsafeEvidence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 }
+
+test("keeps ordinary Chinese discussion of paths and websites", async () => {
+  const ordinaryEvidence = "请检查页面路径与网址字段是否完整，不包含任何外部地址。";
+  const review = { review: async () => ({
+    dimensions: { fidelity: 95, structure: 95, readability: 95, layout: 95, asset: 95, technical: 95 },
+    issues: [{
+      id: "ordinary-language-warning",
+      severity: "warning" as const,
+      category: "technical" as const,
+      evidence: ordinaryEvidence,
+      suggestedAction: "人工确认字段名称",
+    }],
+  }) };
+  const result = await evaluateSlide({ source, spec, render, deterministic: passingDeterministic, review });
+  assert.equal(result.issues[0]?.evidence, ordinaryEvidence);
+  assert.equal(result.issues[0]?.id, "ordinary-language-warning");
+});

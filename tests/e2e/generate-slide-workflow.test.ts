@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { generateSlideWorkflow } from "../../src/workflow/generate-slide.js";
 import { makeWorkflowDependencies, workflowInput } from "../helpers/workflow-fixtures.js";
@@ -43,4 +44,32 @@ test("reports the template of the selected repaired attempt", async () => {
   const manifest = await deps.runStore.getRun(result.runId);
   assert.equal(manifest.template?.slug, switchedSlug);
   assert.match(manifest.template?.reason ?? "", /修复.*切换/);
+});
+
+test("sanitizes a fake quality loop result before attempt and final quality persistence", async () => {
+  const deps = await makeWorkflowDependencies({
+    scores: [82],
+    hardGates: [true],
+    issues: [{
+      id: "fake-loop-url",
+      severity: "warning",
+      category: "layout",
+      evidence: "https://review.invalid/fake-loop?token=fake-loop-secret",
+      suggestedAction: "Keep best effort semantics",
+    }],
+  });
+  const result = await generateSlideWorkflow(workflowInput, deps);
+  assert.equal(result.status, "best_effort");
+  assert.equal(result.quality.score, 82);
+  assert.equal(result.quality.hardGatePassed, true);
+  assert.equal(result.quality.remainingIssues[0]?.category, "layout");
+  assert.equal(result.quality.remainingIssues[0]?.severity, "warning");
+
+  const runDir = deps.runStore.runDir(result.runId);
+  const attemptQuality = await readFile(join(runDir, "attempts", "01", "quality.json"), "utf8");
+  const finalQuality = await readFile(join(runDir, "quality.json"), "utf8");
+  const manifest = await readFile(result.artifacts.manifestPath, "utf8");
+  const allLayers = `${attemptQuality}\n${finalQuality}\n${manifest}\n${JSON.stringify(result)}`;
+  assert.match(allLayers, /External review diagnostic removed by safety policy/);
+  assert.doesNotMatch(allLayers, /review\.invalid|fake-loop-secret/);
 });

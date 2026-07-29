@@ -185,7 +185,7 @@ async function executeResolvedSlideWorkflow(
       hardGatePassed: attempt.quality.hardGatePassed,
       safeToReturn: attempt.quality.safeToReturn,
       actions: attempt.actions,
-    });
+    }, { quality: attempt.quality });
   }
 
   const selectedNumber = loop.selectedAttempt ?? loop.attempts.at(-1)?.attempt;

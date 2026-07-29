@@ -187,6 +187,20 @@ test("markNeedsAssets ignores hashes already supplied", async () => {
   assert.deepEqual(output.missingAssetIds, []);
 });
 
+test("a delayed unavailable-bytes observation cannot mark an already delivered page missing", async () => {
+  const { store } = await makeStore();
+  const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });
+  const assetId = "p77-img-001";
+  await store.mergeAssetHashes(run.deckRunId, { [assetId]: HASH_A });
+  await store.savePageResult(run.deckRunId, 77, slideResult(crypto.randomUUID()), { [assetId]: HASH_A });
+
+  const delayedObserver = await store.markUnavailableBytes(run.deckRunId, [assetId], [{ pageNumber: 77, assetIds: [assetId] }]);
+
+  assert.equal(delayedObserver.status, "running");
+  assert.deepEqual(delayedObserver.missingAssetIds, []);
+  assert.equal((await store.listPageRecords(run.deckRunId))[0]?.status, "delivered");
+});
+
 test("page writes cannot move a run out of needs_assets while assets remain missing", async () => {
   const { store } = await makeStore();
   const run = await store.createOrResumeRun({ canonicalInput: { deckPlanId: PLAN_ID }, deckPlanId: PLAN_ID });

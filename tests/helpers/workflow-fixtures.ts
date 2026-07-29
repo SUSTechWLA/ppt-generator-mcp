@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { QualityReport } from "../../src/domain/quality-report.js";
+import type { QualityIssue, QualityReport } from "../../src/domain/quality-report.js";
 import type { WorkflowDependencies } from "../../src/workflow/generate-slide.js";
 import { RunStore } from "../../src/workflow/run-store.js";
 import type { AttemptResult, QualityLoopResult } from "../../src/workflow/quality-loop.js";
@@ -13,7 +13,13 @@ export const workflowInput = {
   quality: { minScore: 85, maxAttempts: 3 },
 };
 
-async function writeFakeAttempts(runDir: string, scores: number[], hardGates: boolean[], templateSlugs: string[] = []): Promise<QualityLoopResult> {
+async function writeFakeAttempts(
+  runDir: string,
+  scores: number[],
+  hardGates: boolean[],
+  templateSlugs: string[] = [],
+  issues: QualityIssue[] = [],
+): Promise<QualityLoopResult> {
   const spec = makeSlideSpec({ assetCount: 1 });
   const state = {
     spec,
@@ -35,7 +41,7 @@ async function writeFakeAttempts(runDir: string, scores: number[], hardGates: bo
       safeToReturn: true,
       hardGatePassed: hardGates[index],
       dimensions: { fidelity: scores[index], structure: scores[index], readability: scores[index], layout: scores[index], asset: scores[index], technical: scores[index] },
-      issues: [],
+      issues,
     };
     const html = '<html><body><article data-slide-page="1"><img src="data:image/png;base64,iVBORw0KGgo="></article></body></html>';
     await Promise.all([
@@ -66,7 +72,7 @@ async function writeFakeAttempts(runDir: string, scores: number[], hardGates: bo
   };
 }
 
-export async function makeWorkflowDependencies(options: { scores: number[]; hardGates: boolean[]; templateSlugs?: string[] }) {
+export async function makeWorkflowDependencies(options: { scores: number[]; hardGates: boolean[]; templateSlugs?: string[]; issues?: QualityIssue[] }) {
   const root = await mkdtemp(join(tmpdir(), "ppt-workflow-"));
   const counters = { imageCalls: 0 };
   const source = makeSourceDocument();
@@ -81,7 +87,7 @@ export async function makeWorkflowDependencies(options: { scores: number[]; hard
     selectTemplate: () => ({ slug: "green-infographic-bid-a4-landscape-text-image", reason: "图片槽位与内容匹配", score: 95, candidates: [] }),
     generateAssets: async () => { counters.imageCalls += 1; return assets; },
     composeSlide: async () => ({ html: '<html><body><article data-slide-page="1"><img src="data:image/png;base64,iVBORw0KGgo="></article></body></html>', warnings: [] }),
-    runQualityLoop: async (input) => writeFakeAttempts(input.runDir, options.scores, options.hardGates, options.templateSlugs),
+    runQualityLoop: async (input) => writeFakeAttempts(input.runDir, options.scores, options.hardGates, options.templateSlugs, options.issues),
   };
   return dependencies;
 }

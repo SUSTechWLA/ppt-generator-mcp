@@ -51,10 +51,14 @@ export interface DeckStoreApi {
   }): Promise<{ deckRunId: string; resumed: boolean; manifest: DeckManifest }>;
   mergeAssetHashes(deckRunId: string, hashes: Record<string, string>): Promise<DeckManifest>;
   markNeedsAssets(deckRunId: string, ids: string[]): Promise<GenerateDeckOutput>;
-  markUnavailableBytes(deckRunId: string, ids: string[]): Promise<GenerateDeckOutput>;
+  markUnavailableBytes(
+    deckRunId: string,
+    ids: string[],
+    pageScopes?: Array<{ pageNumber: number; assetIds: string[] }>,
+  ): Promise<GenerateDeckOutput>;
   hasDeliveredPage(deckRunId: string, pageNumber: number): Promise<boolean>;
-  savePageResult(deckRunId: string, pageNumber: number, result: GenerateSlideOutput): Promise<DeckManifest>;
-  savePageFailure(deckRunId: string, pageNumber: number, error: unknown): Promise<DeckManifest>;
+  savePageResult(deckRunId: string, pageNumber: number, result: GenerateSlideOutput, verifiedAssetHashes?: Record<string, string>): Promise<DeckManifest>;
+  savePageFailure(deckRunId: string, pageNumber: number, error: unknown, verifiedAssetHashes?: Record<string, string>): Promise<DeckManifest>;
   listPageRecords(deckRunId: string): Promise<DeckPageRecord[]>;
   finalizeRun(deckRunId: string, input: {
     pages: DeckPageRecord[];
@@ -135,6 +139,30 @@ function requireRequestId(value: string | undefined): void {
 
 function requirePageNumber(value: number): void {
   if (!Number.isInteger(value) || value < 1 || value > 9999) throw new Error("Invalid pageNumber");
+}
+
+function validateAssetHashes(hashes: Record<string, string>): void {
+  if (typeof hashes !== "object" || hashes === null || Array.isArray(hashes)) throw new Error("Invalid asset hashes");
+  for (const [assetId, hash] of Object.entries(hashes)) {
+    if (!ASSET_ID.test(assetId)) throw new Error(`Invalid asset id: ${assetId}`);
+    if (!SHA256.test(hash)) throw new Error(`Invalid asset hash for ${assetId}`);
+  }
+}
+
+function applyVerifiedAssetHashes(manifest: DeckManifest, hashes: Record<string, string>): DeckManifest {
+  const assetHashes = { ...manifest.assetHashes };
+  for (const [assetId, hash] of Object.entries(hashes)) {
+    if (assetHashes[assetId] && assetHashes[assetId] !== hash) throw new Error(`Asset hash replacement rejected for ${assetId}`);
+    assetHashes[assetId] = hash;
+  }
+  const suppliedIds = new Set(Object.keys(hashes));
+  const missingAssetIds = manifest.missingAssetIds.filter((assetId) => !suppliedIds.has(assetId));
+  return {
+    ...manifest,
+    assetHashes,
+    missingAssetIds,
+    status: manifest.status === "needs_assets" && missingAssetIds.length === 0 ? "running" : manifest.status,
+  };
 }
 
 function safeJson(value: unknown, label: string): string {
@@ -475,30 +503,14 @@ export class DeckStore implements DeckStoreApi {
   }
 
   async mergeAssetHashes(deckRunId: string, hashes: Record<string, string>): Promise<DeckManifest> {
-    if (typeof hashes !== "object" || hashes === null || Array.isArray(hashes)) throw new Error("Invalid asset hashes");
-    for (const [assetId, hash] of Object.entries(hashes)) {
-      if (!ASSET_ID.test(assetId)) throw new Error(`Invalid asset id: ${assetId}`);
-      if (!SHA256.test(hash)) throw new Error(`Invalid asset hash for ${assetId}`);
-    }
+    validateAssetHashes(hashes);
     return this.mutateManifest(deckRunId, (manifest) => {
       if (manifest.status === "delivered") {
         const idempotent = Object.entries(hashes).every(([assetId, hash]) => manifest.assetHashes[assetId] === hash);
         if (idempotent) return manifest;
         throw new Error("Delivered deck run is immutable");
       }
-      const assetHashes = { ...manifest.assetHashes };
-      for (const [assetId, hash] of Object.entries(hashes)) {
-        if (assetHashes[assetId] && assetHashes[assetId] !== hash) throw new Error(`Asset hash replacement rejected for ${assetId}`);
-        assetHashes[assetId] = hash;
-      }
-      const suppliedIds = new Set(Object.keys(hashes));
-      const missingAssetIds = manifest.missingAssetIds.filter((assetId) => !suppliedIds.has(assetId));
-      return {
-        ...manifest,
-        assetHashes,
-        missingAssetIds,
-        status: manifest.status === "needs_assets" && missingAssetIds.length === 0 ? "running" : manifest.status,
-      };
+      return applyVerifiedAssetHashes(manifest, hashes);
     });
   }
 
@@ -517,16 +529,42 @@ export class DeckStore implements DeckStoreApi {
     return this.toOutput(manifest);
   }
 
-  async markUnavailableBytes(deckRunId: string, ids: string[]): Promise<GenerateDeckOutput> {
+  async markUnavailableBytes(
+    deckRunId: string,
+    ids: string[],
+    pageScopes: Array<{ pageNumber: number; assetIds: string[] }> = [],
+  ): Promise<GenerateDeckOutput> {
     if (!Array.isArray(ids)) throw new Error("Invalid unavailable asset ids");
     for (const assetId of ids) if (!ASSET_ID.test(assetId)) throw new Error(`Invalid asset id: ${assetId}`);
+    if (!Array.isArray(pageScopes)) throw new Error("Invalid unavailable page scopes");
+    for (const scope of pageScopes) {
+      requirePageNumber(scope.pageNumber);
+      if (!Array.isArray(scope.assetIds)) throw new Error("Invalid unavailable page asset ids");
+      for (const assetId of scope.assetIds) if (!ASSET_ID.test(assetId)) throw new Error(`Invalid asset id: ${assetId}`);
+    }
     const manifest = await this.mutateManifest(deckRunId, (current) => {
-      const missingAssetIds = Array.from(new Set([...current.missingAssetIds, ...ids]));
+      const deliveredPages = new Set(current.pages.filter((page) => page.status === "delivered").map((page) => page.pageNumber));
+      const scopedIds = new Set(pageScopes.flatMap((scope) => scope.assetIds));
+      const resolvedIds = new Set(pageScopes.filter((scope) => deliveredPages.has(scope.pageNumber)).flatMap((scope) => scope.assetIds));
+      const stillUnavailable = [
+        ...ids.filter((assetId) => !scopedIds.has(assetId)),
+        ...pageScopes.filter((scope) => !deliveredPages.has(scope.pageNumber)).flatMap((scope) => scope.assetIds),
+      ];
+      const missingAssetIds = Array.from(new Set([
+        ...current.missingAssetIds.filter((assetId) => !resolvedIds.has(assetId)),
+        ...stillUnavailable,
+      ]));
       if (current.status === "delivered") {
         if (missingAssetIds.length === 0) return current;
         throw new Error("Delivered deck run is immutable");
       }
-      return { ...current, missingAssetIds, status: missingAssetIds.length > 0 ? "needs_assets" : "running" };
+      return {
+        ...current,
+        missingAssetIds,
+        status: missingAssetIds.length > 0
+          ? "needs_assets"
+          : current.status === "needs_assets" ? "running" : current.status,
+      };
     });
     return this.toOutput(manifest);
   }
@@ -536,8 +574,14 @@ export class DeckStore implements DeckStoreApi {
     return (await this.getRun(deckRunId)).pages.some((page) => page.pageNumber === pageNumber && page.status === "delivered");
   }
 
-  async savePageResult(deckRunId: string, pageNumber: number, result: GenerateSlideOutput): Promise<DeckManifest> {
+  async savePageResult(
+    deckRunId: string,
+    pageNumber: number,
+    result: GenerateSlideOutput,
+    verifiedAssetHashes: Record<string, string> = {},
+  ): Promise<DeckManifest> {
     requirePageNumber(pageNumber);
+    validateAssetHashes(verifiedAssetHashes);
     const parsed = generateSlideOutputSchema.safeParse(result);
     if (!parsed.success) throw new Error("Invalid generated page result");
     const record = deckPageRecordSchema.parse({
@@ -547,17 +591,25 @@ export class DeckStore implements DeckStoreApi {
       result: parsed.data,
     });
     return this.mutateManifest(deckRunId, (manifest) => {
-      if (manifest.missingAssetIds.length > 0) throw new Error("Cannot save a page while assets are missing");
-      return applyPageMutation(manifest, record);
+      const available = applyVerifiedAssetHashes(manifest, verifiedAssetHashes);
+      if (available.missingAssetIds.length > 0) throw new Error("Cannot save a page while assets are missing");
+      return applyPageMutation(available, record);
     });
   }
 
-  async savePageFailure(deckRunId: string, pageNumber: number, error: unknown): Promise<DeckManifest> {
+  async savePageFailure(
+    deckRunId: string,
+    pageNumber: number,
+    error: unknown,
+    verifiedAssetHashes: Record<string, string> = {},
+  ): Promise<DeckManifest> {
     requirePageNumber(pageNumber);
+    validateAssetHashes(verifiedAssetHashes);
     const record = deckPageRecordSchema.parse({ pageNumber, status: "failed", error: pageError(error) });
     return this.mutateManifest(deckRunId, (manifest) => {
-      if (manifest.missingAssetIds.length > 0) throw new Error("Cannot save a page while assets are missing");
-      return applyPageMutation(manifest, record);
+      const available = applyVerifiedAssetHashes(manifest, verifiedAssetHashes);
+      if (available.missingAssetIds.length > 0) throw new Error("Cannot save a page while assets are missing");
+      return applyPageMutation(available, record);
     });
   }
 

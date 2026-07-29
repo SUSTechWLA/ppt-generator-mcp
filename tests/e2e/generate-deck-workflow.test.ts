@@ -283,6 +283,107 @@ test("failed asset page resume requires bytes again even when their hashes were 
   }
 });
 
+test("a no-bytes observer cannot invalidate delivered or best-effort in-flight work holding verified bytes", async () => {
+  for (const pageStatus of ["delivered", "best_effort"] as const) {
+    const f = await fixture({ pages: [208], forceAssets: true });
+    try {
+      const suppliedAssets = f.plan.assets.map((asset) => ({ id: asset.id, dataUrl: PNG }));
+      let release!: () => void;
+      let announceEntered!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const entered = new Promise<void>((resolve) => { announceEntered = resolve; });
+      const deps = createGenerateDeckDependencies({
+        deckStore: f.store,
+        profiles: f.profiles,
+        generatePage: async (input) => {
+          announceEntered();
+          await gate;
+          return result(crypto.randomUUID(), input.page.number, pageStatus);
+        },
+        inspectDeliveredPage: async (input, output) => evidence(input, output),
+      });
+      const requestId = `asset-availability-race-${pageStatus}`;
+      const inFlight = generateDeckWorkflow({
+        deckPlanId: f.plan.plannedDeck.deckPlanId,
+        externalAssets: suppliedAssets,
+        requestId,
+      }, deps);
+      await entered;
+
+      const observer = await generateDeckWorkflow({
+        deckPlanId: f.plan.plannedDeck.deckPlanId,
+        externalAssets: [],
+        requestId,
+      }, deps);
+      assert.equal(observer.status, "needs_assets");
+      assert.deepEqual(observer.missingAssetIds, suppliedAssets.map((asset) => asset.id));
+
+      release();
+      const completed = await inFlight;
+      assert.equal(completed.status, pageStatus === "delivered" ? "delivered" : "partial");
+      assert.equal(completed.pages[0]?.status, pageStatus);
+      const manifest = await f.store.getRun(completed.deckRunId);
+      assert.deepEqual(manifest.missingAssetIds, []);
+      assert.equal(manifest.pages[0]?.status, pageStatus);
+
+      if (pageStatus === "delivered") {
+        const lateObserver = await generateDeckWorkflow({
+          deckPlanId: f.plan.plannedDeck.deckPlanId,
+          externalAssets: [],
+          requestId,
+        }, deps);
+        assert.equal(lateObserver.status, "delivered");
+        assert.deepEqual((await f.store.getRun(completed.deckRunId)).missingAssetIds, []);
+      }
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("an in-flight failure holding verified bytes closes missing state and persists its failure", async () => {
+  const f = await fixture({ pages: [209], forceAssets: true });
+  try {
+    const suppliedAssets = f.plan.assets.map((asset) => ({ id: asset.id, dataUrl: PNG }));
+    let release!: () => void;
+    let announceEntered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { announceEntered = resolve; });
+    const deps = createGenerateDeckDependencies({
+      deckStore: f.store,
+      profiles: f.profiles,
+      generatePage: async () => {
+        announceEntered();
+        await gate;
+        throw new Error("in-flight page failed");
+      },
+      inspectDeliveredPage: async (input, output) => evidence(input, output),
+    });
+    const requestId = "asset-availability-race-failure";
+    const inFlight = generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: suppliedAssets,
+      requestId,
+    }, deps);
+    await entered;
+    const observer = await generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: [],
+      requestId,
+    }, deps);
+    assert.equal(observer.status, "needs_assets");
+
+    release();
+    const completed = await inFlight;
+    assert.equal(completed.status, "failed");
+    const manifest = await f.store.getRun(completed.deckRunId);
+    assert.deepEqual(manifest.missingAssetIds, []);
+    assert.equal(manifest.pages[0]?.status, "failed");
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("planned page execution receives immutable QA context and persisted quality bounds", async () => {
   const f = await fixture({ pages: [411] });
   try {
@@ -365,7 +466,7 @@ test("consistency failure keeps page deliveries but prevents deck delivery", asy
   }
 });
 
-test("successful page diagnostics cannot persist secrets, stacks, or caller paths", async () => {
+test("successful page diagnostics are normalized before persisting secrets, stacks, or caller paths", async () => {
   const f = await fixture({ pages: [650] });
   try {
     const deps = createGenerateDeckDependencies({
@@ -391,9 +492,55 @@ test("successful page diagnostics cannot persist secrets, stacks, or caller path
       inspectDeliveredPage: async (input, output) => evidence(input, output),
     });
     const output = await generateDeckWorkflow({ deckPlanId: f.plan.plannedDeck.deckPlanId, externalAssets: [] }, deps);
-    assert.equal(output.status, "failed");
+    assert.equal(output.status, "delivered");
+    const delivered = output.pages[0];
+    assert.ok(delivered && "quality" in delivered);
+    assert.equal(delivered.quality.remainingIssues[0]?.evidence, "External review diagnostic removed by safety policy");
     const persisted = JSON.stringify(await f.store.getRun(output.deckRunId));
     assert.doesNotMatch(`${JSON.stringify(output)}${persisted}`, /sk-123|Bearer abc|\/Users\/caller|private\.ts|provider failure/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("an injected best-effort page result uses the shared sanitizer without changing quality semantics", async () => {
+  const f = await fixture({ pages: [651] });
+  try {
+    const deps = createGenerateDeckDependencies({
+      deckStore: f.store,
+      profiles: f.profiles,
+      generatePage: async (input) => {
+        const unsafe = result(crypto.randomUUID(), input.page.number, "best_effort");
+        return {
+          ...unsafe,
+          summary: "best effort retains its status",
+          quality: {
+            ...unsafe.quality,
+            remainingIssues: [{
+              id: "injected-url",
+              severity: "warning",
+              category: "layout",
+              evidence: "https://review.invalid/best-effort?token=injected-secret",
+              suggestedAction: "Keep the score and close the diagnostic",
+            }],
+          },
+        };
+      },
+      inspectDeliveredPage: async (input, output) => evidence(input, output),
+    });
+    const output = await generateDeckWorkflow({ deckPlanId: f.plan.plannedDeck.deckPlanId, externalAssets: [] }, deps);
+
+    assert.equal(output.status, "partial");
+    const pageOutput = output.pages[0];
+    assert.ok(pageOutput && "quality" in pageOutput);
+    assert.equal(pageOutput.status, "best_effort");
+    assert.equal(pageOutput.quality.score, 82);
+    assert.equal(pageOutput.quality.hardGatePassed, false);
+    assert.equal(pageOutput.quality.remainingIssues[0]?.severity, "warning");
+    assert.equal(pageOutput.quality.remainingIssues[0]?.category, "layout");
+    assert.equal(pageOutput.quality.remainingIssues[0]?.evidence, "External review diagnostic removed by safety policy");
+    const persisted = JSON.stringify(await f.store.getRun(output.deckRunId));
+    assert.doesNotMatch(`${JSON.stringify(output)}${persisted}`, /review\.invalid|injected-secret/);
   } finally {
     await f.cleanup();
   }
@@ -506,4 +653,58 @@ test("production review diagnostics are closed before first attempt and final pe
 
   assert.match(attemptQuality, /External review diagnostic removed by safety policy/);
   assert.doesNotMatch(allPersistence, /url-secret|\/Users\/reviewer|review-secret|leaked stack|TEVBS1lfQkFTRTY0|review-credential-secret/);
+});
+
+test("obfuscated best-effort review diagnostics stay closed across all five persistence layers", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "generate-deck-obfuscated-review-"));
+  const unsafeVariants = [
+    "%2568%2574%2574%2570%2573%253A%252F%252Freview.invalid%252Fnested%253Ftoken%253Dnested-secret",
+    "h\u200Bt t\tp\r s : / /review.invalid/folded?token=folded-secret",
+    "f\u200B i l e : / / /Users/reviewer/file-secret.txt",
+    "C:/reviewer/forward-secret.txt and C:\\reviewer\\back-secret.txt",
+    "api%255Fkey%253Dencoded-secret",
+  ] as const;
+  const categories = ["fidelity", "structure", "readability", "layout", "technical"] as const;
+  const mock = await startMockOpenAIServer({
+    reviewScore: 82,
+    reviewIssues: unsafeVariants.map((evidence, index) => ({
+      id: `obfuscated-warning-${index + 1}`,
+      severity: "warning" as const,
+      category: categories[index],
+      evidence,
+      suggestedAction: "Run a closed local check",
+    })),
+  });
+  t.after(async () => {
+    await mock.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const dependencies = createProductionDependencies(mock.configFor(root), { templatesDir: resolve("templates") });
+  const planned = await dependencies.planDeck({
+    sourceText: page(902, "责任人机制", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
+    pageNumbers: [902],
+    documentType: "bid",
+    quality: { minScore: 90, maxAttempts: 1 },
+  });
+  assert.equal(planned.assets.length, 0);
+
+  const output = await dependencies.generateDeck({ deckPlanId: planned.plannedDeck.deckPlanId, externalAssets: [] });
+  assert.equal(output.status, "partial");
+  const pageOutput = output.pages[0];
+  assert.ok(pageOutput && "runId" in pageOutput && "quality" in pageOutput);
+  assert.equal(pageOutput.status, "best_effort");
+  assert.equal(pageOutput.quality.score, 82);
+  assert.equal(pageOutput.quality.hardGatePassed, true);
+  assert.deepEqual(pageOutput.quality.remainingIssues.map((issue) => issue.severity), Array(5).fill("warning"));
+  assert.deepEqual(pageOutput.quality.remainingIssues.map((issue) => issue.category), categories);
+
+  const attemptQuality = await readFile(join(root, pageOutput.runId, "attempts", "01", "quality.json"), "utf8");
+  const pageManifest = await readFile(join(root, pageOutput.runId, "manifest.json"), "utf8");
+  const finalQuality = await readFile(join(root, pageOutput.runId, "quality.json"), "utf8");
+  const deckManifest = await readFile(join(root, "decks", "runs", output.deckRunId, "manifest.json"), "utf8");
+  const fiveLayers = [attemptQuality, pageManifest, finalQuality, deckManifest, JSON.stringify(output)];
+  for (const layer of fiveLayers) {
+    for (const unsafe of unsafeVariants) assert.equal(layer.includes(unsafe), false, `unsafe variant persisted: ${unsafe}`);
+    assert.doesNotMatch(layer, /nested-secret|folded-secret|file-secret|forward-secret|back-secret|encoded-secret/);
+  }
 });

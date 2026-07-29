@@ -25,6 +25,7 @@ import {
   type DeckConsistencyReport,
 } from "../services/deck-consistency.js";
 import { validatePlanAgainstProfiles } from "../services/plan-profile-validator.js";
+import { normalizeGenerateSlideOutputDiagnostics } from "../services/quality-safety.js";
 import {
   getDocumentTemplatePolicy,
   type DocumentTemplatePolicy,
@@ -152,27 +153,8 @@ function pageInput(
   };
 }
 
-function hasUnsafePageDiagnostics(result: GenerateSlideOutput): boolean {
-  const diagnosticText = JSON.stringify({
-    selectedTemplateReason: result.selectedTemplate.reason,
-    summary: result.summary,
-    issues: result.quality.remainingIssues,
-  });
-  return /\b(?:sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,}|(?:api[_-]?key|client[_-]?secret|access[_-]?token)\s*[:=]\s*["']?[^\s"']{8,}|AKIA[A-Z0-9]{12,})/iu.test(diagnosticText)
-    || /(?:^|[\s("'=])(?:\/(?:[^/\s]+\/)+[^/\s"')]+|[A-Za-z]:\\[^\s"']+|\\\\[^\s"']+)/u.test(diagnosticText)
-    || /(?:\\n|\n)\s*at\s+[^\n]+:\d+:\d+/u.test(diagnosticText);
-}
-
 function validatePageResult(result: unknown, input: PlannedPageWorkflowInput, profiles: TemplateProfile[]): GenerateSlideOutput {
-  const parsed = generateSlideOutputSchema.parse(result);
-  if (hasUnsafePageDiagnostics(parsed)) {
-    throw new WorkflowError({
-      code: "QUALITY_FAILED",
-      stage: "quality_loop",
-      retryable: false,
-      message: "Page diagnostics contain unsafe sensitive or path-like content",
-    });
-  }
+  const parsed = normalizeGenerateSlideOutputDiagnostics(generateSlideOutputSchema.parse(result));
   if (parsed.quality.threshold !== input.quality.minScore
     || parsed.quality.attempts > input.quality.maxAttempts) {
     throw new WorkflowError({
@@ -218,9 +200,10 @@ async function saveResultMonotonically(
   deckRunId: string,
   pageNumber: number,
   result: GenerateSlideOutput,
+  verifiedAssetHashes: Record<string, string>,
 ): Promise<void> {
   try {
-    await deps.deckStore.savePageResult(deckRunId, pageNumber, result);
+    await deps.deckStore.savePageResult(deckRunId, pageNumber, result, verifiedAssetHashes);
   } catch (error) {
     if (await deps.deckStore.hasDeliveredPage(deckRunId, pageNumber)) return;
     throw error;
@@ -232,9 +215,10 @@ async function saveFailureMonotonically(
   deckRunId: string,
   pageNumber: number,
   error: unknown,
+  verifiedAssetHashes: Record<string, string>,
 ): Promise<void> {
   try {
-    await deps.deckStore.savePageFailure(deckRunId, pageNumber, error);
+    await deps.deckStore.savePageFailure(deckRunId, pageNumber, error, verifiedAssetHashes);
   } catch (mutationError) {
     if (await deps.deckStore.hasDeliveredPage(deckRunId, pageNumber)) return;
     throw mutationError;
@@ -283,12 +267,18 @@ export async function generateDeckWorkflow(rawInput: unknown, deps: GenerateDeck
   }
 
   const deliveredNumbers = new Set(active.manifest.pages.filter((record) => record.status === "delivered").map((record) => record.pageNumber));
-  const requiredForPendingPages = deck.slides
+  const pendingAssetScopes = deck.slides
     .filter((slide) => !deliveredNumbers.has(slide.page.number))
-    .flatMap((slide) => slide.plannedSpec.assets.map((asset) => asset.id));
+    .map((slide) => ({
+      pageNumber: slide.page.number,
+      assetIds: slide.plannedSpec.assets.map((asset) => asset.id).filter((assetId) => !suppliedIds.includes(assetId)),
+    }))
+    .filter((scope) => scope.assetIds.length > 0);
   const supplied = new Set(suppliedIds);
-  const missing = requiredForPendingPages.filter((assetId) => !supplied.has(assetId));
-  if (missing.length > 0) return orderedPages(await deps.deckStore.markUnavailableBytes(active.deckRunId, missing), deck.pageNumbers);
+  const missing = pendingAssetScopes.flatMap((scope) => scope.assetIds).filter((assetId) => !supplied.has(assetId));
+  if (missing.length > 0) {
+    return orderedPages(await deps.deckStore.markUnavailableBytes(active.deckRunId, missing, pendingAssetScopes), deck.pageNumbers);
+  }
   await deps.deckStore.mergeAssetHashes(active.deckRunId, suppliedHashes);
 
   const policy = deps.getDocumentPolicy(deck.documentType);
@@ -299,9 +289,9 @@ export async function generateDeckWorkflow(rawInput: unknown, deps: GenerateDeck
     const workflowInput = pageInput(deck, active.deckRunId, slide, pageIndex, pageAssets, policy);
     try {
       const result = validatePageResult(await deps.generatePage(workflowInput), workflowInput, deps.profiles);
-      await saveResultMonotonically(deps, active.deckRunId, slide.page.number, result);
+      await saveResultMonotonically(deps, active.deckRunId, slide.page.number, result, suppliedHashes);
     } catch (error) {
-      await saveFailureMonotonically(deps, active.deckRunId, slide.page.number, error);
+      await saveFailureMonotonically(deps, active.deckRunId, slide.page.number, error, suppliedHashes);
     }
   }
 

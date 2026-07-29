@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -16,6 +16,7 @@ import {
   type PlannedPageWorkflowInput,
 } from "../../src/workflow/generate-deck.js";
 import { createPlanDeckDependencies, planDeckWorkflow } from "../../src/workflow/plan-deck.js";
+import { startMockOpenAIServer } from "../helpers/mock-openai-server.js";
 
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XG9uAAAAAElFTkSuQmCC";
 
@@ -159,6 +160,43 @@ test("asset preflight rejects duplicate, unknown, and replacement while zero-ass
   }
 });
 
+test("asset preflight applies the injected production byte limit before creating or mutating a run", async () => {
+  const f = await fixture({ pages: [207], forceAssets: true });
+  try {
+    const pngBytes = Buffer.from(PNG.split(",")[1], "base64");
+    const oversizedPng = `data:image/png;base64,${Buffer.concat([pngBytes, Buffer.from([0])]).toString("base64")}`;
+    const supplied = f.plan.assets.map((asset, index) => ({ id: asset.id, dataUrl: index === 0 ? oversizedPng : PNG }));
+    const deps = createGenerateDeckDependencies({
+      deckStore: f.store,
+      profiles: f.profiles,
+      maxImageBytes: pngBytes.length,
+      generatePage: async (input) => result(crypto.randomUUID(), input.page.number),
+      inspectDeliveredPage: async (input, output) => evidence(input, output),
+    });
+    const requestId = "asset-byte-limit-run";
+
+    await assert.rejects(() => generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: supplied,
+      requestId,
+    }, deps), /maximum byte size/i);
+    assert.deepEqual(await readdir(join(f.root, "decks", "runs")), [], "invalid bytes must be rejected before a run manifest is created");
+
+    const repaired = await generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: f.plan.assets.map((asset) => ({ id: asset.id, dataUrl: PNG })),
+      requestId,
+    }, deps);
+    assert.equal(repaired.status, "delivered");
+    assert.deepEqual(
+      Object.keys((await f.store.getRun(repaired.deckRunId)).assetHashes).sort(),
+      f.plan.assets.map((asset) => asset.id).sort(),
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("partial generation preserves safe later pages and resume retries only non-delivered pages", async () => {
   const f = await fixture();
   try {
@@ -191,6 +229,55 @@ test("partial generation preserves safe later pages and resume retries only non-
 
     const persisted = JSON.stringify(await f.store.getRun(first.deckRunId));
     assert.doesNotMatch(persisted, /sk-secret|\/Users\/private|provider failed/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("failed asset page resume requires bytes again even when their hashes were registered", async () => {
+  const f = await fixture({ pages: [206], forceAssets: true });
+  try {
+    assert.ok(f.plan.assets.length > 0);
+    const suppliedAssets = f.plan.assets.map((asset) => ({ id: asset.id, dataUrl: PNG }));
+    let failPage = true;
+    const calls: string[][] = [];
+    const deps = createGenerateDeckDependencies({
+      deckStore: f.store,
+      profiles: f.profiles,
+      generatePage: async (input) => {
+        calls.push(input.externalAssets.map((asset) => asset.id));
+        if (failPage) throw new Error("first page attempt failed");
+        return result(crypto.randomUUID(), input.page.number);
+      },
+      inspectDeliveredPage: async (input, output) => evidence(input, output),
+    });
+    const requestId = "asset-bytes-resume-run";
+
+    const first = await generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: suppliedAssets,
+      requestId,
+    }, deps);
+    assert.equal(first.status, "failed");
+    assert.deepEqual(Object.keys((await f.store.getRun(first.deckRunId)).assetHashes).sort(), suppliedAssets.map((asset) => asset.id).sort());
+
+    const withoutBytes = await generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: [],
+      requestId,
+    }, deps);
+    assert.equal(withoutBytes.status, "needs_assets");
+    assert.deepEqual(withoutBytes.missingAssetIds, suppliedAssets.map((asset) => asset.id));
+    assert.equal(calls.length, 1, "resume without bytes must not retry page generation");
+
+    failPage = false;
+    const repaired = await generateDeckWorkflow({
+      deckPlanId: f.plan.plannedDeck.deckPlanId,
+      externalAssets: suppliedAssets,
+      requestId,
+    }, deps);
+    assert.equal(repaired.status, "delivered");
+    assert.deepEqual(calls, [suppliedAssets.map((asset) => asset.id), suppliedAssets.map((asset) => asset.id)]);
   } finally {
     await f.cleanup();
   }
@@ -372,4 +459,51 @@ test("production deck integration composes and QA-checks one immutable planned p
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("production review diagnostics are closed before first attempt and final persistence", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "generate-deck-review-safety-"));
+  const unsafeText = [
+    "https://review.invalid/callback?token=url-secret",
+    "/Users/reviewer/private/key.txt",
+    "OPENAI_API_KEY=review-secret",
+    "Error: leaked stack\n    at review (/Users/reviewer/review.ts:8:4)",
+    "data:image/png;base64,TEVBS1lfQkFTRTY0",
+  ].join(" | ");
+  const mock = await startMockOpenAIServer({
+    reviewScore: 95,
+    reviewIssues: [{
+      id: "unsafe-review-warning",
+      severity: "warning",
+      category: "technical",
+      evidence: unsafeText,
+      targetId: "https://review.invalid/private-target",
+      suggestedAction: "Bearer review-credential-secret",
+    }],
+  });
+  t.after(async () => {
+    await mock.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const dependencies = createProductionDependencies(mock.configFor(root), { templatesDir: resolve("templates") });
+  const planned = await dependencies.planDeck({
+    sourceText: page(901, "责任人机制", "固定负责人配置数量为1名。规定响应时限为30分钟。"),
+    pageNumbers: [901],
+    documentType: "bid",
+    quality: { minScore: 90, maxAttempts: 2 },
+  });
+  assert.equal(planned.assets.length, 0);
+
+  const output = await dependencies.generateDeck({ deckPlanId: planned.plannedDeck.deckPlanId, externalAssets: [] });
+  assert.equal(output.status, "delivered");
+  const delivered = output.pages[0];
+  assert.ok(delivered && "runId" in delivered);
+  const attemptQuality = await readFile(join(root, delivered.runId, "attempts", "01", "quality.json"), "utf8");
+  const pageManifest = await readFile(join(root, delivered.runId, "manifest.json"), "utf8");
+  const finalQuality = await readFile(join(root, delivered.runId, "quality.json"), "utf8");
+  const deckManifest = await readFile(join(root, "decks", "runs", output.deckRunId, "manifest.json"), "utf8");
+  const allPersistence = `${attemptQuality}\n${pageManifest}\n${finalQuality}\n${deckManifest}\n${JSON.stringify(output)}`;
+
+  assert.match(attemptQuality, /External review diagnostic removed by safety policy/);
+  assert.doesNotMatch(allPersistence, /url-secret|\/Users\/reviewer|review-secret|leaked stack|TEVBS1lfQkFTRTY0|review-credential-secret/);
 });

@@ -20,6 +20,11 @@ import type { ComposeResult } from "../services/slide-composer.js";
 import type { ExternalAsset } from "../services/asset-generator.js";
 import type { DocumentTemplatePolicy } from "../services/template-selector.js";
 import { validateFactReferences } from "../services/slide-spec-builder.js";
+import {
+  hasUnsafeDiagnosticValue,
+  normalizeGenerateSlideOutputDiagnostics,
+  normalizeQualityReportDiagnostics,
+} from "../services/quality-safety.js";
 import type { ActiveRun, RunStore } from "./run-store.js";
 import type { QualityLoopResult } from "./quality-loop.js";
 
@@ -143,7 +148,7 @@ async function executeResolvedSlideWorkflow(
     ...(profile ? { template: { slug: selection.slug, version: profile.version, reason: selection.reason } } : {}),
   });
 
-  const loop = await deps.runQualityLoop({
+  const rawLoop = await deps.runQualityLoop({
     runId: run.runId,
     runDir: deps.runStore.runDir(run.runId),
     source,
@@ -161,6 +166,14 @@ async function executeResolvedSlideWorkflow(
     requiredThemeId: input.requiredThemeId,
     documentPolicy: input.documentPolicy,
   });
+  const loop: QualityLoopResult = {
+    ...rawLoop,
+    attempts: rawLoop.attempts.map((attempt) => ({
+      ...attempt,
+      quality: normalizeQualityReportDiagnostics(attempt.quality),
+      actions: hasUnsafeDiagnosticValue(attempt.actions) ? [] : attempt.actions,
+    })),
+  };
   for (const attempt of loop.attempts) {
     if (!attempt.htmlPath || !attempt.qualityPath) throw new Error(`Attempt ${attempt.attempt} did not persist all artifacts`);
     await deps.runStore.saveAttempt(run.runId, {
@@ -203,7 +216,7 @@ async function executeResolvedSlideWorkflow(
     actions: selected.actions,
   });
   const manifestPath = join(deps.runStore.runDir(run.runId), "manifest.json");
-  const result = generateSlideOutputSchema.parse({
+  const result = normalizeGenerateSlideOutputDiagnostics(generateSlideOutputSchema.parse({
     runId: run.runId,
     status: loop.status,
     selectedTemplate: { slug: selectedTemplateSlug, reason: selectedTemplateReason },
@@ -221,7 +234,7 @@ async function executeResolvedSlideWorkflow(
       : loop.status === "best_effort"
         ? `返回安全的最佳尝试，质量分 ${selected.quality.score}，请查看剩余问题。`
         : "没有尝试通过安全返回门禁，请检查质量报告。",
-  });
+  }));
   await deps.runStore.finalize(run.runId, {
     status: result.status,
     selectedAttempt: selected.attempt,

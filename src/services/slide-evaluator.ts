@@ -6,6 +6,7 @@ import type { SlideSpec } from "../domain/slide-spec.js";
 import type { ReviewProvider } from "../providers/contracts.js";
 import type { DeterministicReport } from "./deterministic-evaluator.js";
 import type { RenderResult } from "./page-renderer.js";
+import { normalizeQualityReportDiagnostics } from "./quality-safety.js";
 
 const reviewSchema = z.object({
   dimensions: qualityDimensionsSchema,
@@ -80,11 +81,11 @@ export async function evaluateSlide(input: {
   ) * 10) / 10;
   const issues = deduplicateIssues([...input.deterministic.issues, ...reviewIssues]);
   const fidelityHardFailure = reviewIssues.some((issue) => issue.category === "fidelity" && issue.severity === "error");
-  return qualityReportSchema.parse({
+  return normalizeQualityReportDiagnostics(qualityReportSchema.parse({
     score,
     safeToReturn: input.deterministic.safeToReturn,
     hardGatePassed: input.deterministic.hardGatePassed && input.deterministic.safeToReturn && !fidelityHardFailure,
     dimensions,
     issues,
-  });
+  }));
 }

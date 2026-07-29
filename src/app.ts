@@ -17,6 +17,7 @@ import { evaluateDeterministic } from "./services/deterministic-evaluator.js";
 import { renderPage, type RenderResult } from "./services/page-renderer.js";
 import { executeRepairs } from "./services/repair-executor.js";
 import { evaluateSlide } from "./services/slide-evaluator.js";
+import { normalizeQualityReportDiagnostics } from "./services/quality-safety.js";
 import { buildSlideSpec } from "./services/slide-spec-builder.js";
 import { getDocumentTemplatePolicy, loadTemplateProfiles, selectTemplate } from "./services/template-selector.js";
 import { loadTemplate } from "./lib/template-parser.js";
@@ -157,13 +158,13 @@ export function createProductionDependencies(
             ...(workflowInput.expectedMetadataBindings ? { expectedMetadataBindings: workflowInput.expectedMetadataBindings } : {}),
             ...(workflowInput.displayPlan ? { displayPlan: workflowInput.displayPlan, plannedSpec: workflowInput.spec } : {}),
           });
-          const quality = await evaluateSlide({
+          const quality = normalizeQualityReportDiagnostics(await evaluateSlide({
             source: workflowInput.source,
             spec: state.spec,
             render,
             deterministic,
             review: reviewProvider,
-          });
+          }));
           if (!composed.qualityPath) throw new Error(`Quality path missing for attempt ${attempt}`);
           await writeFile(composed.qualityPath, `${JSON.stringify({ ...quality, deterministic }, null, 2)}\n`);
           return quality;
@@ -209,6 +210,7 @@ export function createProductionDependencies(
   const generateDeckDependencies = createGenerateDeckDependencies({
     deckStore,
     profiles,
+    maxImageBytes: config.limits.maxImageBytes,
     generatePage: (input) => generatePreparedSlideWorkflow({
       source: input.source,
       plannedSpec: input.plannedSpec,

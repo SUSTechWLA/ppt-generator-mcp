@@ -18,7 +18,7 @@ import {
 import type { SlideSpec } from "../domain/slide-spec.js";
 import type { TemplateProfile, TemplateSelection } from "../domain/template-profile.js";
 import { WorkflowError } from "../domain/workflow-error.js";
-import { parseExternalAssetDataUrl, type ExternalAsset } from "../services/asset-generator.js";
+import { validateExternalAssetDataUrl, type ExternalAsset } from "../services/asset-generator.js";
 import {
   evaluateDeckConsistency,
   type DeckConsistencyPage,
@@ -59,6 +59,7 @@ export interface GenerateDeckDependencies {
     | "createOrResumeRun"
     | "mergeAssetHashes"
     | "markNeedsAssets"
+    | "markUnavailableBytes"
     | "hasDeliveredPage"
     | "savePageResult"
     | "savePageFailure"
@@ -69,6 +70,7 @@ export interface GenerateDeckDependencies {
   profiles: TemplateProfile[];
   generatePage(input: PlannedPageWorkflowInput): Promise<GenerateSlideOutput>;
   inspectDeliveredPage(input: PlannedPageWorkflowInput, result: GenerateSlideOutput): Promise<DeckConsistencyPage>;
+  validateExternalAsset(dataUrl: string): { bytes: Buffer };
   evaluateConsistency(input: {
     plannedDeck: PlannedDeck;
     loadedProfiles: TemplateProfile[];
@@ -82,16 +84,19 @@ export function createGenerateDeckDependencies(input: {
   profiles: TemplateProfile[];
   generatePage: GenerateDeckDependencies["generatePage"];
   inspectDeliveredPage: GenerateDeckDependencies["inspectDeliveredPage"];
+  maxImageBytes?: number;
 }): GenerateDeckDependencies {
+  const maxImageBytes = input.maxImageBytes ?? Number.MAX_SAFE_INTEGER;
   return {
     ...input,
+    validateExternalAsset: (dataUrl) => validateExternalAssetDataUrl(dataUrl, maxImageBytes),
     evaluateConsistency: evaluateDeckConsistency,
     getDocumentPolicy: getDocumentTemplatePolicy,
   };
 }
 
-function assetHash(dataUrl: string): string {
-  return createHash("sha256").update(parseExternalAssetDataUrl(dataUrl).bytes).digest("hex");
+function assetHash(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function pageSource(slide: DeckSlidePlan): SourceDocument {
@@ -254,12 +259,16 @@ export async function generateDeckWorkflow(rawInput: unknown, deps: GenerateDeck
   const unknown = suppliedIds.filter((assetId) => !allAssetIds.has(assetId));
   if (unknown.length > 0) throw new Error(`Unknown external asset IDs: ${unknown.join(",")}`);
 
+  const suppliedHashes = Object.fromEntries(input.externalAssets.map((asset) => {
+    const parsed = deps.validateExternalAsset(asset.dataUrl);
+    return [asset.id, assetHash(parsed.bytes)];
+  }));
+
   const active = await deps.deckStore.createOrResumeRun({
     requestId: input.requestId,
     canonicalInput: { deckPlanId: deck.deckPlanId },
     deckPlanId: deck.deckPlanId,
   });
-  const suppliedHashes = Object.fromEntries(input.externalAssets.map((asset) => [asset.id, assetHash(asset.dataUrl)]));
   for (const [assetId, hash] of Object.entries(suppliedHashes)) {
     const existing = active.manifest.assetHashes[assetId];
     if (existing && existing !== hash) throw new Error(`Asset hash replacement rejected for ${assetId}`);
@@ -279,7 +288,7 @@ export async function generateDeckWorkflow(rawInput: unknown, deps: GenerateDeck
     .flatMap((slide) => slide.plannedSpec.assets.map((asset) => asset.id));
   const supplied = new Set(suppliedIds);
   const missing = requiredForPendingPages.filter((assetId) => !supplied.has(assetId));
-  if (missing.length > 0) return orderedPages(await deps.deckStore.markNeedsAssets(active.deckRunId, missing), deck.pageNumbers);
+  if (missing.length > 0) return orderedPages(await deps.deckStore.markUnavailableBytes(active.deckRunId, missing), deck.pageNumbers);
   await deps.deckStore.mergeAssetHashes(active.deckRunId, suppliedHashes);
 
   const policy = deps.getDocumentPolicy(deck.documentType);

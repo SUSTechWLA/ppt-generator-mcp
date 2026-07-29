@@ -3,11 +3,13 @@ import type { AddressInfo } from "node:net";
 
 import { DEFAULT_LIMITS } from "../../src/config/limits.js";
 import type { AppConfig, ImageProviderProfile, ProviderProfile } from "../../src/config/env.js";
+import type { QualityIssue } from "../../src/domain/quality-report.js";
 
 interface MockOptions {
   imageMode?: "base64" | "url";
   failFirstChatWith?: number;
   reviewScore?: number;
+  reviewIssues?: QualityIssue[];
 }
 
 export interface RecordedRequest {
@@ -48,7 +50,7 @@ export async function startMockOpenAIServer(options: MockOptions = {}) {
       const content = isReview
         ? {
             dimensions: { fidelity: score, structure: score, readability: score, layout: score, asset: score, technical: score },
-            issues: [],
+            issues: options.reviewIssues ?? [],
           }
         : schemaName === "test_payload" ? { ok: true } : { ok: true };
       response.writeHead(200, { "content-type": "application/json" });

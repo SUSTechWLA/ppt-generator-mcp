@@ -4,6 +4,11 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { hashCanonical } from "../domain/source-document.js";
 import type { ArtifactName, AttemptRecord, RunManifest, StageRecord, WorkflowStage } from "../domain/run-manifest.js";
+import {
+  hasUnsafeDiagnosticValue,
+  normalizeGenerateSlideOutputDiagnostics,
+  normalizePersistedQualityArtifact,
+} from "../services/quality-safety.js";
 
 interface RequestIndexEntry {
   runId: string;
@@ -139,9 +144,12 @@ export class RunStore {
     await mkdir(directory, { recursive: true });
     if (files?.html !== undefined) await atomicWrite(join(directory, "page.html"), files.html);
     if (files?.preview !== undefined) await atomicWrite(join(directory, "preview.png"), files.preview);
-    if (files?.quality !== undefined) await atomicWrite(join(directory, "quality.json"), `${JSON.stringify(files.quality, null, 2)}\n`);
+    if (files?.quality !== undefined) {
+      await atomicWrite(join(directory, "quality.json"), `${JSON.stringify(normalizePersistedQualityArtifact(files.quality), null, 2)}\n`);
+    }
     const manifest = await this.getRun(runId);
-    manifest.attempts = [...manifest.attempts.filter((item) => item.attempt !== attempt.attempt), attempt].sort((a, b) => a.attempt - b.attempt);
+    const safeAttempt = hasUnsafeDiagnosticValue(attempt.actions) ? { ...attempt, actions: [] } : attempt;
+    manifest.attempts = [...manifest.attempts.filter((item) => item.attempt !== attempt.attempt), safeAttempt].sort((a, b) => a.attempt - b.attempt);
     return this.writeManifest(manifest);
   }
 
@@ -162,7 +170,10 @@ export class RunStore {
 
   async finalize(runId: string, update: Pick<RunManifest, "status"> & Partial<Pick<RunManifest, "selectedAttempt" | "finalResult" | "artifacts">>): Promise<RunManifest> {
     const manifest = await this.getRun(runId);
-    Object.assign(manifest, update);
+    Object.assign(manifest, {
+      ...update,
+      ...(update.finalResult ? { finalResult: normalizeGenerateSlideOutputDiagnostics(update.finalResult) } : {}),
+    });
     return this.writeManifest(manifest);
   }
 

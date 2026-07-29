@@ -107,11 +107,6 @@ export const deckManifestSchema = z.object({
   if (new Set(manifest.pages.map((page) => page.pageNumber)).size !== manifest.pages.length) {
     context.addIssue({ code: "custom", message: "Page records must have unique page numbers", path: ["pages"] });
   }
-  for (const [index, assetId] of manifest.missingAssetIds.entries()) {
-    if (manifest.assetHashes[assetId]) {
-      context.addIssue({ code: "custom", message: "A supplied asset cannot remain missing", path: ["missingAssetIds", index] });
-    }
-  }
   if (manifest.status === "needs_assets" && manifest.missingAssetIds.length === 0) {
     context.addIssue({ code: "custom", message: "needs_assets status requires missing assets", path: ["status"] });
   }

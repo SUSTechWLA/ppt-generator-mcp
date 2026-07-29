@@ -62,6 +62,16 @@ export function parseExternalAssetDataUrl(dataUrl: string): { bytes: Buffer; mim
   return { bytes, mimeType };
 }
 
+export function validateExternalAssetDataUrl(
+  dataUrl: string,
+  maxBytes: number,
+): { bytes: Buffer; mimeType: GeneratedAsset["mimeType"] } {
+  if (!Number.isInteger(maxBytes) || maxBytes < 1) throw new Error("Invalid maximum image byte size");
+  const parsed = parseExternalAssetDataUrl(dataUrl);
+  if (parsed.bytes.length > maxBytes) throw new Error("External asset exceeds maximum byte size");
+  return parsed;
+}
+
 const ICON_ALIASES: Array<[RegExp, string]> = [
   [/团队|人员|协作|班组/i, "users-group.svg"],
   [/审批|流程|清单/i, "clipboard-check.svg"],
@@ -132,8 +142,7 @@ export async function generateAssets(input: GenerateAssetsInput): Promise<Genera
 
     const supplied = external.get(spec.id);
     if (supplied) {
-      const parsed = parseExternalAssetDataUrl(supplied);
-      if (parsed.bytes.length > input.maxBytes) throw new Error("External asset exceeds maximum byte size");
+      const parsed = validateExternalAssetDataUrl(supplied, input.maxBytes);
       results.push(await persistAsset(input.outputDir, spec, hash, parsed.bytes, parsed.mimeType));
       continue;
     }

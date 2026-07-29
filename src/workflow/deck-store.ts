@@ -51,6 +51,7 @@ export interface DeckStoreApi {
   }): Promise<{ deckRunId: string; resumed: boolean; manifest: DeckManifest }>;
   mergeAssetHashes(deckRunId: string, hashes: Record<string, string>): Promise<DeckManifest>;
   markNeedsAssets(deckRunId: string, ids: string[]): Promise<GenerateDeckOutput>;
+  markUnavailableBytes(deckRunId: string, ids: string[]): Promise<GenerateDeckOutput>;
   hasDeliveredPage(deckRunId: string, pageNumber: number): Promise<boolean>;
   savePageResult(deckRunId: string, pageNumber: number, result: GenerateSlideOutput): Promise<DeckManifest>;
   savePageFailure(deckRunId: string, pageNumber: number, error: unknown): Promise<DeckManifest>;
@@ -490,7 +491,8 @@ export class DeckStore implements DeckStoreApi {
         if (assetHashes[assetId] && assetHashes[assetId] !== hash) throw new Error(`Asset hash replacement rejected for ${assetId}`);
         assetHashes[assetId] = hash;
       }
-      const missingAssetIds = manifest.missingAssetIds.filter((assetId) => !assetHashes[assetId]);
+      const suppliedIds = new Set(Object.keys(hashes));
+      const missingAssetIds = manifest.missingAssetIds.filter((assetId) => !suppliedIds.has(assetId));
       return {
         ...manifest,
         assetHashes,
@@ -506,6 +508,20 @@ export class DeckStore implements DeckStoreApi {
     const manifest = await this.mutateManifest(deckRunId, (current) => {
       const missingAssetIds = Array.from(new Set([...current.missingAssetIds, ...ids]))
         .filter((assetId) => !current.assetHashes[assetId]);
+      if (current.status === "delivered") {
+        if (missingAssetIds.length === 0) return current;
+        throw new Error("Delivered deck run is immutable");
+      }
+      return { ...current, missingAssetIds, status: missingAssetIds.length > 0 ? "needs_assets" : "running" };
+    });
+    return this.toOutput(manifest);
+  }
+
+  async markUnavailableBytes(deckRunId: string, ids: string[]): Promise<GenerateDeckOutput> {
+    if (!Array.isArray(ids)) throw new Error("Invalid unavailable asset ids");
+    for (const assetId of ids) if (!ASSET_ID.test(assetId)) throw new Error(`Invalid asset id: ${assetId}`);
+    const manifest = await this.mutateManifest(deckRunId, (current) => {
+      const missingAssetIds = Array.from(new Set([...current.missingAssetIds, ...ids]));
       if (current.status === "delivered") {
         if (missingAssetIds.length === 0) return current;
         throw new Error("Delivered deck run is immutable");

@@ -134,7 +134,7 @@ flowchart TD
 - 每个语义项的 slot assignment、字符使用和容量总计；
 - 页面元数据与图片提示词的绑定证据；
 - 按局部质量顺序保存的完整成功候选评分；
-- 有效 `templateDiversity`、保留字符损失、选择分损失、首次使用与相邻重复证据；
+- 有效 `templateDiversity`、保留字符损失、选择分损失、首次使用、相邻重复，以及重复是不可避免还是全局质量权衡优选的证据；
 - 选择原因、文档策略和主题信息。
 
 `planFingerprint` 绑定来源、页面顺序、质量要求、有效多样性模式和上述模板能力证据。使用相同 `requestId` 恢复计划时，Server 返回原计划，并用当前 catalog 再次校验 capability；不会静默重规划旧计划。历史计划的 `templateDiversity` 仍是可选字段，解析时不会为旧 artifact 合成默认值，因此原 fingerprint 保持有效。
@@ -253,7 +253,9 @@ Server 当前注册 20 个工具，分为四层。
 
 `list_templates`、`load_template`、`fill_placeholders`、`insert_asset_slots`、`render_icons`、`assemble_page`、`validate_page`、`parse_source_content`、`generate_image` 用于受控的低层编排。
 
-高层 deck 工具不接受 API Key、任意文件路径或远程图片 URL。低层 `generate_image` 只有在 Server 配置 provider 时才可用，不改变高层“外部资产注入”的推荐边界。
+前两组构成推荐的 high-level deck/template-knowledge surface：strict schema 不接收调用方 API Key、base URL、任意物理路径或远程 URL，provider secret 来自 Server 环境，产物进入受控 store。
+
+后两组是 trusted-local legacy/atomic surface，而不是同一安全承诺的延伸。部分兼容/原子 schema 接收物理路径、`apiKey`、`baseUrl`、`outputPath` 或 `outputDir`；`generate_image` 可按调用方配置直接发起网络请求并写入调用方指定目录。它们继承宿主进程的网络和文件权限，其下载与输出不享受 high-level host allowlist、artifact allowlist 或 store-root containment 保证。它们只适合受控本地编排，不得暴露给不可信 Agent；生产部署应通过 MCP client/gateway 工具白名单只开放所需高层工具，或把 trusted-local surface 置于独立受控主机。
 
 ## 10. 模板知识沉淀
 
@@ -270,14 +272,23 @@ Server 当前注册 20 个工具，分为四层。
 
 ## 11. 安全设计
 
-- 所有工具入口使用 strict Zod schema，拒绝未知字段；
-- provider 密钥只从环境变量读取，并以不可枚举属性保存在 Server 内部；
-- 高层工具只接受逻辑 ID、正文和 data URL，不接受调用方物理路径；
-- store 对路径做根目录包含、realpath 和符号链接检查；
-- 可读取产物使用固定白名单和大小上限，大型 HTML 不通过公共文本接口回传；
-- 图片大小、数量、输入字符数、并发数和请求时长都有上限；
-- 外部下载仅在明确配置的低层 provider 场景使用 host allowlist；
-- MCP 错误统一转为结构化、安全诊断，未知异常不把原始消息或堆栈返回调用方。
+### 11.1 推荐 high-level surface
+
+这里的安全承诺只覆盖 9.1 与 9.2 的 deck/template-knowledge 工具：
+
+- 入口使用 strict Zod schema，拒绝未知字段，不接收调用方 key、base URL、物理路径或远程 URL；
+- provider 密钥只从 Server 环境变量读取，并以不可枚举属性保存在 Server 内部；
+- 输入只包含有界正文、受限 data URL、蓝图和逻辑 ID；
+- deck 与 template-knowledge store 对路径做根目录包含、realpath 和符号链接检查；
+- 可读取产物使用固定 artifact 白名单和大小上限，大型 HTML 不通过公共文本接口回传；
+- 图片大小、数量、输入字符数、并发数和请求时长有显式上限；
+- 高层错误与诊断经过结构化和脱敏，未知异常不把原始依赖消息、堆栈或物理路径返回调用方。
+
+### 11.2 Trusted-local legacy/atomic surface
+
+9.3 与 9.4 为兼容旧 workflow 和受控低层编排而保留。它们可能接收物理路径、调用方 `apiKey/baseUrl` 和输出目录，并可使用宿主网络与文件系统权限。特别是 `generate_image` 可直接访问调用方配置的 endpoint 并写入 `outputDir`；`assemble_page` 等工具也可写入调用方路径。
+
+因此，high-level 的 host allowlist、artifact allowlist、store-root containment 和“secret 只来自环境”保证不适用于这些 legacy/atomic 下载与输出操作。Server 注册这些工具不等于授权不可信 Agent 使用它们；工具暴露策略必须由受控 MCP client/gateway 或独立部署边界执行。
 
 ## 12. 当前限制与演进方向
 
@@ -311,6 +322,6 @@ Server 当前注册 20 个工具，分为四层。
 
 - 先定义输入、持久化证据和历史兼容策略；
 - 新策略不能绕过事实、容量、图片或文档硬门禁；
-- 外部 provider 必须可选，并保持密钥只在 Server 环境；
+- 推荐 high-level workflow 的外部 provider 必须可选，并保持密钥只在 Server 环境；
 - 幂等恢复不能因新默认值改变历史计划身份；
 - 更新 README、本文和真实 MCP 验收步骤后再进入主分支。

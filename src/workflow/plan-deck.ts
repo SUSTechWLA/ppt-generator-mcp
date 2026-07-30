@@ -409,6 +409,7 @@ function selectionReasonWithDiversity(reason: string, evidence: DiversityEvidenc
     `scoreLoss=${compactNumber(evidence.selectionScoreLoss)}`,
     `firstUse=${evidence.firstUse}`,
     `adjacentRepeat=${evidence.adjacentRepeat}`,
+    `repeatDisposition=${evidence.repeatDisposition}`,
   ].join("; ");
   return `${reason.slice(0, Math.max(0, 1_000 - suffix.length))}${suffix}`;
 }

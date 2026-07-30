@@ -17,6 +17,7 @@ export interface DeckTemplateDecision {
   selectionScoreLoss: number;
   firstUse: boolean;
   adjacentRepeat: boolean;
+  repeatDisposition: "none" | "unavoidable" | "quality-preferred";
   diversityAdjustment: number;
 }
 
@@ -132,6 +133,11 @@ export function selectDeckTemplateSequence(
       for (const candidate of admitted) {
         const firstUse = !state.usedSlugs.has(candidate.candidate.templateSlug);
         const adjacentRepeat = state.lastSlug === candidate.candidate.templateSlug;
+        const repeatDisposition = !adjacentRepeat
+          ? "none"
+          : admitted.some((alternative) => alternative.candidate.templateSlug !== state.lastSlug)
+            ? "quality-preferred"
+            : "unavoidable";
         const diversityAdjustment = (firstUse ? policy.firstUseBonus : 0)
           - (adjacentRepeat ? policy.adjacentPenalty : 0);
         const qualityLoss = candidate.retainedLossPercent * 2 + candidate.selectionScoreLoss;
@@ -142,6 +148,7 @@ export function selectDeckTemplateSequence(
           selectionScoreLoss: candidate.selectionScoreLoss,
           firstUse,
           adjacentRepeat,
+          repeatDisposition,
           diversityAdjustment,
         };
         const next: SequenceState = {

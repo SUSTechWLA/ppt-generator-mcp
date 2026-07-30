@@ -16,7 +16,7 @@
 - 模板知识沉淀：从内联 HTML、展示页截图或通用蓝图提取布局知识，经 owned compiler 和真实浏览器 QA 后保存为不可变模板知识。
 - 质量门禁：检查单页尺寸、溢出、字号、对比度、图片加载、远程资源、脚本与敏感信息；最多进行 3 次定向修复。
 - Provider 可选：没有文本或图片 API 时仍可确定性规划，并由调用方通过 `externalAssets` 注入图片。
-- 安全边界：API Key 仅从 Server 环境读取；高层工具不接受路径、远程 URL、任意文件名或图片 API Key。
+- 分层安全边界：推荐的 deck/template-knowledge 高层工具从 Server 环境读取 provider 密钥，只接受受控文本、data URL 与逻辑 ID，并把产物限制在受控 store；兼容/原子工具属于 trusted-local surface，边界不同。
 
 ## 核心实现原则
 
@@ -163,6 +163,11 @@ npm start
 
 Server 当前注册 20 个工具。完整分组、调用边界及适用场景见[架构文档的 MCP 工具面](docs/architecture.md#mcp-工具面)。
 
+这 20 个工具不是同一种信任面：
+
+- 推荐的 high-level surface 是 `plan_deck`、`generate_deck`、`get_deck`、`inspect_template`、`create_template_from_reference` 和 `list_template_knowledge`。这些 strict contract 不接收调用方 key、base URL、物理路径或远程 URL；provider secret 来自 Server 环境，持久化和读取受 store root、闭集 artifact 与大小限制约束。
+- `plan_slide` 等单页兼容工具和原子模板工具是 trusted-local surface。部分 schema 会接收物理路径、`apiKey`、`baseUrl`、`outputPath` 或 `outputDir`；`generate_image` 可按调用参数发起网络请求并写入调用方指定目录。这些工具继承宿主进程的网络和文件权限，其下载与输出不享受上述 high-level host allowlist 或 store-root containment 保证，不得直接暴露给不可信 Agent。部署时应在 MCP client/gateway 侧只放行所需的高层工具，或把 trusted-local surface 隔离到受控主机与受控调用方。
+
 ## 状态与产物
 
 - `needs_assets`：仍缺少计划中指定的一个或多个图片，可继续同一请求。
@@ -201,9 +206,9 @@ template-knowledge/
 - `PPT_OUTPUT_ROOT`：运行目录，默认 `output/runs`。
 - `PPT_MAX_CONCURRENCY`、`PPT_REQUEST_TIMEOUT_MS`、`PPT_MAX_IMAGE_BYTES` 等：资源限制。
 
-没有 reviewer 时，Chromium 硬门禁与确定性评分仍然生效。密钥只从环境变量读取，不进入工具参数、HTML 或 manifest。
+没有 reviewer 时，Chromium 硬门禁与确定性评分仍然生效。推荐 high-level surface 的 provider 密钥只从环境变量读取，不进入工具参数、HTML 或 manifest；这项承诺不扩展到可显式接收 `imageConfig.apiKey/baseUrl` 的 trusted-local 兼容/原子调用。
 
-其中 `PPT_LLM_*` 主要服务旧的单页/低层规划路径，`PPT_IMAGE_*` 服务低层图片工具和修复能力，`PPT_REVIEW_*` 提供可选视觉复核。推荐的 `plan_deck → generate_deck` 高层路径不接收调用方 API Key，也不会在规划阶段隐式生成图片。
+其中 `PPT_LLM_*` 主要服务旧的单页/低层规划路径，`PPT_IMAGE_*` 服务低层图片工具和修复能力，`PPT_REVIEW_*` 提供可选视觉复核。推荐的 `plan_deck → generate_deck` 高层路径不接收调用方 API Key，也不会在规划阶段隐式生成图片；trusted-local 工具若选择调用方自带 provider 配置，则由受信调用方承担该配置与宿主权限边界。
 
 ## 模板维护
 

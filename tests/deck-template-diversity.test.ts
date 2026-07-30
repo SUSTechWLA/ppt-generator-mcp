@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,6 +16,7 @@ import { loadTemplate } from "../src/lib/template-parser.js";
 import { DeckStore } from "../src/workflow/deck-store.js";
 import { createPlanDeckDependencies, planDeckWorkflow } from "../src/workflow/plan-deck.js";
 import { mcpPlanDeckInputSchema } from "../src/mcp/deck-tools.js";
+import { hashCanonical } from "../src/domain/source-document.js";
 
 const baseInput = {
   sourceText: "<page 1>\n一级标题：示例\n正文：\n事实内容足够用于页面规划和模板选择。",
@@ -46,6 +47,16 @@ const fourPageSource = `<page 1>
 三级标题：安全与秩序管理
 正文：
 机械作业避开人员集中时段，作业区域设置警示和引导。枝叶、草屑及包装物随产随清，完成一个作业面后复查植物、道路、设备和防护设施。`;
+
+const processSource = `<page 1>
+一级标题：实施方案
+二级标题：服务流程
+三级标题：全过程闭环管理
+正文：
+项目启动后依次完成现场交接、任务分派、过程巡查和结果复核。每项任务记录责任人、完成时限和验收结果，异常事项进入整改闭环。`;
+
+const PRE_DIVERSITY_PLAN_ID = "11111111-1111-4111-8111-111111111111";
+const PRE_DIVERSITY_PLAN_FINGERPRINT = "265b2a56ec1fb9c90bac00e56187e3b28586e7180a3307b5bf14224d86111bb5";
 
 const templateRoot = fileURLToPath(new URL("../templates", import.meta.url));
 
@@ -122,6 +133,45 @@ test("balanced selects varied near-best templates without adjacent repetition", 
   const slugs = decisions.map((decision, page) => pages[page][decision.candidateIndex].templateSlug);
   assert.ok(new Set(slugs).size >= 2);
   assert.equal(slugs.some((slug, index) => index > 0 && slug === slugs[index - 1]), false);
+  assert.deepEqual(decisions.map((decision) => decision.repeatDisposition), ["none", "none", "none", "none"]);
+});
+
+test("marks an adjacent repeat unavoidable when no admitted alternative changes the slug", () => {
+  const pages = Array.from({ length: 2 }, () => [
+    { templateSlug: "layout-a", retainedCharacterCount: 200, selectionScore: 92, catalogIndex: 0 },
+  ]);
+
+  assert.deepEqual(
+    selectDeckTemplateSequence(pages, "balanced").map((decision) => decision.repeatDisposition),
+    ["none", "unavoidable"],
+  );
+});
+
+test("marks a globally preferred adjacent repeat when an admitted alternative exists", () => {
+  const pages = [
+    [
+      { templateSlug: "layout-a", retainedCharacterCount: 200, selectionScore: 92, catalogIndex: 0 },
+    ],
+    [
+      { templateSlug: "layout-a", retainedCharacterCount: 200, selectionScore: 92, catalogIndex: 0 },
+      { templateSlug: "layout-b", retainedCharacterCount: 194, selectionScore: 84, catalogIndex: 1 },
+    ],
+    [
+      { templateSlug: "layout-b", retainedCharacterCount: 200, selectionScore: 92, catalogIndex: 1 },
+    ],
+  ];
+  const decisions = selectDeckTemplateSequence(pages, "balanced");
+
+  assert.deepEqual(decisions.map((decision, pageIndex) => pages[pageIndex][decision.candidateIndex].templateSlug), [
+    "layout-a",
+    "layout-a",
+    "layout-b",
+  ]);
+  assert.deepEqual(decisions.map((decision) => decision.repeatDisposition), [
+    "none",
+    "quality-preferred",
+    "none",
+  ]);
 });
 
 test("balanced rejects novelty outside the quality band", () => {
@@ -188,19 +238,14 @@ test("bounds candidate and state exploration for a 30-page deck", () => {
 
 test("a process-capable text table profile carries process facts through its existing bindings", async () => {
   const templateSlug = "green-infographic-bid-a4-landscape-table-text";
-  const sourceText = `<page 1>
-一级标题：实施方案
-二级标题：服务流程
-三级标题：全过程闭环管理
-正文：
-项目启动后依次完成现场交接、任务分派、过程巡查和结果复核。每项任务记录责任人、完成时限和验收结果，异常事项进入整改闭环。`;
-  const output = await runWorkflowWithSource(sourceText, [1], {
+  const output = await runWorkflowWithSource(processSource, [1], {
     templateSlug,
     requestId: "template-process-capability-001",
   });
   const slide = output.plannedDeck.slides[0];
 
   assert.equal(slide.templateSlug, templateSlug);
+  assert.equal(slide.templateMatch.profileVersion, "2.0.1");
   assert.deepEqual(slide.displayPlan.items.map((item) => item.role), ["process", "process"]);
   assert.deepEqual(slide.templateMatch.assignments.map((item) => item.role), ["process", "process"]);
   assert.deepEqual(slide.templateMatch.representedFactIds, slide.originalSourceFactIds);
@@ -231,7 +276,7 @@ test("balanced planning selects a feasible varied sequence and persists auditabl
   assert.ok(output.plannedDeck.slides.every((slide) => slide.templateMatch.candidateScores.length >= 1));
   assert.ok(output.plannedDeck.slides.some((slide) => slide.templateMatch.candidateScores.length >= 2));
   assert.ok(output.plannedDeck.slides.every((slide) =>
-    /mode=balanced; retainedLoss=\d+; retainedLossPercent=\d+(?:\.\d+)?; scoreLoss=-?\d+(?:\.\d+)?; firstUse=(?:true|false); adjacentRepeat=(?:true|false)/
+    /mode=balanced; retainedLoss=\d+; retainedLossPercent=\d+(?:\.\d+)?; scoreLoss=-?\d+(?:\.\d+)?; firstUse=(?:true|false); adjacentRepeat=(?:true|false); repeatDisposition=(?:none|unavoidable|quality-preferred)/
       .test(slide.templateMatch.selectionReason)
   ));
   assert.deepEqual(output.assets, output.plannedDeck.slides.flatMap((slide) => slide.plannedSpec.assets));
@@ -272,16 +317,53 @@ test("an explicit template slug forces and persists effective diversity off", as
   assert.deepEqual(new Set(output.plannedDeck.slides.map((slide) => slide.templateSlug)), new Set([templateSlug]));
 });
 
-test("historical plans without template diversity retain their original fingerprint shape", async () => {
-  const output = await runRealWorkflow({
-    templateDiversity: "off",
-    requestId: "template-diversity-historical-001",
-  });
-  const historicalPlan = structuredClone(output.plannedDeck) as Record<string, unknown>;
+test("a frozen pre-diversity plan keeps its literal fingerprint and resumes from DeckStore", async () => {
+  const templateSlug = "green-infographic-bid-a4-landscape-table-text";
+  const planningInput = {
+    sourceText: processSource,
+    pageNumbers: [1],
+    documentType: "bid" as const,
+    preferredThemeId: "green-infographic-v1",
+    templateSlug,
+    requestId: "pre-diversity-plan-001",
+  };
+  const output = await runWorkflowWithSource(processSource, [1], { templateSlug });
+  const historicalOutput = structuredClone(output);
+  const historicalPlan = historicalOutput.plannedDeck as Record<string, unknown>;
+  historicalPlan.deckPlanId = PRE_DIVERSITY_PLAN_ID;
   delete historicalPlan.templateDiversity;
-  historicalPlan.planFingerprint = hashPlannedDeckFingerprint(historicalPlan as Parameters<typeof hashPlannedDeckFingerprint>[0]);
+  for (const slide of historicalOutput.plannedDeck.slides) {
+    slide.templateMatch.selectionReason = slide.templateMatch.selectionReason.split("; mode=")[0];
+  }
+  historicalPlan.planFingerprint = PRE_DIVERSITY_PLAN_FINGERPRINT;
 
+  assert.equal(
+    hashPlannedDeckFingerprint(historicalPlan as Parameters<typeof hashPlannedDeckFingerprint>[0]),
+    PRE_DIVERSITY_PLAN_FINGERPRINT,
+  );
   const parsed = plannedDeckSchema.parse(historicalPlan);
   assert.equal(parsed.templateDiversity, undefined);
-  assert.equal(parsed.planFingerprint, historicalPlan.planFingerprint);
+  assert.equal(parsed.planFingerprint, PRE_DIVERSITY_PLAN_FINGERPRINT);
+
+  const root = await mkdtemp(join(tmpdir(), "pre-diversity-store-"));
+  try {
+    const planDirectory = join(root, "decks", "plans", PRE_DIVERSITY_PLAN_ID);
+    await mkdir(planDirectory, { recursive: true });
+    await writeFile(join(planDirectory, "plan.json"), `${JSON.stringify(historicalOutput, null, 2)}\n`);
+    const canonicalInput = planDeckInputSchema.parse(planningInput);
+    await writeFile(join(root, "decks", "plan-request-index.json"), `${JSON.stringify({
+      [planningInput.requestId]: { id: PRE_DIVERSITY_PLAN_ID, fingerprint: hashCanonical(canonicalInput) },
+    }, null, 2)}\n`);
+
+    const deckStore = new DeckStore(root);
+    const profiles = loadTemplateProfiles(templateRoot);
+    const resumed = await planDeckWorkflow(
+      planningInput,
+      createPlanDeckDependencies({ deckStore, profiles }),
+    );
+    assert.deepEqual(resumed, historicalOutput);
+    assert.equal(resumed.plannedDeck.templateDiversity, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

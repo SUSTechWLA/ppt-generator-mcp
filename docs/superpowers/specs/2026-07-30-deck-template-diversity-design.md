@@ -5,7 +5,7 @@
 **Status:** Implemented
 **Scope:** `plan_deck` template selection only
 
-> Production note (2026-07-31): the public MCP contract, bounded optimizer, deck-scope workflow integration, immutable evidence and historical fingerprint compatibility are implemented. Automated tests, production typecheck/build, and two identical `plan_deck` calls through `dist/src/server.js` over the real four-page source have passed. That source exposed exactly one complete successful candidate per page, so the approved quality band correctly retained one repeated slug rather than forcing artificial variety.
+> Production note (2026-07-31): the public MCP contract, bounded optimizer, deck-scope workflow integration, immutable evidence and historical fingerprint compatibility are implemented. Selection evidence distinguishes non-repeats, unavoidable repeats, and repeats preferred by the global quality tradeoff; a frozen pre-diversity plan uses a literal fingerprint and resumes through `DeckStore`. Automated tests, production typecheck/build, and two identical `plan_deck` calls through `dist/src/server.js` over the real four-page source have passed. That source exposed exactly one complete successful candidate per page, so the approved quality band correctly retained one repeated slug rather than forcing artificial variety.
 
 ## Goal
 
@@ -164,7 +164,7 @@ Use test-first development with real candidate structures and workflow calls.
 5. Explicit `templateSlug` fixes all pages to the requested template.
 6. `off` reproduces the current per-page winner sequence.
 7. Repeated identical planning inputs produce the same template sequence and fingerprint.
-8. Historical planned-deck fixtures without `templateDiversity` continue to parse and validate.
+8. A frozen historical planned-deck fixture without `templateDiversity` hashes to a precomputed literal, parses, and resumes through `DeckStore` without runtime recomputation of the expected fingerprint.
 9. A 30-page catalog-growth fixture remains within the 12-candidate and 256-state bounds.
 10. A real MCP `plan_deck` run over local `test.md` validates four pages, reports the selected template sequence and keeps every page's grounding and profile evidence valid.
 

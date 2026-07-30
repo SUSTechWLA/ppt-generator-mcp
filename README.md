@@ -10,6 +10,7 @@
 - 事实与来源证据：金额、面积、数量、时限和约束均可追溯到所属页面。
 - 模板无关页面蓝图和严格 `TemplateProfile`：按容量、语义角色、图片槽位、文档策略和密度选择模板，不按页码、正文或 slug 特判。
 - `plan_deck → generate_deck → get_deck`：不可变计划、断点续跑、每页独立 QA、跨页一致性校验。
+- 模板知识：从内联 HTML 或展示页截图分析任务沉淀严格蓝图，经 owned compiler、真实图片 Chromium QA 和不可变存储后形成可晋升模板。
 - 无图片 API 模式：Agent 调用 `imagegen` 后，以 `externalAssets` 注入图片。
 - 可选 OpenAI-compatible 文本、图片和多模态评审 provider。
 - Chromium QA：单页、尺寸、溢出、字号、对比度、图片加载、脚本、远程资源和敏感信息门禁。
@@ -97,6 +98,9 @@ npm start
 | `plan_deck` | 固定分页正文 → 不可变逐页计划、模板能力证据和图片提示词 |
 | `generate_deck` | 资产注入 → 逐页生成/QA/修复和跨页一致性检查 |
 | `get_deck` | 按 UUID 读取脱敏 plan、manifest 或闭集文本产物 |
+| `inspect_template` | 只读分析内联 HTML 的布局、组件、色板、排版和安全发现 |
+| `create_template_from_reference` | 从 HTML、受限截图 data URL 或严格蓝图编译并 QA 模板知识 |
+| `list_template_knowledge` | 列出不可变知识 ID、能力标签、闭集产物名和 QA 证据 |
 
 `plan_slide`、`generate_slide` 和原子工具继续保留用于兼容与调试。稳定交付必须优先使用 deck 工作流；高层 deck 路径不会调用旧 Markdown 兼容解析器或语义自动分页器。
 
@@ -146,7 +150,7 @@ npm run demo:source
 
 `demo:source` 通过内存 MCP 完整调用 `plan_slide → generate_slide`，使用 `examples/assets/personnel-coordination.png`，并执行真实 Chromium QA。
 
-详细 deck 工具契约与接入说明见 [docs/workflows/generate-deck.md](docs/workflows/generate-deck.md)。
+详细 deck 工具契约与接入说明见 [docs/workflows/generate-deck.md](docs/workflows/generate-deck.md)；模板学习与人工晋升边界见 [docs/workflows/template-knowledge.md](docs/workflows/template-knowledge.md)。
 
 ## 模板开发
 

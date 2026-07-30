@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-30
 
-**Status:** Draft for written-spec review
+**Status:** Approved for implementation
 **Scope:** `plan_deck` template selection only
 
 ## Goal

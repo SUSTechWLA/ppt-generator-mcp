@@ -22,11 +22,15 @@ const persistedDeckQualitySchema = z.object({
   maxAttempts: z.number().int().min(1).max(3),
 }).strict();
 
+export const templateDiversityModeSchema = z.enum(["off", "conservative", "balanced", "expressive"]);
+export type TemplateDiversityMode = z.infer<typeof templateDiversityModeSchema>;
+
 export const planDeckInputSchema = z.object({
   ...sourceChoice,
   pageNumbers: z.array(z.number().int().min(1).max(9999)).min(1).max(30),
   documentType: documentTypeSchema.default("bid"),
   templateSlug: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  templateDiversity: templateDiversityModeSchema.optional(),
   preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
   audience: z.string().trim().max(200).optional(),
   quality: qualitySettingsSchema,
@@ -399,6 +403,7 @@ export const plannedDeckSchema = z.object({
   documentType: documentTypeSchema,
   quality: persistedDeckQualitySchema,
   preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  templateDiversity: templateDiversityModeSchema.optional(),
   pageNumbers: z.array(z.number().int().positive()),
   slides: z.array(deckSlidePlanSchema).min(1).max(30),
 }).strict().superRefine((deck, context) => {
@@ -501,6 +506,7 @@ export function hashPlannedDeckFingerprint(input: {
   documentType: z.infer<typeof documentTypeSchema>;
   quality: z.infer<typeof persistedDeckQualitySchema>;
   preferredThemeId?: string;
+  templateDiversity?: TemplateDiversityMode;
   pageNumbers: number[];
   slides: z.infer<typeof deckSlidePlanSchema>[];
 }): string {
@@ -511,6 +517,7 @@ export function hashPlannedDeckFingerprint(input: {
     documentType: input.documentType,
     quality: input.quality,
     ...(input.preferredThemeId ? { preferredThemeId: input.preferredThemeId } : {}),
+    ...(input.templateDiversity ? { templateDiversity: input.templateDiversity } : {}),
     pageNumbers: input.pageNumbers,
     slides: input.slides,
   });

@@ -6,6 +6,17 @@ const componentTypeSchema = z.enum([
   "title-band", "fact-card", "metric-card", "process-card", "evidence-card", "image-card", "conclusion-band", "page-number",
 ]);
 
+export const TEMPLATE_REGION_COMPONENTS = {
+  title: "title-band",
+  body: "fact-card",
+  metric: "metric-card",
+  process: "process-card",
+  evidence: "evidence-card",
+  image: "image-card",
+  conclusion: "conclusion-band",
+  "page-number": "page-number",
+} as const;
+
 const regionSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
   role: regionRoleSchema,
@@ -86,6 +97,9 @@ export const templateBlueprintSchema = z.object({
     if (region.columnStart + region.columnSpan - 1 > blueprint.grid.columns) {
       context.addIssue({ code: "custom", message: "Region exceeds declared grid columns", path: ["grid", "regions", index] });
     }
+    if (region.component !== TEMPLATE_REGION_COMPONENTS[region.role]) {
+      context.addIssue({ code: "custom", message: `Region role ${region.role} requires component ${TEMPLATE_REGION_COMPONENTS[region.role]}`, path: ["grid", "regions", index, "component"] });
+    }
   }
   for (const requiredRole of ["title", "body", "page-number"] as const) {
     if (!blueprint.grid.regions.some((region) => region.role === requiredRole)) {
@@ -97,12 +111,24 @@ export const templateBlueprintSchema = z.object({
     context.addIssue({ code: "custom", message: "Title and page-number roles must be unique", path: ["grid", "regions"] });
   }
   const imageRegion = blueprint.grid.regions.find((region) => region.id === blueprint.optionalImage.regionId);
+  const imageRegions = blueprint.grid.regions.filter((region) => region.role === "image");
   if (blueprint.optionalImage.enabled) {
-    if (!imageRegion || imageRegion.role !== "image" || blueprint.optionalImage.maxAreaRatio <= 0 || blueprint.visualRatios.image <= 0) {
+    if (!imageRegion || imageRegion.role !== "image" || imageRegions.length !== 1 || blueprint.optionalImage.maxAreaRatio <= 0 || blueprint.visualRatios.image <= 0) {
       context.addIssue({ code: "custom", message: "Enabled image must reference an image region and positive ratios", path: ["optionalImage"] });
     }
-  } else if (blueprint.optionalImage.regionId !== undefined || blueprint.optionalImage.maxAreaRatio !== 0 || blueprint.visualRatios.image !== 0) {
+  } else if (blueprint.optionalImage.regionId !== undefined || imageRegions.length !== 0 || blueprint.optionalImage.maxAreaRatio !== 0 || blueprint.visualRatios.image !== 0) {
     context.addIssue({ code: "custom", message: "Disabled image must have zero ratios and no region", path: ["optionalImage"] });
+  }
+  for (const role of ["metric", "process", "evidence"] as const) {
+    const hasRegion = blueprint.grid.regions.some((region) => region.role === role);
+    const hasCapability = blueprint.capabilityTags.includes(role);
+    if (hasRegion !== hasCapability) {
+      context.addIssue({ code: "custom", message: `Capability ${role} must exactly match its region`, path: ["capabilityTags"] });
+    }
+  }
+  const hasVisualCapability = blueprint.capabilityTags.includes("visual-support");
+  if (hasVisualCapability !== blueprint.optionalImage.enabled) {
+    context.addIssue({ code: "custom", message: "Capability visual-support must exactly match the enabled image region", path: ["capabilityTags"] });
   }
   if (blueprint.visualRatios.text + blueprint.visualRatios.image + blueprint.visualRatios.whitespace > 1.001) {
     context.addIssue({ code: "custom", message: "Visual ratios cannot exceed one", path: ["visualRatios"] });

@@ -1,12 +1,41 @@
 import assert from "node:assert/strict";
-import { lstat, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { createTemplateFromReference } from "../../src/workflow/create-template-from-reference.js";
 import { TemplateKnowledgeStore } from "../../src/workflow/template-knowledge-store.js";
-import { ONE_PIXEL_PNG, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
+import { hashCanonical } from "../../src/domain/source-document.js";
+import { templateBlueprintSchema } from "../../src/domain/template-blueprint.js";
+import { compileTemplateBlueprint } from "../../src/services/template-blueprint-compiler.js";
+import { ONE_PIXEL_PNG, validImageTemplateBlueprint, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
+
+function approvalInput(index: number) {
+  const blueprint = templateBlueprintSchema.parse(validTemplateBlueprint({ slugSeed: `concurrent-layout-${index}` }));
+  const compiled = compileTemplateBlueprint(blueprint);
+  return {
+    requestId: `concurrent-request-${index}`,
+    requestFingerprint: hashCanonical({ request: index }),
+    sourceType: "blueprint" as const,
+    sourceHash: hashCanonical({ source: index }),
+    blueprint,
+    html: compiled.html,
+    profile: compiled.profile,
+    quality: {
+      chromiumRendered: true as const,
+      hardGatePassed: true as const,
+      safeToReturn: true as const,
+      score: 100,
+      imageCount: 0,
+      rasterAreaRatio: 0,
+      containmentViolations: 0 as const,
+      collisions: 0 as const,
+      issues: [],
+    },
+    preview: Buffer.from("89504e470d0a1a0a", "hex"),
+  };
+}
 
 test("image without analyzer returns stable handoff and persists nothing", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "knowledge-no-analyzer-"));
@@ -24,6 +53,10 @@ test("image without analyzer returns stable handoff and persists nothing", async
   assert.doesNotMatch(JSON.stringify(first), /base64|iVBOR|data:image/i);
   await assert.rejects(
     createTemplateFromReference({ referenceImageDataUrl: "data:image/png;base64,AAAA", requestId: "image-handoff-01" }, { store }),
+    /fingerprint mismatch/i,
+  );
+  await assert.rejects(
+    createTemplateFromReference({ blueprint: validTemplateBlueprint(), requestId: "image-handoff-01" }, { store }),
     /fingerprint mismatch/i,
   );
 });
@@ -48,6 +81,45 @@ test("caller blueprint receives real Chromium QA and one immutable approved reco
     createTemplateFromReference({ blueprint: validTemplateBlueprint({ displayName: "Changed" }), requestId: "approve-blueprint-01" }, { store }),
     /fingerprint mismatch/i,
   );
+  await assert.rejects(
+    createTemplateFromReference({ referenceImageDataUrl: ONE_PIXEL_PNG, requestId: "approve-blueprint-01" }, { store }),
+    /fingerprint mismatch/i,
+  );
+});
+
+test("different requests never lose approvals across concurrent store instances", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-concurrent-root-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stores = [new TemplateKnowledgeStore(root), new TemplateKnowledgeStore(root)];
+  const inputs = Array.from({ length: 16 }, (_, index) => approvalInput(index + 1));
+  const approved = await Promise.all(inputs.map((input, index) => stores[index % stores.length].approve(input)));
+  const records = await stores[0].list();
+  assert.equal(records.length, approved.length);
+  assert.deepEqual(new Set(records.map((record) => record.knowledgeId)), new Set(approved.map((record) => record.knowledgeId)));
+  const directories = (await readdir(join(root, "records"))).sort();
+  assert.deepEqual(directories, approved.map((record) => record.knowledgeId).sort());
+  const index = JSON.parse(await readFile(join(root, "knowledge-index.json"), "utf8")) as { records: Array<{ knowledgeId: string }>; requests: Record<string, { knowledgeId: string }> };
+  assert.equal(index.records.length, approved.length);
+  for (const [position, input] of inputs.entries()) assert.equal(index.requests[input.requestId].knowledgeId, approved[position].knowledgeId);
+});
+
+test("image approval renders a real raster and enforces the declared raster-area gate", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-image-qa-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new TemplateKnowledgeStore(root);
+  await assert.rejects(
+    createTemplateFromReference({ blueprint: validImageTemplateBlueprint(0.05), requestId: "image-raster-too-large" }, { store }),
+    /Chromium quality gates/i,
+  );
+  const approved = await createTemplateFromReference({ blueprint: validImageTemplateBlueprint(0.4), requestId: "image-raster-valid" }, { store });
+  assert.equal(approved.status, "approved");
+  if (approved.status !== "approved") return;
+  assert.equal(approved.quality.imageCount, 1);
+  assert.ok(approved.quality.rasterAreaRatio > 0.1 && approved.quality.rasterAreaRatio < 0.4);
+  assert.equal(approved.quality.containmentViolations, 0);
+  assert.equal(approved.quality.collisions, 0);
+  const qa = JSON.parse((await store.getArtifact(approved.knowledgeId, "qa.json")).text) as typeof approved.quality;
+  assert.deepEqual(qa, approved.quality);
 });
 
 test("safe HTML and configured image analysis both compile generic knowledge without source material", async (t) => {
@@ -120,4 +192,19 @@ test("store list rejects a symlinked root or index instead of trusting external 
   await mkdir(safeRoot);
   await symlink(join(outside, "knowledge-index.json"), join(safeRoot, "knowledge-index.json"));
   await assert.rejects(new TemplateKnowledgeStore(safeRoot).list(), /unsafe|unavailable/i);
+});
+
+test("mutations reject a symlinked root before creating anything in the external target", async (t) => {
+  const parent = await mkdtemp(join(tmpdir(), "knowledge-zero-side-effect-"));
+  t.after(() => rm(parent, { recursive: true, force: true }));
+  for (const operation of ["approve", "reserve"] as const) {
+    const outside = join(parent, `outside-${operation}`);
+    const linkedRoot = join(parent, `linked-${operation}`);
+    await mkdir(outside);
+    await symlink(outside, linkedRoot);
+    const store = new TemplateKnowledgeStore(linkedRoot);
+    if (operation === "approve") await assert.rejects(store.approve(approvalInput(90)), /unsafe|unavailable/i);
+    else await assert.rejects(store.reserveAnalysisRequest("symlink-analysis-request", "a".repeat(64)), /unsafe|unavailable/i);
+    assert.deepEqual(await readdir(outside), []);
+  }
 });

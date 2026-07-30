@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as z from "zod/v4";
 
@@ -14,6 +14,10 @@ const qualityEvidenceSchema = z.object({
   hardGatePassed: z.literal(true),
   safeToReturn: z.literal(true),
   score: z.number().min(0).max(100),
+  imageCount: z.number().int().min(0).max(12),
+  rasterAreaRatio: z.number().min(0).max(1),
+  containmentViolations: z.literal(0),
+  collisions: z.literal(0),
   issues: z.array(z.object({ severity: z.string(), category: z.string(), evidence: z.string() }).strict()).max(50),
 }).strict();
 
@@ -50,13 +54,29 @@ function publicRecord(record: InternalRecord): TemplateKnowledgeRecord {
 interface StoreIndex {
   version: 1;
   records: InternalRecord[];
-  requests: Record<string, { fingerprint: string; knowledgeId: string }>;
+  requests: Record<string,
+    | { fingerprint: string; status: "analysis" }
+    | { fingerprint: string; status: "approved"; knowledgeId: string }>;
 }
-
-type AnalysisRequestIndex = Record<string, string>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_TEXT_ARTIFACT_BYTES = 2 * 1024 * 1024;
+const ROOT_MUTATION_LOCKS = new Map<string, Promise<void>>();
+
+async function withRootMutation<T>(root: string, operation: () => Promise<T>): Promise<T> {
+  const previous = ROOT_MUTATION_LOCKS.get(root) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => { release = resolveLock; });
+  const chain = previous.then(() => current);
+  ROOT_MUTATION_LOCKS.set(root, chain);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (ROOT_MUTATION_LOCKS.get(root) === chain) ROOT_MUTATION_LOCKS.delete(root);
+  }
+}
 
 function contained(root: string, target: string): boolean {
   const delta = relative(root, target);
@@ -97,6 +117,22 @@ export class TemplateKnowledgeStore {
     return join(this.root, "knowledge-index.json");
   }
 
+  private async ensureOwnedRoot(): Promise<void> {
+    try {
+      const entry = await lstat(this.root);
+      if (entry.isSymbolicLink() || !entry.isDirectory()) throw new Error("unsafe");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new Error("Template knowledge storage is unsafe or unavailable");
+      }
+      await mkdir(this.root, { recursive: true });
+      const created = await lstat(this.root);
+      if (created.isSymbolicLink() || !created.isDirectory()) {
+        throw new Error("Template knowledge storage is unsafe or unavailable");
+      }
+    }
+  }
+
   private async readVerifiedIndexText(path: string): Promise<string | undefined> {
     try {
       const rootEntry = await lstat(this.root);
@@ -132,26 +168,26 @@ export class TemplateKnowledgeStore {
     }
   }
 
-  async reserveAnalysisRequest(requestId: string | undefined, fingerprint: string): Promise<void> {
+  async reserveAnalysisRequest(requestId: string | undefined, fingerprint: string): Promise<TemplateKnowledgeRecord | undefined> {
     if (!requestId) return;
-    await mkdir(this.root, { recursive: true });
-    const path = join(this.root, "analysis-request-index.json");
-    let index: AnalysisRequestIndex;
-    try {
-      const text = await this.readVerifiedIndexText(path);
-      if (text === undefined) index = {};
-      else index = JSON.parse(text) as AnalysisRequestIndex;
-      if (!index || typeof index !== "object" || Array.isArray(index)
-        || Object.values(index).some((value) => typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))) throw new Error();
-    } catch (error) {
-      throw new Error("Template analysis request index is unavailable or corrupt");
-    }
-    const existing = Object.prototype.hasOwnProperty.call(index, requestId) ? index[requestId] : undefined;
-    if (existing && existing !== fingerprint) throw new Error(`requestId fingerprint mismatch for ${requestId}`);
-    if (!existing) {
-      Object.defineProperty(index, requestId, { value: fingerprint, enumerable: true, writable: true, configurable: true });
-      await atomicWrite(path, `${JSON.stringify(index, null, 2)}\n`);
-    }
+    return withRootMutation(this.root, async () => {
+      await this.ensureOwnedRoot();
+      const index = await this.readIndex();
+      const existing = Object.prototype.hasOwnProperty.call(index.requests, requestId) ? index.requests[requestId] : undefined;
+      if (existing && existing.fingerprint !== fingerprint) throw new Error(`requestId fingerprint mismatch for ${requestId}`);
+      if (existing?.status === "approved") {
+        const record = index.records.find((candidate) => candidate.knowledgeId === existing.knowledgeId);
+        if (!record) throw new Error("Template knowledge request index is corrupt");
+        return publicRecord(record);
+      }
+      if (!existing) {
+        Object.defineProperty(index.requests, requestId, {
+          value: { fingerprint, status: "analysis" }, enumerable: true, writable: true, configurable: true,
+        });
+        await atomicWrite(this.indexPath(), `${JSON.stringify(index, null, 2)}\n`);
+      }
+      return undefined;
+    });
   }
 
   private async readIndex(): Promise<StoreIndex> {
@@ -161,7 +197,9 @@ export class TemplateKnowledgeStore {
       const raw = JSON.parse(text) as StoreIndex;
       if (raw.version !== 1 || !Array.isArray(raw.records) || !raw.requests || typeof raw.requests !== "object" || Array.isArray(raw.requests)
         || Object.values(raw.requests).some((entry) => !entry || typeof entry !== "object"
-          || !/^[0-9a-f]{64}$/.test(entry.fingerprint) || !UUID.test(entry.knowledgeId))) throw new Error();
+          || !/^[0-9a-f]{64}$/.test(entry.fingerprint)
+          || (entry.status !== "analysis" && entry.status !== "approved")
+          || (entry.status === "approved" && !UUID.test(entry.knowledgeId)))) throw new Error();
       for (const record of raw.records) internalRecordSchema.parse(record);
       return raw;
     } catch (error) {
@@ -175,6 +213,7 @@ export class TemplateKnowledgeStore {
     const entry = Object.prototype.hasOwnProperty.call(index.requests, requestId) ? index.requests[requestId] : undefined;
     if (!entry) return undefined;
     if (entry.fingerprint !== fingerprint) throw new Error(`requestId fingerprint mismatch for ${requestId}`);
+    if (entry.status === "analysis") return undefined;
     const record = index.records.find((candidate) => candidate.knowledgeId === entry.knowledgeId);
     if (!record) throw new Error("Template knowledge request index is corrupt");
     return publicRecord(record);
@@ -191,22 +230,28 @@ export class TemplateKnowledgeStore {
     quality: TemplateKnowledgeRecord["quality"];
     preview: Buffer;
   }): Promise<TemplateKnowledgeRecord> {
-    const recordsRoot = join(this.root, "records");
-    await mkdir(recordsRoot, { recursive: true });
-    await this.assertOwnedRecordsDirectory(recordsRoot);
-    const index = await this.readIndex();
-    if (input.requestId && Object.prototype.hasOwnProperty.call(index.requests, input.requestId)) {
-      const existing = await this.findRequest(input.requestId, input.requestFingerprint);
-      if (!existing) throw new Error("Template knowledge request index is corrupt");
-      return existing;
-    }
-    const knowledgeId = randomUUID();
-    const recordDir = join(this.root, "records", knowledgeId);
-    await mkdir(recordDir, { recursive: false });
-    await this.assertOwnedRecordsDirectory(recordDir);
-    const now = new Date().toISOString();
-    const templateVersion = 1 + Math.max(0, ...index.records.filter((record) => record.slug === input.profile.slug).map((record) => record.templateVersion));
-    const record: InternalRecord = {
+    return withRootMutation(this.root, async () => {
+      await this.ensureOwnedRoot();
+      const index = await this.readIndex();
+      if (input.requestId && Object.prototype.hasOwnProperty.call(index.requests, input.requestId)) {
+        const existing = index.requests[input.requestId];
+        if (existing.fingerprint !== input.requestFingerprint) throw new Error(`requestId fingerprint mismatch for ${input.requestId}`);
+        if (existing.status === "approved") {
+          const record = index.records.find((candidate) => candidate.knowledgeId === existing.knowledgeId);
+          if (!record) throw new Error("Template knowledge request index is corrupt");
+          return publicRecord(record);
+        }
+      }
+      const recordsRoot = join(this.root, "records");
+      await mkdir(recordsRoot, { recursive: true });
+      await this.assertOwnedRecordsDirectory(recordsRoot);
+      const knowledgeId = randomUUID();
+      const recordDir = join(recordsRoot, knowledgeId);
+      await mkdir(recordDir, { recursive: false });
+      await this.assertOwnedRecordsDirectory(recordDir);
+      const now = new Date().toISOString();
+      const templateVersion = 1 + Math.max(0, ...index.records.filter((record) => record.slug === input.profile.slug).map((record) => record.templateVersion));
+      const record: InternalRecord = {
       recordVersion: 1,
       knowledgeId,
       templateVersion,
@@ -219,22 +264,28 @@ export class TemplateKnowledgeStore {
       createdAt: now,
       ...(input.requestId ? { requestId: input.requestId } : {}),
       requestFingerprint: input.requestFingerprint,
-    };
-    await Promise.all([
-      atomicWrite(join(recordDir, "blueprint.json"), `${JSON.stringify(templateBlueprintSchema.parse(input.blueprint), null, 2)}\n`),
-      atomicWrite(join(recordDir, "template.html"), input.html),
-      atomicWrite(join(recordDir, "profile.json"), `${JSON.stringify(templateProfileSchema.parse(input.profile), null, 2)}\n`),
-      atomicWrite(join(recordDir, "qa.json"), `${JSON.stringify(input.quality, null, 2)}\n`),
-      atomicWrite(join(recordDir, "preview.png"), input.preview),
-    ]);
-    index.records.push(record);
-    if (input.requestId) {
-      Object.defineProperty(index.requests, input.requestId, {
-        value: { fingerprint: input.requestFingerprint, knowledgeId }, enumerable: true, writable: true, configurable: true,
-      });
-    }
-    await atomicWrite(this.indexPath(), `${JSON.stringify(index, null, 2)}\n`);
-    return publicRecord(record);
+      };
+      try {
+        await Promise.all([
+          atomicWrite(join(recordDir, "blueprint.json"), `${JSON.stringify(templateBlueprintSchema.parse(input.blueprint), null, 2)}\n`),
+          atomicWrite(join(recordDir, "template.html"), input.html),
+          atomicWrite(join(recordDir, "profile.json"), `${JSON.stringify(templateProfileSchema.parse(input.profile), null, 2)}\n`),
+          atomicWrite(join(recordDir, "qa.json"), `${JSON.stringify(qualityEvidenceSchema.parse(input.quality), null, 2)}\n`),
+          atomicWrite(join(recordDir, "preview.png"), input.preview),
+        ]);
+        index.records.push(record);
+        if (input.requestId) {
+          Object.defineProperty(index.requests, input.requestId, {
+            value: { fingerprint: input.requestFingerprint, status: "approved", knowledgeId }, enumerable: true, writable: true, configurable: true,
+          });
+        }
+        await atomicWrite(this.indexPath(), `${JSON.stringify(index, null, 2)}\n`);
+        return publicRecord(record);
+      } catch (error) {
+        await rm(recordDir, { recursive: true, force: true });
+        throw error;
+      }
+    });
   }
 
   async list(): Promise<TemplateKnowledgeRecord[]> {

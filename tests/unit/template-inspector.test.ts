@@ -37,3 +37,14 @@ test("inspection may discard a bounded inline raster reference without treating 
   assert.ok(inspected.findings.some((finding) => finding.code === "resource-attribute" && finding.severity === "notice"));
   assert.doesNotMatch(JSON.stringify(inspected), /AAAA|data:image|reference pixels/i);
 });
+
+test("primary token inference uses the blueprint 4.5 contrast threshold with a stable fallback", () => {
+  for (const color of ["#888888", "#777777"]) {
+    const inspected = inspectTemplateHtml(`<!doctype html><html><head><style>:root{--primary:${color};--background:#ffffff}body{color:#17241e;background:#ffffff}</style></head><body><main><section>Body</section></main><footer>1</footer></body></html>`);
+    assert.equal(inspected.safe, true);
+    assert.equal(inspected.blueprint.palette.primary, "#176b45");
+  }
+  const boundary = inspectTemplateHtml(`<!doctype html><html><head><style>:root{--primary:#767676;--background:#ffffff}body{color:#17241e;background:#ffffff}</style></head><body><main><section>Body</section></main><footer>1</footer></body></html>`);
+  assert.equal(boundary.safe, true);
+  assert.equal(boundary.blueprint.palette.primary, "#767676");
+});

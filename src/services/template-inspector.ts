@@ -64,7 +64,7 @@ export function inspectTemplateHtml(referenceHtml: string): TemplateInspection {
   const colors = colorCandidates(styles);
   const background = colors.includes("#ffffff") ? "#ffffff" : "#ffffff";
   const text = colors.find((color) => ["#000000", "#111111", "#16251d", "#17241e"].includes(color)) ?? "#17241e";
-  const primary = colors.find((color) => color !== background && color !== text && colorContrastRatio(color, background) >= 3) ?? "#176b45";
+  const primary = colors.find((color) => color !== background && color !== text && colorContrastRatio(color, background) >= 4.5) ?? "#176b45";
   const gridColumns = countColumns(styles);
   const sections = Math.max(1, Math.min(4, doc.querySelectorAll("main > section, main > article, .card, [class*=card i]").length || 2));
   const bodySpan = Math.max(1, Math.floor(gridColumns / Math.min(2, sections)));
@@ -92,7 +92,7 @@ export function inspectTemplateHtml(referenceHtml: string): TemplateInspection {
     spacing: { outerMm: 12, gapMm: 4, cardPaddingMm: 5, borderRadiusMm: 2 },
     visualRatios: { text: 0.62, image: 0, whitespace: 0.24 },
     optionalImage: { enabled: false, maxAreaRatio: 0, screenshotAsBackground: false },
-    capabilityTags: ["detail", "evidence", "formal"],
+    capabilityTags: ["detail", ...(regions.some((region) => region.role === "evidence") ? ["evidence" as const] : []), "formal"],
   });
   findings.push({ code: "tokens-normalized", severity: "notice" });
   return {

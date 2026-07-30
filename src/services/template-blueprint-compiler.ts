@@ -1,11 +1,9 @@
-import { JSDOM } from "jsdom";
-
 import type { TemplateBlueprint } from "../domain/template-blueprint.js";
+import type { SemanticRole } from "../domain/page-blueprint.js";
 import { templateProfileSchema, type TemplateProfile } from "../domain/template-profile.js";
 
 export interface CompiledTemplateBlueprint {
   html: string;
-  previewHtml: string;
   profile: TemplateProfile;
 }
 
@@ -13,8 +11,29 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
 }
 
+const REGION_ROLES: Partial<Record<TemplateBlueprint["grid"]["regions"][number]["role"], SemanticRole>> = {
+  title: "headline",
+  body: "fact",
+  metric: "metric",
+  process: "process",
+  evidence: "evidence",
+  image: "visual",
+  conclusion: "conclusion",
+};
+
 function buildProfile(blueprint: TemplateBlueprint, semanticCapacity: number): TemplateProfile {
-  const pageIntents = [...new Set(blueprint.capabilityTags.filter((tag) => tag !== "formal").map((tag) => tag === "metric" ? "detail" : tag))];
+  const pageIntents = [...new Set(blueprint.capabilityTags.filter((tag) => tag !== "formal"))];
+  const supportedRoles = [...new Set(blueprint.grid.regions.map((region) => REGION_ROLES[region.role]).filter((role): role is SemanticRole => Boolean(role)))];
+  const acceptedRoles = [...new Set(blueprint.grid.regions
+    .filter((region) => ["body", "metric", "process", "evidence"].includes(region.role))
+    .map((region) => REGION_ROLES[region.role] as SemanticRole))];
+  const supportedBlocks = [...new Set(blueprint.grid.regions.flatMap((region) => {
+    if (region.role === "image") return ["image" as const];
+    if (region.role === "metric") return ["metric" as const];
+    if (region.role === "process") return ["process" as const];
+    if (region.role === "body" || region.role === "evidence") return ["text" as const];
+    return [];
+  }))];
   const pageBindings = {
     pageTitle: "page-title",
     pageNumber: "page-number",
@@ -32,14 +51,14 @@ function buildProfile(blueprint: TemplateBlueprint, semanticCapacity: number): T
     version: "1.0.0",
     themeId: `learned-${blueprint.slugSeed}`.slice(0, 64),
     pageIntents: pageIntents.length > 0 ? pageIntents : ["detail"],
-    supportedRoles: ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+    supportedRoles,
     semanticSlots: [{
       id: "main-content",
       priority: 10,
       required: true,
       itemCapacity: semanticCapacity,
       maxCharsPerItem: 150,
-      acceptedRoles: ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+      acceptedRoles,
       bindings: { title: "component-title", body: "paragraph" },
       factBearingBinding: "body",
       factBearingValueIndex: 0,
@@ -48,7 +67,7 @@ function buildProfile(blueprint: TemplateBlueprint, semanticCapacity: number): T
     pageBindings,
     ...(blueprint.optionalImage.enabled ? { assetPromptBindings: { figureRef: "figure-ref" } } : {}),
     blockCapacity: semanticCapacity,
-    supportedBlocks: ["text", "image", "table", "process", "metric"],
+    supportedBlocks,
     imageSlots: {
       placeholderTag: "figures",
       placeholderCount: blueprint.optionalImage.enabled ? 1 : 0,
@@ -93,63 +112,26 @@ function buildProfile(blueprint: TemplateBlueprint, semanticCapacity: number): T
         "page-footer": { xRatio: [0, 0.03], yRatio: [0.91, 0.99], widthRatio: [0.94, 1], heightRatio: [0.03, 0.07] },
       },
     },
-    documentCompatibility: { bid: blueprint.optionalImage.maxAreaRatio <= 0.18, proposal: true, presentation: true },
+    documentCompatibility: {
+      bid: ["fact", "metric", "process", "evidence"].every((role) => supportedRoles.includes(role as SemanticRole))
+        && blueprint.optionalImage.maxAreaRatio <= 0.18,
+      proposal: ["fact", "metric"].every((role) => supportedRoles.includes(role as SemanticRole)),
+      presentation: supportedRoles.includes("fact"),
+    },
     format: "a4-landscape",
     status: "approved",
   });
 }
 
-function previewHtml(templateHtml: string, profile: TemplateProfile): string {
-  const dom = new JSDOM(templateHtml);
-  const doc = dom.window.document;
-  doc.title = "Template preview";
-  const values: Record<string, string> = {
-    "section-title": "Service delivery proposal",
-    "part-number": "PART.01",
-    "part-label": "Delivery plan",
-    "chapter-label": "Implementation framework",
-    "topic-title": "Reliable operating model",
-    "subsection-title": "Evidence-led execution",
-    "summary-text": "A reusable structure connects responsibilities, evidence and measurable outcomes.",
-    "page-number": "1",
-    "component-title": "Delivery capability",
-    paragraph: "The operating model assigns clear ownership, measurable controls and traceable evidence for every delivery stage.",
-    "figure-ref": "Delivery evidence",
-    "image-caption": "Supporting visual",
-    figures: "",
-  };
-  for (const [tag, value] of Object.entries(values)) {
-    for (const element of Array.from(doc.querySelectorAll(tag))) {
-      if (tag === "figures") {
-        element.closest("figure")?.remove();
-        continue;
-      }
-      const replacement = doc.createElement("span");
-      replacement.textContent = value;
-      element.replaceWith(replacement);
-    }
-  }
-  const page = doc.querySelector<HTMLElement>(".bid-page")!;
-  page.setAttribute("data-slide-page", "1");
-  page.setAttribute("data-template-slug", profile.slug);
-  page.setAttribute("data-template-version", profile.version);
-  page.setAttribute("data-theme-id", profile.themeId);
-  page.setAttribute("data-document-format", profile.format);
-  for (const landmark of profile.requiredLandmarks) {
-    const selector = landmark === "page-header" ? ".page-header"
-      : landmark === "chapter-band" ? ".chapter-band"
-        : landmark === "subsection-title" ? ".subsection-title"
-          : landmark === "summary-band" ? ".summary-band" : ".page-footer";
-    doc.querySelector(selector)?.setAttribute("data-page-landmark", landmark);
-  }
-  return dom.serialize();
-}
-
 export function compileTemplateBlueprint(blueprint: TemplateBlueprint): CompiledTemplateBlueprint {
   const semanticRegions = blueprint.grid.regions.filter((region) => ["body", "metric", "process", "evidence"].includes(region.role));
   const profile = buildProfile(blueprint, semanticRegions.length);
+  const contentRegions = [...semanticRegions, ...blueprint.grid.regions.filter((region) => region.role === "image")];
+  const contentRowBase = Math.min(...contentRegions.map((region) => region.row));
+  const normalizedRow = (row: number) => row - contentRowBase + 1;
+  const rowCount = Math.max(...contentRegions.map((region) => normalizedRow(region.row)));
   const cards = semanticRegions.map((region) => `
-      <section class="component content-card" data-component="${escapeHtml(region.component)}" data-semantic-slot="main-content" style="grid-column:${region.columnStart} / span ${region.columnSpan};grid-row:${region.row}">
+      <section class="component content-card" data-component="${escapeHtml(region.component)}" data-semantic-slot="main-content" style="grid-column:${region.columnStart} / span ${region.columnSpan};grid-row:${normalizedRow(region.row)}">
         <h4><component-title>Generic content heading</component-title></h4>
         <p><paragraph>Generic body content</paragraph></p>
       </section>`).join("");
@@ -157,7 +139,7 @@ export function compileTemplateBlueprint(blueprint: TemplateBlueprint): Compiled
     ? blueprint.grid.regions.find((region) => region.id === blueprint.optionalImage.regionId)!
     : undefined;
   const image = imageRegion ? `
-      <figure class="component image-card" data-component="image-card" style="grid-column:${imageRegion.columnStart} / span ${imageRegion.columnSpan};grid-row:${imageRegion.row}">
+      <figure class="component image-card" data-component="image-card" style="grid-column:${imageRegion.columnStart} / span ${imageRegion.columnSpan};grid-row:${normalizedRow(imageRegion.row)}">
         <figures>Generate a supporting visual for <figure-ref>the adjacent evidence</figure-ref>; no text, logo or watermark.</figures>
         <figcaption><image-caption>Supporting visual</image-caption></figcaption>
       </figure>` : "";
@@ -167,8 +149,9 @@ export function compileTemplateBlueprint(blueprint: TemplateBlueprint): Compiled
     .page-header{height:50px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid ${blueprint.palette.primary}}.page-header h1{font-size:13pt;margin:0}.part-block{display:flex;gap:12px;font-size:9pt}
     .chapter-band{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:${blueprint.palette.primary};color:${blueprint.palette.background};border-radius:${blueprint.spacing.borderRadiusMm}mm}.chapter-band h2{font-size:${blueprint.typography.titlePt}pt;margin:0}.chapter-label{font-size:10pt}
     .subsection-title{height:34px;margin:0;font-size:13pt;color:${blueprint.palette.primary};display:flex;align-items:center}
-    .content-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(${blueprint.grid.columns},1fr);grid-auto-rows:minmax(100px,1fr);gap:${blueprint.grid.gapMm}mm;align-content:stretch}
+    .content-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(${blueprint.grid.columns},1fr);grid-template-rows:repeat(${rowCount},minmax(0,1fr));gap:${blueprint.grid.gapMm}mm;align-content:stretch}
     .component{min-width:0;min-height:0}.content-card{padding:${blueprint.spacing.cardPaddingMm}mm;border:1px solid ${blueprint.palette.secondary};border-radius:${blueprint.spacing.borderRadiusMm}mm;background:${blueprint.palette.surface};overflow:hidden}.content-card h4{margin:0 0 9px;color:${blueprint.palette.primary};font-size:13pt}.content-card p{margin:0;font-size:${blueprint.typography.bodyPt}pt;line-height:${blueprint.typography.lineHeight}}
+    .image-card{margin:0;padding:${blueprint.spacing.cardPaddingMm}mm;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:8px;border:1px solid ${blueprint.palette.secondary};border-radius:${blueprint.spacing.borderRadiusMm}mm;background:${blueprint.palette.surface};overflow:hidden}.image-card img{display:block;width:100%;height:100%;min-height:0;object-fit:contain}.image-card figcaption{font-size:${blueprint.typography.bodyPt}pt;line-height:1.3;color:${blueprint.palette.text}}
     .summary-band{height:54px;padding:10px 16px;display:flex;align-items:center;border-left:5px solid ${blueprint.palette.primary};background:${blueprint.palette.secondary};font-size:10pt;font-weight:600}
     .page-footer{height:26px;display:flex;align-items:end;justify-content:space-between;border-top:1px solid ${blueprint.palette.secondary};font-size:9pt}.page-footer .page-number{font-weight:700;color:${blueprint.palette.primary}}
   `;
@@ -182,5 +165,5 @@ export function compileTemplateBlueprint(blueprint: TemplateBlueprint): Compiled
     <section class="summary-band" data-component="summary-band"><summary-text>Summary statement</summary-text></section>
     <footer class="page-footer"><span>Reusable template knowledge</span><span class="page-number"><page-number>1</page-number></span></footer>
   </article></body></html>`;
-  return { html, previewHtml: previewHtml(html, profile), profile };
+  return { html, profile };
 }

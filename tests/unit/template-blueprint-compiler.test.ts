@@ -7,7 +7,7 @@ import test from "node:test";
 import { templateBlueprintSchema } from "../../src/domain/template-blueprint.js";
 import { compileTemplateBlueprint } from "../../src/services/template-blueprint-compiler.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
-import { validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
+import { validImageTemplateBlueprint, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
 
 test("valid blueprint compiles self-contained template accepted by the ordinary catalog loader", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "learned-template-catalog-"));
@@ -40,4 +40,36 @@ test("blueprint schema rejects unsafe identities, duplicate slots, invalid range
     validTemplateBlueprint({ optionalImage: { enabled: true, regionId: "body-a", maxAreaRatio: 0.4, screenshotAsBackground: true } }),
   ];
   for (const value of cases) assert.equal(templateBlueprintSchema.safeParse(value).success, false);
+});
+
+test("blueprint roles, components and capability tags must describe the same real capability", () => {
+  const base = validTemplateBlueprint();
+  const mutateRegion = (id: string, update: Record<string, unknown>) => ({
+    ...base,
+    grid: { ...(base.grid as object), regions: (base.grid as { regions: Array<Record<string, unknown>> }).regions.map((region) => region.id === id ? { ...region, ...update } : region) },
+  });
+  const cases = [
+    mutateRegion("title", { component: "fact-card" }),
+    mutateRegion("body-a", { component: "page-number" }),
+    mutateRegion("page", { component: "process-card" }),
+    mutateRegion("body-a", { component: "process-card" }),
+    { ...base, capabilityTags: ["detail", "process", "formal"] },
+    { ...base, capabilityTags: ["detail", "metric", "formal"] },
+    validTemplateBlueprint({ capabilityTags: ["detail", "visual-support", "formal"] }),
+    mutateRegion("body-a", { role: "process", component: "process-card" }),
+    mutateRegion("body-a", { role: "metric", component: "metric-card" }),
+  ];
+  for (const value of cases) assert.equal(templateBlueprintSchema.safeParse(value).success, false, JSON.stringify(value));
+});
+
+test("compiler profile advertises only roles, blocks and intents backed by regions", () => {
+  const text = compileTemplateBlueprint(templateBlueprintSchema.parse(validTemplateBlueprint())).profile;
+  assert.deepEqual(text.supportedRoles.sort(), ["conclusion", "evidence", "fact", "headline"].sort());
+  assert.deepEqual(text.supportedBlocks, ["text"]);
+  assert.deepEqual(text.pageIntents.sort(), ["detail", "evidence"].sort());
+
+  const image = compileTemplateBlueprint(templateBlueprintSchema.parse(validImageTemplateBlueprint())).profile;
+  assert.deepEqual(image.supportedRoles.sort(), ["conclusion", "fact", "headline", "visual"].sort());
+  assert.deepEqual(image.supportedBlocks.sort(), ["image", "text"].sort());
+  assert.deepEqual(image.pageIntents.sort(), ["detail", "visual-support"].sort());
 });

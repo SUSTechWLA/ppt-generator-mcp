@@ -1,5 +1,7 @@
 # Deck Template Diversity Implementation Plan
 
+> **Main-branch status:** Planned, not implemented. The task checkboxes below are execution instructions and do not describe the currently published MCP contract.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make `plan_deck` choose a deterministic, quality-bounded sequence of varied compatible templates across the full deck.

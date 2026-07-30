@@ -4,6 +4,8 @@
 
 项目不依赖特定 Agent：任何支持 MCP stdio 和工具调用的 workflow 都能接入。最终交付是内联 CSS、SVG 与图片的自包含 HTML，而不是 `.pptx`。
 
+> 当前主分支说明（2026-07-30）：生产版会为每页生成全部通过硬门禁的模板候选，再按该页事实保留量、模板匹配分和容量利用率选择本页最佳模板；整套页面的全局多样性优化仍处于已批准设计阶段，尚未成为 `plan_deck` 的公共参数。详见[架构与实现原理](docs/architecture.md)和[整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)。
+
 ## 核心能力
 
 - 固定输入协议：只接受整行 `<page N>`、标签化标题和 `正文：`，不猜测页码，不自动重新分页。
@@ -15,6 +17,17 @@
 - Provider 可选：没有文本或图片 API 时仍可确定性规划，并由调用方通过 `externalAssets` 注入图片。
 - 安全边界：API Key 仅从 Server 环境读取；高层工具不接受路径、远程 URL、任意文件名或图片 API Key。
 
+## 核心实现原则
+
+1. **先保证事实，再决定版式。** 正文先被解析为不可变 source sections、facts 和关键锚点，模板只能压缩表达，不能丢失数字、比例、日期、范围、否定词或责任关系。
+2. **模板 profile 是可执行契约。** 模板是否可用由语义角色、槽位容量、字符上限、图片基数、最小字号、文档兼容性和设计地标共同决定，不靠 Agent 对模板名称的猜测。
+3. **规划与生成解耦。** `plan_deck` 固化来源、内容计划、模板能力快照和图片意图；`generate_deck` 只能按照不可变计划注入资产并渲染，不能静默换内容或重选模板。
+4. **质量是门禁，不只是评分。** Chromium 实测尺寸、溢出、碰撞、字号、对比度、图片有效性和事实映射；任一硬门禁失败时，即使总分较高也不能交付。
+5. **默认可复现、Provider 可选。** 高层 deck 规划使用确定性 grounded planner；没有文本、图片或复核 API 时仍能运行，图片由外部 Agent 按稳定资产 ID 注入。
+6. **知识先隔离，再晋升。** 参考页面只用于抽取通用布局知识；经过 owned compiler、目录校验和真实浏览器 QA 后进入不可变知识库，再由人工晋升到生产模板目录。
+
+完整的数据结构、选择顺序、恢复机制、QA 门禁和安全边界见[架构与实现原理](docs/architecture.md)。
+
 ## 项目结构
 
 ```text
@@ -22,6 +35,9 @@
 ├── src/                         # MCP 工具、工作流、模板编译、渲染和 QA
 ├── templates/
 │   └── green-infographic/       # A4 横向模板、能力档案、样式与图标
+├── docs/
+│   ├── architecture.md           # 当前生产架构、数据流和扩展边界
+│   └── superpowers/              # 已批准设计与实施计划，不等同于已发布功能
 ├── .mcp.json                    # MCP stdio 配置
 ├── .env.example                 # 可选 provider 与运行限制
 ├── package.json
@@ -89,6 +105,8 @@ npm start
 5. 逐页检查分数与硬门禁，再检查 deck consistency。仅 `status=delivered` 可作为正式交付。
 6. 使用 `get_deck` 读取脱敏 manifest、`final.html`、`quality.json` 或 `consistency.json`。
 
+这个 workflow 的稳定性来自三类不可变证据：原始事实与关键锚点、被选模板的完整能力快照、以及页面内容到模板槽位的逐项 assignment。Server 在恢复旧请求或生成交付页之前都会重新验证这些证据。
+
 规划示例：
 
 ```json
@@ -141,6 +159,8 @@ npm start
 
 `plan_slide`、`generate_slide`、`get_run`、`get_artifact`、`evaluate_slide` 及原子模板工具继续保留，用于兼容、调试或自定义编排。稳定的多页交付优先使用 deck workflow。
 
+Server 当前注册 20 个工具。完整分组、调用边界及适用场景见[架构文档的 MCP 工具面](docs/architecture.md#mcp-工具面)。
+
 ## 状态与产物
 
 - `needs_assets`：仍缺少计划中指定的一个或多个图片，可继续同一请求。
@@ -181,6 +201,8 @@ template-knowledge/
 
 没有 reviewer 时，Chromium 硬门禁与确定性评分仍然生效。密钥只从环境变量读取，不进入工具参数、HTML 或 manifest。
 
+其中 `PPT_LLM_*` 主要服务旧的单页/低层规划路径，`PPT_IMAGE_*` 服务低层图片工具和修复能力，`PPT_REVIEW_*` 提供可选视觉复核。推荐的 `plan_deck → generate_deck` 高层路径不接收调用方 API Key，也不会在规划阶段隐式生成图片。
+
 ## 模板维护
 
 内置模板位于 `templates/green-infographic/`，使用同目录 `template-profiles.json` 描述能力。新增或晋升模板必须：
@@ -191,6 +213,15 @@ template-knowledge/
 4. 通过 `npm run check`，并在真实 Chromium 中完成渲染和质量门禁。
 
 模板族的具体清单和维护约束见 `templates/green-infographic/README.md`。
+
+## 已批准但尚未发布的整套多样性选择
+
+当前生产版对每页独立选择局部最佳模板。下一阶段设计会保留每页全部合格候选，在质量差距受限的前提下，用确定性的有界序列优化器从整套页面角度奖励不同版式、惩罚连续重复。它不是强化学习：没有训练、探索、环境反馈或在线更新，只是带硬约束和固定效用函数的组合优化。
+
+该能力只有在工作流集成、历史指纹兼容、真实 MCP 双次复现和全部质量检查完成后，才会进入主分支公共契约。设计和实施边界分别见：
+
+- [整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)
+- [整套模板多样性实施计划](docs/superpowers/plans/2026-07-30-deck-template-diversity.md)
 
 ## License
 

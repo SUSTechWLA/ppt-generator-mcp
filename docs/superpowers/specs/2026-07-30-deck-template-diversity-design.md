@@ -5,6 +5,8 @@
 **Status:** Approved for implementation
 **Scope:** `plan_deck` template selection only
 
+> Main-branch note: this document describes an approved next-stage design, not the current production contract. The current main branch still selects the local best successful candidate independently for each page; `templateDiversity` must not be advertised as available until the implementation and real MCP verification are merged.
+
 ## Goal
 
 Select templates as a coherent deck instead of choosing the same per-page winner independently. The planner should increase layout variety when several candidates are genuinely deliverable, while preserving factual grounding, profile capacity, document policy, determinism, resumability, and image-asset transparency.

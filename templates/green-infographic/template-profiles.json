@@ -238,8 +238,8 @@
         "page-footer": { "xRatio": [0, 0.02], "yRatio": [0.94, 0.99], "widthRatio": [0.96, 1], "heightRatio": [0.025, 0.06] }
       }
     },
-    "pageIntents": ["detail", "comparison", "evidence"],
-    "supportedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
+    "pageIntents": ["detail", "process", "comparison", "evidence"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence"],
     "semanticSlots": [
       {
         "id": "table-explanation",
@@ -247,7 +247,7 @@
         "required": true,
         "itemCapacity": 2,
         "maxCharsPerItem": 30,
-        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "comparison", "evidence"],
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
         "factBearingValueIndex": 0,
@@ -274,7 +274,7 @@
       "summaryText": "summary-text"
     },
     "blockCapacity": 2,
-    "supportedBlocks": ["text", "table", "metric"],
+    "supportedBlocks": ["text", "table", "process", "metric"],
     "imageSlots": { "placeholderTag": "figures", "placeholderCount": 0, "minAssets": 0, "maxAssets": 0, "unusedPolicy": "remove-placeholder" },
     "densityRange": ["medium", "high"],
     "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 60, "summary-text": 110, "component-title": 30, "paragraph": 180, "table-header": 20, "table-cell": 30 },

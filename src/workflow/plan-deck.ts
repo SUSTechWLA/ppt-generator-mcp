@@ -4,6 +4,7 @@ import {
   plannedDeckSchema,
   hashPlannedDeckFingerprint,
   type deckTemplateMatchSchema,
+  type TemplateDiversityMode,
 } from "../domain/deck-plan.js";
 import type { PageMetadata } from "../domain/document-context.js";
 import { hashCanonical, type SourceDocument } from "../domain/source-document.js";
@@ -27,6 +28,11 @@ import { solveTemplateSlots, type TemplateSlotSolution } from "../services/templ
 import type { DeckStoreApi } from "./deck-store.js";
 import { validatePlanAgainstProfiles } from "../services/plan-profile-validator.js";
 import { hashDeckSourceEvidence } from "../domain/deck-source-evidence.js";
+import {
+  selectDeckTemplateSequence,
+  type DeckTemplateCandidateScore,
+  type DeckTemplateDecision,
+} from "../services/deck-template-diversity.js";
 
 type PlanDeckInput = ReturnType<typeof planDeckInputSchema.parse>;
 type PlanDeckOutput = ReturnType<typeof planDeckOutputSchema.parse>;
@@ -364,12 +370,12 @@ function planForProfile(
   };
 }
 
-function selectProfilePlan(
+function candidatePlansForPage(
   partition: ExplicitPagePartition,
   page: PageMetadata,
   input: PlanDeckInput,
   deps: PlanDeckDependencies,
-): CandidatePlan {
+): CandidatePlan[] {
   const successes: CandidatePlan[] = [];
   const diagnostics: string[] = [];
   for (const profile of allowedProfiles(input, deps.profiles)) {
@@ -379,24 +385,49 @@ function selectProfilePlan(
       diagnostics.push(localCandidateDiagnostic(error, partition, page, profile));
     }
   }
-  const winner = successes.sort(compareCandidates)[0];
-  if (!winner) {
+  const ordered = successes.sort(compareCandidates);
+  if (ordered.length === 0) {
     planningError(
       `Page ${partition.pageNumber} has no honest profile-budgeted display plan`,
       diagnostics.join("; ").slice(0, 4_000) || "No compatible approved profiles were evaluated.",
     );
   }
-  return winner;
+  return ordered;
 }
 
-function templateMatch(candidate: CandidatePlan): DeckTemplateMatch {
+type DiversityEvidence = DeckTemplateDecision & { mode: TemplateDiversityMode };
+
+function compactNumber(value: number): string {
+  return String(Number(value.toFixed(4)));
+}
+
+function selectionReasonWithDiversity(reason: string, evidence: DiversityEvidence): string {
+  const suffix = [
+    `; mode=${evidence.mode}`,
+    `retainedLoss=${evidence.retainedCharacterLoss}`,
+    `retainedLossPercent=${compactNumber(evidence.retainedLossPercent)}`,
+    `scoreLoss=${compactNumber(evidence.selectionScoreLoss)}`,
+    `firstUse=${evidence.firstUse}`,
+    `adjacentRepeat=${evidence.adjacentRepeat}`,
+  ].join("; ");
+  return `${reason.slice(0, Math.max(0, 1_000 - suffix.length))}${suffix}`;
+}
+
+function templateMatch(
+  candidate: CandidatePlan,
+  diversityEvidence: DiversityEvidence,
+  pageCandidates: readonly CandidatePlan[],
+): DeckTemplateMatch {
   const semanticItemCapacity = candidate.profile.semanticSlots.reduce((total, slot) => total + slot.itemCapacity, 0);
   return {
     themeId: candidate.profile.themeId,
     profileVersion: candidate.profile.version,
     selectionScore: candidate.selection.score,
-    selectionReason: candidate.selection.reason,
-    candidateScores: candidate.selection.candidates,
+    selectionReason: selectionReasonWithDiversity(candidate.selection.reason, diversityEvidence),
+    candidateScores: pageCandidates.map((pageCandidate) => ({
+      slug: pageCandidate.profile.slug,
+      score: pageCandidate.selection.score,
+    })),
     blockCapacity: candidate.profile.blockCapacity,
     semanticItemCapacity,
     effectiveItemCapacity: candidate.grounded.displayPlan.targetBudget.itemCapacity,
@@ -431,9 +462,32 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
   }
 
   const partitions = deps.partitionDeckSource({ sourceText, pageNumbers: input.pageNumbers });
-  const slides = partitions.map((partition, pageIndex) => {
+  const pagePlans = partitions.map((partition, pageIndex) => {
     const page = buildPageMetadata(partition, pageIndex);
-    const candidate = selectProfilePlan(partition, page, input, deps);
+    const candidates = candidatePlansForPage(partition, page, input, deps);
+    return { partition, page, candidates };
+  });
+  const effectiveTemplateDiversity = input.templateSlug
+    ? "off"
+    : input.templateDiversity ?? "balanced";
+  const diversityCandidates: DeckTemplateCandidateScore[][] = pagePlans.map(({ candidates }) =>
+    candidates.map((candidate) => ({
+      templateSlug: candidate.profile.slug,
+      retainedCharacterCount: candidate.grounded.retainedCharacterCount,
+      selectionScore: candidate.selection.score,
+      catalogIndex: deps.profiles.indexOf(candidate.profile),
+    }))
+  );
+  const diversityDecisions = selectDeckTemplateSequence(diversityCandidates, effectiveTemplateDiversity);
+  const slides = pagePlans.map(({ partition, page, candidates }, pageIndex) => {
+    const diversityDecision = diversityDecisions[pageIndex];
+    const candidate = diversityDecision && candidates[diversityDecision.candidateIndex];
+    if (!candidate || !diversityDecision) {
+      planningError(
+        `Page ${partition.pageNumber} has no selected deck template candidate`,
+        "Re-run planning with the approved template catalog; deck-level selection returned an invalid candidate index.",
+      );
+    }
     return {
       page,
       sourceSections: partition.sourceSections,
@@ -443,7 +497,11 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
       displayPlan: candidate.grounded.displayPlan,
       plannedSpec: candidate.plannedSpec,
       templateSlug: candidate.profile.slug,
-      templateMatch: templateMatch(candidate),
+      templateMatch: templateMatch(
+        candidate,
+        { ...diversityDecision, mode: effectiveTemplateDiversity },
+        candidates,
+      ),
     };
   });
   const planEvidence = {
@@ -453,6 +511,7 @@ export async function planDeckWorkflow(rawInput: unknown, deps: PlanDeckDependen
     documentType: input.documentType,
     quality: input.quality,
     ...(input.preferredThemeId ? { preferredThemeId: input.preferredThemeId } : {}),
+    templateDiversity: effectiveTemplateDiversity,
     pageNumbers: input.pageNumbers,
     slides,
   } as const;

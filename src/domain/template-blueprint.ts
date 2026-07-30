@@ -146,9 +146,25 @@ export type TemplateRegion = z.infer<typeof regionSchema>;
 
 export const TEMPLATE_BLUEPRINT_JSON_SCHEMA = {
   ...z.toJSONSchema(templateBlueprintSchema, { target: "draft-7" }),
-  $comment: "Server validation additionally enforces unique region IDs and capability tags, required unique title/page-number roles, a body role, grid containment, image-region consistency, visual-ratio totals, and WCAG contrast.",
+  $comment: "This JSON Schema describes bounded field shapes. Cross-field rules are the combined JSON Schema + serverValidation contract below and are enforced by the server.",
+  "x-roleComponentMapping": TEMPLATE_REGION_COMPONENTS,
+  "x-capabilityRegionMapping": {
+    metric: "metric",
+    process: "process",
+    evidence: "evidence",
+    "visual-support": "enabled optionalImage with exactly one referenced image region",
+  },
   "x-serverValidation": [
-    "unique-region-ids", "unique-capability-tags", "required-title-body-page-roles", "grid-containment",
-    "image-region-consistency", "visual-ratio-total", "wcag-contrast",
+    { id: "unique-region-ids", description: "Every grid region id is unique." },
+    { id: "unique-capability-tags", description: "Every capability tag is unique." },
+    { id: "required-role-cardinality", description: "Exactly one title, at least one body, and exactly one page-number region are required." },
+    { id: "grid-containment", description: "Every region ends within the declared grid column count." },
+    { id: "role-component-mapping", description: "Every region role uses exactly the component declared by x-roleComponentMapping." },
+    { id: "capability-region-bidirectional", description: "metric, process, and evidence tags exist if and only if matching regions exist; visual-support exists if and only if optionalImage is enabled." },
+    { id: "single-enabled-image-region", description: "Enabled optionalImage references exactly one image role region and both image ratios are positive." },
+    { id: "disabled-image-zero-state", description: "Disabled optionalImage has no image region or regionId and both image ratios are zero." },
+    { id: "screenshot-background-forbidden", description: "optionalImage.screenshotAsBackground is always false." },
+    { id: "visual-ratio-total", description: "text + image + whitespace ratios do not exceed 1.001." },
+    { id: "wcag-contrast-4.5", description: "Text against background, surface and secondary plus primary against background each have contrast ratio at least 4.5." },
   ],
 };

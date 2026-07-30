@@ -1,6 +1,6 @@
 import type { TemplateBlueprint } from "../domain/template-blueprint.js";
 import type { SemanticRole } from "../domain/page-blueprint.js";
-import { templateProfileSchema, type TemplateProfile } from "../domain/template-profile.js";
+import { templateProfileSchema, type PageIntent, type TemplateProfile } from "../domain/template-profile.js";
 
 export interface CompiledTemplateBlueprint {
   html: string;
@@ -22,7 +22,15 @@ const REGION_ROLES: Partial<Record<TemplateBlueprint["grid"]["regions"][number][
 };
 
 function buildProfile(blueprint: TemplateBlueprint, semanticCapacity: number): TemplateProfile {
-  const pageIntents = [...new Set(blueprint.capabilityTags.filter((tag) => tag !== "formal"))];
+  const intentByCapability: Record<TemplateBlueprint["capabilityTags"][number], PageIntent | undefined> = {
+    detail: "detail",
+    metric: "detail",
+    process: "process",
+    evidence: "evidence",
+    "visual-support": "visual-support",
+    formal: undefined,
+  };
+  const pageIntents = [...new Set(blueprint.capabilityTags.map((tag) => intentByCapability[tag]).filter((intent): intent is PageIntent => Boolean(intent)))];
   const supportedRoles = [...new Set(blueprint.grid.regions.map((region) => REGION_ROLES[region.role]).filter((role): role is SemanticRole => Boolean(role)))];
   const acceptedRoles = [...new Set(blueprint.grid.regions
     .filter((region) => ["body", "metric", "process", "evidence"].includes(region.role))

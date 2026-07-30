@@ -9,7 +9,7 @@ import { TemplateKnowledgeStore } from "../../src/workflow/template-knowledge-st
 import { hashCanonical } from "../../src/domain/source-document.js";
 import { templateBlueprintSchema } from "../../src/domain/template-blueprint.js";
 import { compileTemplateBlueprint } from "../../src/services/template-blueprint-compiler.js";
-import { ONE_PIXEL_PNG, validImageTemplateBlueprint, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
+import { ONE_PIXEL_PNG, validImageTemplateBlueprint, validMetricTemplateBlueprint, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
 
 function approvalInput(index: number) {
   const blueprint = templateBlueprintSchema.parse(validTemplateBlueprint({ slugSeed: `concurrent-layout-${index}` }));
@@ -27,6 +27,8 @@ function approvalInput(index: number) {
       hardGatePassed: true as const,
       safeToReturn: true as const,
       score: 100,
+      evidenceVersion: 2 as const,
+      imageEvidenceStatus: "measured" as const,
       imageCount: 0,
       rasterAreaRatio: 0,
       containmentViolations: 0 as const,
@@ -48,6 +50,22 @@ test("image without analyzer returns stable handoff and persists nothing", async
   if (first.status !== "needs_analysis") return;
   assert.match(first.analysisPrompt, /layout|do not transcribe|logo|watermark/i);
   assert.equal((first.blueprintSchema as { additionalProperties?: boolean }).additionalProperties, false);
+  const publicContract = first.blueprintSchema as {
+    $comment?: string;
+    "x-roleComponentMapping"?: Record<string, string>;
+    "x-serverValidation"?: Array<{ id: string; description: string }>;
+  };
+  assert.match(publicContract.$comment ?? "", /JSON Schema.*serverValidation contract/i);
+  assert.deepEqual(publicContract["x-roleComponentMapping"], {
+    title: "title-band", body: "fact-card", metric: "metric-card", process: "process-card",
+    evidence: "evidence-card", image: "image-card", conclusion: "conclusion-band", "page-number": "page-number",
+  });
+  const constraints = new Map((publicContract["x-serverValidation"] ?? []).map((entry) => [entry.id, entry.description]));
+  for (const id of [
+    "unique-region-ids", "unique-capability-tags", "required-role-cardinality", "grid-containment",
+    "role-component-mapping", "capability-region-bidirectional", "single-enabled-image-region",
+    "disabled-image-zero-state", "screenshot-background-forbidden", "visual-ratio-total", "wcag-contrast-4.5",
+  ]) assert.ok(constraints.get(id), `missing public serverValidation contract ${id}`);
   assert.deepEqual(await store.list(), []);
   await assert.rejects(lstat(join(root, "records")));
   assert.doesNotMatch(JSON.stringify(first), /base64|iVBOR|data:image/i);
@@ -98,7 +116,8 @@ test("different requests never lose approvals across concurrent store instances"
   assert.deepEqual(new Set(records.map((record) => record.knowledgeId)), new Set(approved.map((record) => record.knowledgeId)));
   const directories = (await readdir(join(root, "records"))).sort();
   assert.deepEqual(directories, approved.map((record) => record.knowledgeId).sort());
-  const index = JSON.parse(await readFile(join(root, "knowledge-index.json"), "utf8")) as { records: Array<{ knowledgeId: string }>; requests: Record<string, { knowledgeId: string }> };
+  const index = JSON.parse(await readFile(join(root, "knowledge-index.json"), "utf8")) as { version: number; records: Array<{ knowledgeId: string }>; requests: Record<string, { knowledgeId: string }> };
+  assert.equal(index.version, 2);
   assert.equal(index.records.length, approved.length);
   for (const [position, input] of inputs.entries()) assert.equal(index.requests[input.requestId].knowledgeId, approved[position].knowledgeId);
 });
@@ -114,12 +133,26 @@ test("image approval renders a real raster and enforces the declared raster-area
   const approved = await createTemplateFromReference({ blueprint: validImageTemplateBlueprint(0.4), requestId: "image-raster-valid" }, { store });
   assert.equal(approved.status, "approved");
   if (approved.status !== "approved") return;
+  assert.equal(approved.quality.evidenceVersion, 2);
+  if (approved.quality.evidenceVersion !== 2) return;
   assert.equal(approved.quality.imageCount, 1);
   assert.ok(approved.quality.rasterAreaRatio > 0.1 && approved.quality.rasterAreaRatio < 0.4);
   assert.equal(approved.quality.containmentViolations, 0);
   assert.equal(approved.quality.collisions, 0);
   const qa = JSON.parse((await store.getArtifact(approved.knowledgeId, "qa.json")).text) as typeof approved.quality;
   assert.deepEqual(qa, approved.quality);
+});
+
+test("metric blueprint compiles, renders and approves through the real workflow", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-metric-qa-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const approved = await createTemplateFromReference({ blueprint: validMetricTemplateBlueprint(), requestId: "metric-blueprint-approve" }, {
+    store: new TemplateKnowledgeStore(root),
+  });
+  assert.equal(approved.status, "approved");
+  if (approved.status !== "approved") return;
+  assert.deepEqual(approved.capabilityTags, ["detail", "metric", "formal"]);
+  assert.equal(approved.quality.hardGatePassed, true, JSON.stringify(approved.quality.issues));
 });
 
 test("safe HTML and configured image analysis both compile generic knowledge without source material", async (t) => {
@@ -207,4 +240,118 @@ test("mutations reject a symlinked root before creating anything in the external
     else await assert.rejects(store.reserveAnalysisRequest("symlink-analysis-request", "a".repeat(64)), /unsafe|unavailable/i);
     assert.deepEqual(await readdir(outside), []);
   }
+});
+
+test("legacy v1 approved records remain readable and idempotent without claiming measured image QA", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-legacy-v1-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const knowledgeId = "11111111-1111-4111-8111-111111111111";
+  const requestId = "legacy-approved-request";
+  const fingerprint = "a".repeat(64);
+  const legacyRecord = {
+    recordVersion: 1,
+    knowledgeId,
+    templateVersion: 1,
+    sourceType: "blueprint",
+    sourceHash: "b".repeat(64),
+    slug: "legacy-layout",
+    capabilityTags: ["detail", "formal"],
+    quality: { chromiumRendered: true, hardGatePassed: true, safeToReturn: true, score: 96, issues: [] },
+    artifacts: ["blueprint.json", "template.html", "profile.json", "qa.json", "preview.png"],
+    createdAt: "2026-07-29T00:00:00.000Z",
+    requestId,
+    requestFingerprint: fingerprint,
+  };
+  const legacyIndex = { version: 1, records: [legacyRecord], requests: { [requestId]: { fingerprint, knowledgeId } } };
+  await writeFile(join(root, "knowledge-index.json"), `${JSON.stringify(legacyIndex)}\n`);
+  const store = new TemplateKnowledgeStore(root);
+  const first = await store.list();
+  const second = await store.list();
+  assert.deepEqual(first, second);
+  assert.equal(first[0].quality.evidenceVersion, 1);
+  assert.equal(first[0].quality.imageEvidenceStatus, "not-recorded");
+  assert.equal("imageCount" in first[0].quality, false);
+  assert.equal((await store.findRequest(requestId, fingerprint))?.knowledgeId, knowledgeId);
+  assert.equal((await store.reserveAnalysisRequest(requestId, fingerprint))?.knowledgeId, knowledgeId);
+  const replay = await store.approve({ ...approvalInput(77), requestId, requestFingerprint: fingerprint });
+  assert.equal(replay.knowledgeId, knowledgeId);
+  assert.deepEqual(JSON.parse(await readFile(join(root, "knowledge-index.json"), "utf8")), legacyIndex);
+});
+
+test("malformed legacy v1 request entries still fail closed", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-legacy-corrupt-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "knowledge-index.json"), JSON.stringify({
+    version: 1,
+    records: [],
+    requests: { corrupt: { fingerprint: "a".repeat(64) } },
+  }));
+  await assert.rejects(new TemplateKnowledgeStore(root).list(), /unavailable|corrupt/i);
+});
+
+test("legacy v1 pending analysis fingerprints retain the unified request boundary", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-legacy-analysis-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const requestId = "legacy-analysis-request";
+  const fingerprint = "c".repeat(64);
+  await writeFile(join(root, "analysis-request-index.json"), JSON.stringify({ [requestId]: fingerprint }));
+  const store = new TemplateKnowledgeStore(root);
+  await assert.rejects(store.reserveAnalysisRequest(requestId, "d".repeat(64)), /fingerprint mismatch/i);
+  await assert.rejects(store.approve({ ...approvalInput(78), requestId, requestFingerprint: "d".repeat(64) }), /fingerprint mismatch/i);
+  assert.equal(await store.reserveAnalysisRequest(requestId, fingerprint), undefined);
+  const approved = await store.approve({ ...approvalInput(78), requestId, requestFingerprint: fingerprint });
+  assert.equal(approved.quality.evidenceVersion, 2);
+  assert.equal((await store.findRequest(requestId, fingerprint))?.knowledgeId, approved.knowledgeId);
+});
+
+test("invalid prepared evidence starts no writes and emits no unhandled rejection", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-preflight-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const unhandled: unknown[] = [];
+  const listener = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+  try {
+    const invalid = {
+      ...approvalInput(81),
+      html: "x".repeat(20 * 1024 * 1024),
+      quality: { chromiumRendered: true, hardGatePassed: true, safeToReturn: true, score: Number.NaN, issues: [] },
+    };
+    await assert.rejects(new TemplateKnowledgeStore(root).approve(invalid as never));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", listener);
+  }
+  assert.deepEqual(unhandled, []);
+  assert.deepEqual(await readdir(root), []);
+});
+
+test("settled write rollback removes records and temps, releases the root lock, and permits retry", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-write-rollback-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let failProfileWrite = true;
+  const store = new TemplateKnowledgeStore(root, {
+    writeFile: async (path, value) => {
+      if (failProfileWrite && String(path).includes("profile.json.")) {
+        failProfileWrite = false;
+        throw new Error("injected artifact write failure");
+      }
+      return writeFile(path, value);
+    },
+  });
+  const unhandled: unknown[] = [];
+  const listener = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+  try {
+    await assert.rejects(store.approve(approvalInput(82)), /injected artifact write failure/);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", listener);
+  }
+  const afterFailure = await readdir(root, { recursive: true });
+  assert.deepEqual(unhandled, []);
+  assert.equal(afterFailure.some((entry) => entry.endsWith(".tmp") || /records\/[0-9a-f-]{36}/i.test(entry)), false, afterFailure.join("\n"));
+  assert.deepEqual(await readdir(root), []);
+  const approved = await store.approve(approvalInput(83));
+  assert.equal(approved.quality.evidenceVersion, 2);
+  assert.equal((await store.list()).length, 1);
 });

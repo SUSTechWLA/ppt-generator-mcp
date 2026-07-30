@@ -227,6 +227,8 @@ export async function createTemplateFromReference(
           hardGatePassed: true,
           safeToReturn: true,
           score: Math.max(90, 100 - deterministic.issues.filter((issue) => issue.severity === "warning").length * 2),
+          evidenceVersion: 2,
+          imageEvidenceStatus: "measured",
           imageCount: rendered.raster.visibleCount,
           rasterAreaRatio: rendered.rasterAreaRatio,
           containmentViolations: 0,

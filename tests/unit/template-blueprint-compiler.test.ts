@@ -7,7 +7,7 @@ import test from "node:test";
 import { templateBlueprintSchema } from "../../src/domain/template-blueprint.js";
 import { compileTemplateBlueprint } from "../../src/services/template-blueprint-compiler.js";
 import { loadTemplateProfiles } from "../../src/services/template-selector.js";
-import { validImageTemplateBlueprint, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
+import { validImageTemplateBlueprint, validMetricTemplateBlueprint, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
 
 test("valid blueprint compiles self-contained template accepted by the ordinary catalog loader", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "learned-template-catalog-"));
@@ -72,4 +72,9 @@ test("compiler profile advertises only roles, blocks and intents backed by regio
   assert.deepEqual(image.supportedRoles.sort(), ["conclusion", "fact", "headline", "visual"].sort());
   assert.deepEqual(image.supportedBlocks.sort(), ["image", "text"].sort());
   assert.deepEqual(image.pageIntents.sort(), ["detail", "visual-support"].sort());
+
+  const metric = compileTemplateBlueprint(templateBlueprintSchema.parse(validMetricTemplateBlueprint())).profile;
+  assert.deepEqual(metric.supportedRoles.sort(), ["conclusion", "fact", "headline", "metric"].sort());
+  assert.deepEqual(metric.supportedBlocks.sort(), ["metric", "text"].sort());
+  assert.deepEqual(metric.pageIntents, ["detail"]);
 });

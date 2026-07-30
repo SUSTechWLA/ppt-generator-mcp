@@ -57,3 +57,21 @@ export function validImageTemplateBlueprint(maxAreaRatio = 0.4) {
     capabilityTags: ["detail", "visual-support", "formal"],
   });
 }
+
+export function validMetricTemplateBlueprint() {
+  return validTemplateBlueprint({
+    slugSeed: "balanced-metric-layout",
+    grid: {
+      columns: 12,
+      gapMm: 4,
+      regions: [
+        { id: "title", role: "title", component: "title-band", columnStart: 1, columnSpan: 12, row: 1 },
+        { id: "body-a", role: "body", component: "fact-card", columnStart: 1, columnSpan: 6, row: 2 },
+        { id: "metric-a", role: "metric", component: "metric-card", columnStart: 7, columnSpan: 6, row: 2 },
+        { id: "conclusion", role: "conclusion", component: "conclusion-band", columnStart: 1, columnSpan: 12, row: 3 },
+        { id: "page", role: "page-number", component: "page-number", columnStart: 11, columnSpan: 2, row: 4 },
+      ],
+    },
+    capabilityTags: ["detail", "metric", "formal"],
+  });
+}

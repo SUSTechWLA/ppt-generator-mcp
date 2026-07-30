@@ -69,10 +69,19 @@ test("MCP blueprint approval and list expose only immutable logical evidence", a
     arguments: { blueprint: validTemplateBlueprint(), requestId: "mcp-blueprint-approve-01" },
   });
   assert.equal(approved.isError, undefined, JSON.stringify(approved.content));
-  const output = (approved.structuredContent as { result: { status: string; knowledgeId: string; artifacts: string[]; quality: { hardGatePassed: boolean } } }).result;
+  const output = (approved.structuredContent as {
+    result: {
+      status: string;
+      knowledgeId: string;
+      artifacts: string[];
+      quality: { hardGatePassed: boolean; evidenceVersion: number; imageEvidenceStatus: string };
+    };
+  }).result;
   assert.equal(output.status, "approved");
   assert.match(output.knowledgeId, /^[0-9a-f-]{36}$/i);
   assert.equal(output.quality.hardGatePassed, true);
+  assert.equal(output.quality.evidenceVersion, 2);
+  assert.equal(output.quality.imageEvidenceStatus, "measured");
   assert.deepEqual(output.artifacts, ["blueprint.json", "template.html", "profile.json", "qa.json", "preview.png"]);
   const listed = await client.callTool({ name: "list_template_knowledge", arguments: {} });
   assert.equal((listed.structuredContent as { records: unknown[] }).records.length, 1);

@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 
 import {
   generateDeckOutputSchema,
+  planDeckInputSchema,
   planDeckOutputSchema,
 } from "../domain/deck-plan.js";
 import {
@@ -26,6 +27,8 @@ export const mcpPlanDeckInputSchema = z.object({
   sourceText: z.string().trim().min(20).max(120_000).optional(),
   pageNumbers: z.array(z.number().int().min(1).max(9999)).min(1).max(30),
   documentType: documentTypeSchema,
+  templateSlug: planDeckInputSchema.shape.templateSlug,
+  templateDiversity: planDeckInputSchema.shape.templateDiversity,
   preferredThemeId: z.string().regex(/^[a-z0-9-]+$/).optional(),
   audience: z.string().trim().max(200).optional(),
   quality: qualitySettingsSchema,

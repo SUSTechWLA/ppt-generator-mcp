@@ -15,6 +15,7 @@ import { loadTemplateProfiles } from "../src/services/template-selector.js";
 import { loadTemplate } from "../src/lib/template-parser.js";
 import { DeckStore } from "../src/workflow/deck-store.js";
 import { createPlanDeckDependencies, planDeckWorkflow } from "../src/workflow/plan-deck.js";
+import { mcpPlanDeckInputSchema } from "../src/mcp/deck-tools.js";
 
 const baseInput = {
   sourceText: "<page 1>\n一级标题：示例\n正文：\n事实内容足够用于页面规划和模板选择。",
@@ -80,6 +81,31 @@ test("accepts explicit template diversity modes without schema-defaulting omissi
   }
   assert.equal(planDeckInputSchema.parse(baseInput).templateDiversity, undefined);
   assert.equal(planDeckInputSchema.safeParse({ ...baseInput, templateDiversity: "random" }).success, false);
+});
+
+test("the public MCP input preserves deck template selection controls for domain validation", () => {
+  const publicBaseInput = { ...baseInput, documentType: "bid" as const };
+  for (const mode of ["off", "conservative", "balanced", "expressive"] as const) {
+    const parsed = mcpPlanDeckInputSchema.parse({ ...publicBaseInput, templateDiversity: mode });
+    assert.equal(parsed.templateDiversity, mode);
+    assert.equal(planDeckInputSchema.parse(parsed).templateDiversity, mode);
+  }
+
+  const omitted = mcpPlanDeckInputSchema.parse(publicBaseInput);
+  assert.equal(omitted.templateDiversity, undefined);
+  assert.equal(planDeckInputSchema.parse(omitted).templateDiversity, undefined);
+
+  const templateSlug = "green-infographic-bid-a4-landscape";
+  const forced = mcpPlanDeckInputSchema.parse({ ...publicBaseInput, templateSlug });
+  assert.equal(forced.templateSlug, templateSlug);
+  assert.equal(planDeckInputSchema.parse(forced).templateSlug, templateSlug);
+});
+
+test("the public MCP input rejects invalid template controls and unknown keys", () => {
+  const publicBaseInput = { ...baseInput, documentType: "bid" as const };
+  assert.equal(mcpPlanDeckInputSchema.safeParse({ ...publicBaseInput, templateDiversity: "random" }).success, false);
+  assert.equal(mcpPlanDeckInputSchema.safeParse({ ...publicBaseInput, templateSlug: "Invalid Slug" }).success, false);
+  assert.equal(mcpPlanDeckInputSchema.safeParse({ ...publicBaseInput, unexpectedControl: true }).success, false);
 });
 
 test("exports the deck template sequence optimizer", () => {

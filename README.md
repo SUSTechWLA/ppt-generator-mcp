@@ -4,7 +4,7 @@
 
 项目不依赖特定 Agent：任何支持 MCP stdio 和工具调用的 workflow 都能接入。最终交付是内联 CSS、SVG 与图片的自包含 HTML，而不是 `.pptx`。
 
-> 当前主分支说明（2026-07-30）：生产版会为每页生成全部通过硬门禁的模板候选，再按该页事实保留量、模板匹配分和容量利用率选择本页最佳模板；整套页面的全局多样性优化仍处于已批准设计阶段，尚未成为 `plan_deck` 的公共参数。详见[架构与实现原理](docs/architecture.md)和[整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)。
+> 当前生产说明（2026-07-31）：`plan_deck` 会为每页保留全部通过硬门禁的成功候选，再用确定性的有界 deck-scope 优化器选择整套模板序列。公共参数 `templateDiversity` 支持 `off`、`conservative`、`balanced` 和 `expressive`，新计划默认使用 `balanced`。详见[架构与实现原理](docs/architecture.md)和[整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)。
 
 ## 核心能力
 
@@ -12,6 +12,7 @@
 - 中文标点规范化：清理正文中的重复分号和冲突句末标点，并在事实、要点和修复文本组合时避免机械追加分号。
 - `plan_deck → generate_deck → get_deck`：不可变计划、外部图片注入、断点续跑、逐页独立 QA 和跨页一致性检查。
 - 通用模板选择：依据语义角色、组件容量、内容密度、图片槽位和文档兼容性选择模板，不按页码、正文或模板名写特例。
+- 整套模板多样性：只让接近本页最佳质量的完整成功候选参与 deck-scope 选择，以固定奖励和惩罚改善版式节奏；相同输入、模板 catalog 和模式得到相同结果。
 - 模板知识沉淀：从内联 HTML、展示页截图或通用蓝图提取布局知识，经 owned compiler 和真实浏览器 QA 后保存为不可变模板知识。
 - 质量门禁：检查单页尺寸、溢出、字号、对比度、图片加载、远程资源、脚本与敏感信息；最多进行 3 次定向修复。
 - Provider 可选：没有文本或图片 API 时仍可确定性规划，并由调用方通过 `externalAssets` 注入图片。
@@ -37,7 +38,7 @@
 │   └── green-infographic/       # A4 横向模板、能力档案、样式与图标
 ├── docs/
 │   ├── architecture.md           # 当前生产架构、数据流和扩展边界
-│   └── superpowers/              # 已批准设计与实施计划，不等同于已发布功能
+│   └── superpowers/              # 设计、实施计划与验证状态
 ├── .mcp.json                    # MCP stdio 配置
 ├── .env.example                 # 可选 provider 与运行限制
 ├── package.json
@@ -115,6 +116,7 @@ npm start
   "pageNumbers": [59],
   "documentType": "bid",
   "preferredThemeId": "green-infographic-v1",
+  "templateDiversity": "balanced",
   "audience": "招标评审专家与项目业主",
   "quality": { "minScore": 90, "maxAttempts": 3 },
   "requestId": "proposal-deck-plan-001"
@@ -214,11 +216,20 @@ template-knowledge/
 
 模板族的具体清单和维护约束见 `templates/green-infographic/README.md`。
 
-## 已批准但尚未发布的整套多样性选择
+## 整套模板多样性选择
 
-当前生产版对每页独立选择局部最佳模板。下一阶段设计会保留每页全部合格候选，在质量差距受限的前提下，用确定性的有界序列优化器从整套页面角度奖励不同版式、惩罚连续重复。它不是强化学习：没有训练、探索、环境反馈或在线更新，只是带硬约束和固定效用函数的组合优化。
+`plan_deck.templateDiversity` 控制整套页面的模板序列：
 
-该能力只有在工作流集成、历史指纹兼容、真实 MCP 双次复现和全部质量检查完成后，才会进入主分支公共契约。设计和实施边界分别见：
+- `off`：保持每页局部质量赢家，不做 deck-scope 多样性调整；
+- `conservative`：只打破非常接近的平局，不接受事实保留字符损失；
+- `balanced`：新计划的默认值，在批准的窄质量带内兼顾局部质量和版式节奏；
+- `expressive`：允许更宽但仍有上限的近最佳质量带，适合更强调视觉变化的场景。
+
+事实覆盖、critical anchors、槽位容量、最小字号、页面元数据、图片基数和文档策略始终是先决硬门禁；多样性模式不能让失败候选参与选择。显式传入 `templateSlug` 时，调用方覆盖选择策略，整套计划的有效多样性模式固定为 `off`。
+
+选择器是确定性的有界组合优化，不是强化学习：它没有训练、探索、环境反馈或在线更新。相同正文、页序、模板 catalog 和输入参数会产生相同模板序列；复用同一 `requestId` 恢复不可变计划时，deck ID 与 fingerprint 保持一致。若某页只有一个完整成功候选，结果可以合法重复同一版式。
+
+被选中的模板可能带图片槽。此时 `plan_deck` 会只返回所选 slides 的额外 `assets`，调用方必须按稳定资产 ID 生成并在 `generate_deck.externalAssets` 中提供；未被选候选的资产不会泄漏到结果中。设计和实施边界见：
 
 - [整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)
 - [整套模板多样性实施计划](docs/superpowers/plans/2026-07-30-deck-template-diversity.md)

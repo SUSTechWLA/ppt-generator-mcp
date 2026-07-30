@@ -1,6 +1,6 @@
 # PPT Generator MCP 架构与实现原理
 
-本文描述 2026-07-30 主分支已经发布的生产行为。`docs/superpowers/` 下的设计与计划是演进依据；只有在状态明确变为 `Implemented` 且代码、测试和真实 MCP 验证一并合入后，才能视为公共功能。
+本文描述 2026-07-31 已实现并通过自动测试、生产 build 与真实 MCP stdio 双次复现的生产行为。`docs/superpowers/` 下的设计与计划记录该行为的决策依据和实施证据。
 
 ## 1. 系统定位与边界
 
@@ -26,9 +26,11 @@ flowchart TD
     C --> D["Source sections / facts / critical anchors"]
     D --> E["逐 profile grounded display planning"]
     E --> F["模板策略、槽位与容量硬门禁"]
-    F --> G["当前：逐页局部最佳候选"]
-    G --> H["不可变 plannedDeck + profile snapshot"]
-    H --> I{"是否需要图片"}
+    F --> G["逐页完整成功候选，按局部质量排序"]
+    G --> H["deck-scope bounded optimizer"]
+    H --> I0["有效模式与选择证据持久化"]
+    I0 --> H0["不可变 plannedDeck + profile snapshot"]
+    H0 --> I{"是否需要图片"}
     I -- "是" --> J["外部 Agent 按 asset id 生成图片"]
     I -- "否" --> K["generate_deck"]
     J --> K
@@ -97,16 +99,29 @@ flowchart TD
 
 失败候选只产生有界、脱敏的本地诊断，不会把依赖异常、堆栈、物理路径或隐藏提示词暴露给调用方。
 
-### 4.3 当前模板选择顺序
+### 4.3 局部质量排序与整套序列选择
 
-当前主分支对每页独立排序全部成功候选：
+生产 workflow 先对每页全部成功候选执行稳定的局部质量排序：
 
 1. 保留的正文字符数更多；
 2. 模板选择分更高；
 3. 内容块数量更接近模板 block capacity；
 4. profile version 字典序稳定比较。
 
-排序第一的候选成为该页模板。这一选择完全确定、可复现，但目前不会为整套页面的版式节奏牺牲任何页的局部最优，因此多页可能重复同一模板。
+排序第一的候选是该页质量参考。`off` 直接采用所有局部赢家；`conservative`、`balanced` 与 `expressive` 只允许落在各自 retained-character loss 和 selection-score loss 质量带内的候选参与整套选择。事实覆盖、critical anchors、槽位与字符容量、最小字号、页面元数据、图片基数及文档策略在进入质量带之前已经作为硬门禁执行，任何模式都不能绕过。
+
+| 模式 | 相对本页最佳的正文字符损失 | 模板选择分损失 |
+|---|---:|---:|
+| `off` | 只保留局部赢家 | 只保留局部赢家 |
+| `conservative` | `0` | 最多 `3` |
+| `balanced` | 最多 `min(18, max(6, floor(best × 3%)))` | 最多 `8` |
+| `expressive` | 最多 `min(40, max(12, floor(best × 7%)))` | 最多 `15` |
+
+`src/services/deck-template-diversity.ts` 使用固定的 first-use reward、adjacent-repeat penalty 和质量损失函数做确定性 beam DP。为限制模板 catalog 增长后的成本，每页最多保留 12 个已准入候选，每一页最多保留 256 个状态，公共输入最多 30 页，即扩展上限为 `30 × 256 × 12` 次 transition。状态去重、剪枝和最终选择使用同一组稳定 tie-breakers；相同正文、catalog、页序和参数得到相同序列。
+
+新计划省略 `templateDiversity` 时，workflow 采用默认 `balanced` 并持久化有效模式。显式 `templateSlug` 是调用方强制覆盖：候选身份被固定，有效模式强制为 `off`。若硬门禁后某页只有一个完整成功候选，优化器保留该安全赢家，不会为追求版式变化扩大质量带。
+
+这不是强化学习。优化器没有训练数据、探索、策略更新、环境反馈或在线学习，只是在固定约束和固定效用函数下求解有界组合选择。
 
 ### 4.4 不可变计划证据
 
@@ -118,9 +133,11 @@ flowchart TD
 - 完整 template profile snapshot 及 capability hash；
 - 每个语义项的 slot assignment、字符使用和容量总计；
 - 页面元数据与图片提示词的绑定证据；
-- 候选评分、选择原因、文档策略和主题信息。
+- 按局部质量顺序保存的完整成功候选评分；
+- 有效 `templateDiversity`、保留字符损失、选择分损失、首次使用与相邻重复证据；
+- 选择原因、文档策略和主题信息。
 
-`planFingerprint` 绑定来源、页面顺序、质量要求和上述模板能力证据。使用相同 `requestId` 恢复计划时，Server 返回原计划，并用当前 catalog 再次校验 capability；不会静默重规划旧计划。
+`planFingerprint` 绑定来源、页面顺序、质量要求、有效多样性模式和上述模板能力证据。使用相同 `requestId` 恢复计划时，Server 返回原计划，并用当前 catalog 再次校验 capability；不会静默重规划旧计划。历史计划的 `templateDiversity` 仍是可选字段，解析时不会为旧 artifact 合成默认值，因此原 fingerprint 保持有效。
 
 ## 5. 模板 profile 为什么是核心
 
@@ -268,16 +285,16 @@ Server 当前注册 20 个工具，分为四层。
 
 - 上游必须先分页；Server 不做语义自动分页；
 - 当前模板目录只有 `green-infographic` 模板族；
-- 当前 `plan_deck` 逐页选择局部最佳候选，可能连续使用同一版式；
 - 只有经过 profile、文档策略和 grounded planner 全部验证的模板才有资格参与选择，因此模板数量多不等于某页存在多个合格候选；
+- 某页只有一个完整成功候选，或其他候选超出所选模式的质量带时，整套优化可以合法连续使用同一版式；
 - 高层 workflow 不隐式调用图片 API；调用方必须完成图片生成和注入；
-- 主分支当前只有 typecheck/build 检查脚本，后续功能实施计划中新增的测试命令尚未发布。
+- 当前自动验证包含 `npm test` 的 contract、优化器与真实 workflow 回归，以及 `npm run check` 的 typecheck/build；Chromium 交付 QA 仍在 `generate_deck` 阶段按页执行。
 
-### 12.2 已批准的整套模板多样性设计
+### 12.2 已实现的整套模板多样性选择
 
-下一阶段会先保留每页全部合格候选，再用有界、确定性的序列优化器选择整套组合。事实覆盖、critical anchors、容量、字号、图片基数和文档策略仍是硬门禁；只有质量接近本页最佳的候选才能参与多样性竞争。
+生产版会先保留每页全部完整成功候选，再用有界、确定性的序列优化器选择整套组合。事实覆盖、critical anchors、容量、字号、图片基数和文档策略仍是硬门禁；只有质量接近本页最佳的候选才能参与多样性竞争。选择证据和有效模式随 planned deck 持久化并进入新计划 fingerprint。
 
-这不是强化学习。它没有训练数据、探索、策略更新或环境奖励，只使用固定质量带、固定效用函数和确定性 tie-breaker 求解组合优化问题。完整设计见 `docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md`。
+完整模式、质量带、目标函数和兼容策略见 `docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md`。
 
 ## 13. 扩展时的验收清单
 

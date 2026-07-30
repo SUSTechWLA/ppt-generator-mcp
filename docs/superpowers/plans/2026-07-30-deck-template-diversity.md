@@ -1,6 +1,6 @@
 # Deck Template Diversity Implementation Plan
 
-> **Main-branch status:** Planned, not implemented. The task checkboxes below are execution instructions and do not describe the currently published MCP contract.
+> **Implementation status (2026-07-31):** Implemented and verified on `codex/deck-template-diversity`. The public MCP contract, bounded optimizer, deck-scope integration, historical fingerprint compatibility, automated suite, production build, and real `dist/src/server.js` stdio double-call verification are complete. The checkboxes below remain the original execution instructions rather than a mechanically rewritten audit log; in particular, the approval-gated push step was not executed.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

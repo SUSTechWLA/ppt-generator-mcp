@@ -2,10 +2,10 @@
 
 **Date:** 2026-07-30
 
-**Status:** Approved for implementation
+**Status:** Implemented
 **Scope:** `plan_deck` template selection only
 
-> Main-branch note: this document describes an approved next-stage design, not the current production contract. The current main branch still selects the local best successful candidate independently for each page; `templateDiversity` must not be advertised as available until the implementation and real MCP verification are merged.
+> Production note (2026-07-31): the public MCP contract, bounded optimizer, deck-scope workflow integration, immutable evidence and historical fingerprint compatibility are implemented. Automated tests, production typecheck/build, and two identical `plan_deck` calls through `dist/src/server.js` over the real four-page source have passed. That source exposed exactly one complete successful candidate per page, so the approved quality band correctly retained one repeated slug rather than forcing artificial variety.
 
 ## Goal
 

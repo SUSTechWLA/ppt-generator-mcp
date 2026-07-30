@@ -6,6 +6,7 @@ import {
   type SourceDocument,
   type SourceSection,
 } from "../domain/source-document.js";
+import { joinChineseClauses, normalizeChinesePunctuation } from "../domain/chinese-punctuation.js";
 import { WorkflowError } from "../domain/workflow-error.js";
 import { extractFacts } from "./fact-extractor.js";
 
@@ -16,11 +17,11 @@ interface DraftSection {
 }
 
 function normalizeText(value: string): string {
-  return value
+  return normalizeChinesePunctuation(value
     .replace(/\r\n?/g, "\n")
     .replace(/[\t\f\v]+/g, " ")
     .replace(/[ \u00a0]+\n/g, "\n")
-    .trim();
+    .trim());
 }
 
 function markdownSections(sourceText: string): {
@@ -86,7 +87,7 @@ function markdownSections(sourceText: string): {
     title,
     sections: drafts.map((draft) => ({
       heading: draft.heading,
-      body: draft.paragraphs.join("\n\n") || draft.keyPoints.join("；"),
+      body: draft.paragraphs.join("\n\n") || joinChineseClauses(draft.keyPoints),
       keyPoints: draft.keyPoints,
     })),
   };

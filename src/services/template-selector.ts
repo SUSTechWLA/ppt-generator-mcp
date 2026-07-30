@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { JSDOM } from "jsdom";
 
 import type { DocumentType } from "../domain/document-context.js";
+import { joinChineseClauses } from "../domain/chinese-punctuation.js";
 import type { PageBlueprint, SemanticRole } from "../domain/page-blueprint.js";
 import type { SlideBlockType, SlideSpec } from "../domain/slide-spec.js";
 import {
@@ -517,7 +518,7 @@ function emittedCapacityErrors(content: PageBlueprint | SlideSpec, profile: Temp
     ? content.groups.map((group) => ({ title: group.title, body: group.body, role: group.role, bullets: [] as string[], metrics: [] as string[] }))
     : content.blocks.map((block) => ({
         title: block.title,
-        body: [block.body, ...block.bullets].filter(Boolean).join("；"),
+        body: joinChineseClauses([block.body, ...block.bullets]),
         role: roleForBlock(block.type, block.semanticRole),
         bullets: block.bullets,
         metrics: block.metrics.map((metric) => `${metric.label}：${metric.value}`),
@@ -537,9 +538,9 @@ function emittedCapacityErrors(content: PageBlueprint | SlideSpec, profile: Temp
     for (const [index, item] of items.slice(0, itemLimit).entries()) {
       let values: string[];
       if (field === "body" || field === "narrativeBody") values = [item.body];
-      else if (field === "tableCell") values = [item.title, item.body, item.metrics.join("；") || "—", roleLabels[item.role]];
+      else if (field === "tableCell") values = [item.title, item.body, joinChineseClauses(item.metrics) || "—", roleLabels[item.role]];
       else if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) values = [roleLabels[item.role]];
-      else if (field === "metric") values = [item.metrics.join("；") || item.title];
+      else if (field === "metric") values = [joinChineseClauses(item.metrics) || item.title];
       else if (field === "bullet") values = [item.bullets[0] ?? item.title];
       else if (["sequence", "stepNumber", "stageNumber"].includes(field)) values = [String(index + 1).padStart(2, "0")];
       else values = [item.title];

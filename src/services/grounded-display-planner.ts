@@ -16,6 +16,7 @@ import type { SourceDocument, SourceFact } from "../domain/source-document.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
 import { WorkflowError } from "../domain/workflow-error.js";
 import { extractCanonicalAnchors } from "../domain/critical-anchor.js";
+import { chineseClauseSeparator, joinChineseClauses } from "../domain/chinese-punctuation.js";
 import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, projectGroundedVisualIntents } from "../domain/slide-projection.js";
 import { effectiveProfilePositions, type EffectiveProfilePosition } from "../domain/profile-capability.js";
 
@@ -192,8 +193,11 @@ function compactRange(
     const next = new Map<number, Combination>();
     for (const state of states.values()) {
       for (const candidate of candidates[index]) {
-        const separator = state.choices.length === 0 ? 0 : ALLOWED_FACT_SEPARATOR.length;
-        const length = state.length + separator + candidate.displayText.length;
+        const previous = state.choices.at(-1)?.candidate.displayText;
+        const separator = previous
+          ? chineseClauseSeparator(previous, candidate.displayText, ALLOWED_FACT_SEPARATOR)
+          : "";
+        const length = state.length + separator.length + candidate.displayText.length;
         if (length > limit) continue;
         const choice: Combination = {
           choices: [...state.choices, { fact: facts[index], candidate, anchors: anchors[index] }],
@@ -212,7 +216,10 @@ function compactRange(
 
 function balancePenalty(items: PlannedItem[]): number {
   if (items.length <= 1) return 0;
-  const lengths = items.map((item) => item.choices.reduce((total, choice, index) => total + choice.candidate.displayText.length + Number(index > 0), 0));
+  const lengths = items.map((item) => joinChineseClauses(
+    item.choices.map((choice) => choice.candidate.displayText),
+    ALLOWED_FACT_SEPARATOR,
+  ).length);
   return Math.max(...lengths) - Math.min(...lengths);
 }
 
@@ -325,7 +332,10 @@ export function verifyGroundedDisplay(
     }
   }
   for (const [index, group] of groups.entries()) {
-    const expectedBody = group.sourceFactIds.map((factId) => coveragesById.get(factId)?.displayText ?? "").join(ALLOWED_FACT_SEPARATOR);
+    const expectedBody = joinChineseClauses(
+      group.sourceFactIds.map((factId) => coveragesById.get(factId)?.displayText ?? ""),
+      ALLOWED_FACT_SEPARATOR,
+    );
     if (group.body !== expectedBody) issues.push(`Display body is not grounded for group-${index + 1}`);
     const budget = plan.targetBudget.positionBudgets.find((position) => position.displayItemId === group.id);
     if (!budget || group.body.length > budget.maxChars) issues.push(`Display body exceeds its profile budget for ${group.id}`);
@@ -375,7 +385,10 @@ export function planGroundedDisplay(source: SourceDocument, context: GroundedDis
       order: index,
       role: item.role,
       title: groundedTitleForRole(item.role),
-      body: item.choices.map((choice) => choice.candidate.displayText).join(ALLOWED_FACT_SEPARATOR),
+      body: joinChineseClauses(
+        item.choices.map((choice) => choice.candidate.displayText),
+        ALLOWED_FACT_SEPARATOR,
+      ),
       sourceSectionIds: [...new Set(facts.map((fact) => fact.sourceSectionId).filter((sectionId) => sourceSectionById.has(sectionId)))],
       sourceFactIds: facts.map((fact) => fact.id),
     };

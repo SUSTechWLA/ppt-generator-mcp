@@ -1,4 +1,5 @@
 import type { SourceDocument } from "../domain/source-document.js";
+import { joinChineseClauses, normalizeChinesePunctuation } from "../domain/chinese-punctuation.js";
 import { slideSpecSchema, type GeneratedAsset, type SlideBlock, type SlideSpec } from "../domain/slide-spec.js";
 import type { RepairAction } from "./repair-router.js";
 
@@ -34,12 +35,16 @@ export async function executeRepairs(input: {
       if (rewritten.id !== original.id || rewritten.sourceFactIds.some((id) => !original.sourceFactIds.includes(id))) {
         throw new Error(`Repair attempted to change the fact identity of ${original.id}`);
       }
-      state.spec.blocks[index] = rewritten;
+      state.spec.blocks[index] = {
+        ...rewritten,
+        body: normalizeChinesePunctuation(rewritten.body),
+        bullets: rewritten.bullets.map(normalizeChinesePunctuation),
+      };
     } else if (action.type === "restore_fact") {
       const block = state.spec.blocks.find((candidate) => candidate.id === action.targetId);
       const fact = input.source.facts.find((candidate) => candidate.id === action.factId);
       if (block && fact) {
-        block.body = `${block.body.replace(/[。；\s]+$/, "")}；${fact.text}`.slice(0, 500);
+        block.body = joinChineseClauses([block.body, fact.text]).slice(0, 500);
         if (!block.sourceFactIds.includes(fact.id)) block.sourceFactIds.push(fact.id);
       }
     } else if (action.type === "regenerate_asset" && input.regenerateAsset) {

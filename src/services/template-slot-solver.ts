@@ -1,4 +1,5 @@
 import { pageBlueprintSchema, type PageBlueprint, type SemanticRole } from "../domain/page-blueprint.js";
+import { joinChineseClauses } from "../domain/chinese-punctuation.js";
 import { slideSpecSchema, type SlideBlock, type SlideSpec } from "../domain/slide-spec.js";
 import type { SemanticSlot, TemplateProfile } from "../domain/template-profile.js";
 
@@ -116,17 +117,17 @@ const ROLE_LABELS: Record<SemanticRole, string> = {
 };
 
 function fieldValues(field: string, item: SemanticItem): string[] {
-  if (field === "body" || field === "narrativeBody") return [[item.body, ...item.bullets].filter(Boolean).join("；")];
-  if (field === "tableCell") return [item.title, [item.body, ...item.bullets].filter(Boolean).join("；"), item.metrics.join("；") || "—", ROLE_LABELS[item.role]];
+  if (field === "body" || field === "narrativeBody") return [joinChineseClauses([item.body, ...item.bullets])];
+  if (field === "tableCell") return [item.title, joinChineseClauses([item.body, ...item.bullets]), joinChineseClauses(item.metrics) || "—", ROLE_LABELS[item.role]];
   if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return [ROLE_LABELS[item.role]];
   if (["sequence", "stepNumber", "stageNumber"].includes(field)) return [String(item.order + 1).padStart(2, "0")];
-  if (field === "metric") return [item.metrics.join("；") || item.title];
+  if (field === "metric") return [joinChineseClauses(item.metrics) || item.title];
   if (field === "bullet") return [item.bullets[0] ?? item.title];
   return [item.title];
 }
 
 function completeFactBody(item: SemanticItem): string {
-  return [item.body, ...item.bullets].filter(Boolean).join("；");
+  return joinChineseClauses([item.body, ...item.bullets]);
 }
 
 function factBearingValue(slot: SemanticSlot, item: SemanticItem): string | undefined {

@@ -1,4 +1,5 @@
 import type { SourceSection } from "../domain/source-document.js";
+import { joinChineseClauses } from "../domain/chinese-punctuation.js";
 
 function normalizeSemanticValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -12,5 +13,5 @@ export function isSynthesizedKeyPointBody(
   section: Pick<SourceSection, "body" | "keyPoints">,
 ): boolean {
   return section.keyPoints.length > 0
-    && normalizeSemanticValue(section.body) === normalizeSemanticValue(section.keyPoints.join("；"));
+    && normalizeSemanticValue(section.body) === normalizeSemanticValue(joinChineseClauses(section.keyPoints));
 }

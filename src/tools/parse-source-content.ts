@@ -8,6 +8,7 @@
  *   llm     — 调 LLM 提取关键信息、生成图片提示词（质量更高）
  */
 import { generateText, type LLMConfig } from "../lib/llm-client.js";
+import { joinChineseClauses } from "../domain/chinese-punctuation.js";
 
 // ============================================================================
 // Types
@@ -147,7 +148,7 @@ function mapToTemplate(
     const sub = subs[i];
     if (sub) {
       titles.push(sub.title);
-      const fullText = sub.paragraphs[0] || sub.keyPoints.join("；");
+      const fullText = sub.paragraphs[0] || joinChineseClauses(sub.keyPoints);
       const isNarrow = isVisualTemplate && i === 2; // span-4 in visual
       paragraphs.push(extractSentences(fullText, isNarrow ? 80 : 140));
     } else {

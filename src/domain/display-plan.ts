@@ -2,6 +2,7 @@ import * as z from "zod/v4";
 
 import { semanticRoleSchema } from "./page-blueprint.js";
 import { criticalAnchorKindSchema, extractCanonicalAnchors } from "./critical-anchor.js";
+import { joinChineseClauses } from "./chinese-punctuation.js";
 
 const factIdSchema = z.string().regex(/^fact-\d+$/);
 const groupIdSchema = z.string().regex(/^group-\d+$/);
@@ -121,7 +122,7 @@ export const displayPlanSchema = z.object({
       context.addIssue({ code: "custom", message: "Fact coverage must reference its owning display item", path: ["items", index] });
       continue;
     }
-    if (coverages.map((coverage) => coverage!.displayText).join("；") !== item.body) {
+    if (joinChineseClauses(coverages.map((coverage) => coverage!.displayText)) !== item.body) {
       context.addIssue({ code: "custom", message: "Display item body must be rebuilt from fact coverage text", path: ["items", index, "body"] });
     }
   }

@@ -1,4 +1,5 @@
 import type { PageMetadata } from "../domain/document-context.js";
+import { joinChineseClauses, normalizeChinesePunctuation } from "../domain/chinese-punctuation.js";
 import type { SemanticRole } from "../domain/page-blueprint.js";
 import type { SlideBlock, SlideSpec } from "../domain/slide-spec.js";
 import type { TemplateProfile } from "../domain/template-profile.js";
@@ -39,23 +40,23 @@ function count(template: ParsedTemplate, tag: string): number {
 }
 
 function shortTitle(block: SlideBlock): string {
-  return block.title.trim();
+  return normalizeChinesePunctuation(block.title.trim());
 }
 
 function metricText(block: SlideBlock): string {
-  return block.metrics.map((metric) => `${metric.label}：${metric.value}`).join("；");
+  return joinChineseClauses(block.metrics.map((metric) => `${metric.label}：${metric.value}`));
 }
 
 export function semanticBindingValues(field: BindingField, block: SlideBlock, role: SemanticRole, index: number): string[] {
-  if (field === "title" || field === "figureRef") return [block.title];
-  if (field === "body" || field === "narrativeBody") return [[block.body, ...block.bullets].filter(Boolean).join("；")];
+  if (field === "title" || field === "figureRef") return [normalizeChinesePunctuation(block.title)];
+  if (field === "body" || field === "narrativeBody") return [joinChineseClauses([block.body, ...block.bullets])];
   if (field === "shortTitle") return [shortTitle(block)];
   if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return [ROLE_LABELS[role]];
   if (["sequence", "stepNumber", "stageNumber"].includes(field)) return [String(index + 1).padStart(2, "0")];
   if (field === "bullet") return [block.bullets[0] ?? block.title];
   if (field === "metric") return [metricText(block) || block.title];
   if (field === "tableCell") {
-    return [block.title, [block.body, ...block.bullets].filter(Boolean).join("；"), metricText(block) || "—", ROLE_LABELS[role]];
+    return [normalizeChinesePunctuation(block.title), joinChineseClauses([block.body, ...block.bullets]), metricText(block) || "—", ROLE_LABELS[role]];
   }
   return [];
 }
@@ -85,15 +86,15 @@ function exactValues(template: ParsedTemplate, tag: string, values: string[]): s
 function pageContent(spec: SlideSpec, page: PageMetadata | undefined, profile: TemplateProfile, template: ParsedTemplate): FillContent {
   const bindings = profile.pageBindings ?? DEFAULT_PAGE_BINDINGS;
   const values: FillContent = {
-    [bindings.pageTitle]: spec.title,
+    [bindings.pageTitle]: normalizeChinesePunctuation(spec.title),
     [bindings.pageNumber]: String(page?.number ?? 1),
-    [bindings.sectionTitle]: page?.sectionTitle ?? spec.eyebrow ?? "项目方案响应",
+    [bindings.sectionTitle]: normalizeChinesePunctuation(page?.sectionTitle ?? spec.eyebrow ?? "项目方案响应"),
     [bindings.partNumber]: page?.partNumber ?? "PART.01",
-    [bindings.partLabel]: page?.partLabel ?? "方案响应",
-    [bindings.chapterLabel]: page?.chapterLabel ?? spec.eyebrow ?? "项目服务方案",
-    [bindings.topicTitle]: spec.title,
-    [bindings.subsectionTitle]: page?.subsectionTitle ?? spec.eyebrow ?? spec.title,
-    [bindings.summaryText]: spec.conclusion,
+    [bindings.partLabel]: normalizeChinesePunctuation(page?.partLabel ?? "方案响应"),
+    [bindings.chapterLabel]: normalizeChinesePunctuation(page?.chapterLabel ?? spec.eyebrow ?? "项目服务方案"),
+    [bindings.topicTitle]: normalizeChinesePunctuation(spec.title),
+    [bindings.subsectionTitle]: normalizeChinesePunctuation(page?.subsectionTitle ?? spec.eyebrow ?? spec.title),
+    [bindings.summaryText]: normalizeChinesePunctuation(spec.conclusion),
   };
   const images = projectOptionalImages(spec);
   if (images.assets.length > 0 && bindings.imageCaption && count(template, bindings.imageCaption) > 0) {

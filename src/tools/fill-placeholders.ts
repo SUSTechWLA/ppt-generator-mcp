@@ -3,6 +3,7 @@ import {
   generateText,
   type LLMConfig,
 } from "../lib/llm-client.js";
+import { normalizeChinesePunctuation } from "../domain/chinese-punctuation.js";
 
 // ============================================================================
 // Types
@@ -118,12 +119,20 @@ export async function fillPlaceholders(
   const details: FillPlaceholdersOutput["details"] = [];
   const warnings: string[] = [];
   let filledCount = 0;
+  const direct = input.content.direct
+    ? Object.fromEntries(Object.entries(input.content.direct).map(([tag, value]) => [
+        tag,
+        Array.isArray(value)
+          ? value.map((item) => normalizeChinesePunctuation(item))
+          : normalizeChinesePunctuation(value),
+      ]))
+    : undefined;
 
   // === Phase 0: Pre-process raw HTML for JSDOM edge cases ===
   let rawHtml = input.html;
 
-  if (input.content.direct) {
-    for (const [tag, value] of Object.entries(input.content.direct)) {
+  if (direct) {
+    for (const [tag, value] of Object.entries(direct)) {
       const replacement = Array.isArray(value) ? value[0] : value;
       if (typeof replacement !== "string") continue;
 
@@ -152,8 +161,8 @@ export async function fillPlaceholders(
   }
 
   // --- Phase 1a: Direct text replacements ---
-  if (input.content.direct) {
-    for (const [tag, value] of Object.entries(input.content.direct)) {
+  if (direct) {
+    for (const [tag, value] of Object.entries(direct)) {
       const elements = doc.querySelectorAll(tag);
       if (elements.length === 0) continue;
 
@@ -199,7 +208,7 @@ export async function fillPlaceholders(
 
           try {
             const generated = await generateText(input.llmConfig, SYSTEM_PROMPT, userPrompt);
-            const cleanText = generated.trim();
+            const cleanText = normalizeChinesePunctuation(generated.trim());
             if (cleanText) {
               unwrap(el, cleanText);
               details.push({ tag, index: idx, mode: "expand", oldText, newText: cleanText });
@@ -227,8 +236,8 @@ export async function fillPlaceholders(
         if (pattern.test(currentVal)) {
           // Try to get replacement from direct content
           let replacement = "";
-          if (rule.tag && input.content.direct?.[rule.tag]) {
-            const val = input.content.direct[rule.tag];
+          if (rule.tag && direct?.[rule.tag]) {
+            const val = direct[rule.tag];
             replacement = Array.isArray(val) ? val[0] : val;
           }
 
@@ -242,9 +251,9 @@ export async function fillPlaceholders(
               newText: replacement,
             });
             filledCount++;
-          } else if (!replacement && input.content.direct) {
+          } else if (!replacement && direct) {
             // Try to derive from related tag
-            const derived = tryDeriveAttribute(rule.attr, currentVal, input.content.direct, doc);
+            const derived = tryDeriveAttribute(rule.attr, currentVal, direct, doc);
             if (derived && derived !== currentVal) {
               el.setAttribute(rule.attr, derived);
               details.push({
@@ -267,8 +276,8 @@ export async function fillPlaceholders(
   let html = dom.serialize();
 
   // Clean up any escaped XML tags from previously-serialized HTML
-  if (input.content.direct) {
-    for (const [tag, value] of Object.entries(input.content.direct)) {
+  if (direct) {
+    for (const [tag, value] of Object.entries(direct)) {
       const replacement = Array.isArray(value) ? value[0] : value;
       if (typeof replacement !== "string") continue;
 

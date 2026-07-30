@@ -73,6 +73,8 @@ const rawInternalRecordSchema = templateKnowledgeRecordSchema.omit({ quality: tr
 }).strict();
 
 function normalizeQualityEvidence(raw: unknown): TemplateKnowledgeRecord["quality"] {
+  const normalizedLegacy = legacyQualityEvidenceSchema.safeParse(raw);
+  if (normalizedLegacy.success) return normalizedLegacy.data;
   const current = currentQualityEvidenceSchema.safeParse(raw);
   if (current.success) return current.data;
   const transitional = rawTransitionalQualityEvidenceSchema.safeParse(raw);
@@ -308,7 +310,7 @@ export class TemplateKnowledgeStore {
     try {
       const text = await this.readVerifiedIndexText(this.indexPath());
       const records: InternalRecord[] = [];
-      const requests: StoreIndex["requests"] = {};
+      const requests: StoreIndex["requests"] = Object.create(null) as StoreIndex["requests"];
       if (text !== undefined) {
         const raw = JSON.parse(text) as { version?: unknown; records?: unknown; requests?: unknown };
         if ((raw.version !== 1 && raw.version !== 2) || !Array.isArray(raw.records)

@@ -39,6 +39,25 @@ function approvalInput(index: number) {
   };
 }
 
+const DANGEROUS_REQUEST_IDS = ["__proto__", "constructor", "prototype", "toString", "hasOwnProperty"];
+
+function legacyApprovedRecord(index: number, requestId: string, fingerprint: string, sourceType: "image" | "blueprint" = "image") {
+  return {
+    recordVersion: 1,
+    knowledgeId: `20000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    templateVersion: 1,
+    sourceType,
+    sourceHash: index.toString(16).padStart(64, "0"),
+    slug: `legacy-layout-${index}`,
+    capabilityTags: ["detail", "formal"],
+    quality: { chromiumRendered: true, hardGatePassed: true, safeToReturn: true, score: 96, issues: [] },
+    artifacts: ["blueprint.json", "template.html", "profile.json", "qa.json", "preview.png"],
+    createdAt: "2026-07-29T00:00:00.000Z",
+    requestId,
+    requestFingerprint: fingerprint,
+  };
+}
+
 test("image without analyzer returns stable handoff and persists nothing", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "knowledge-no-analyzer-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -354,4 +373,103 @@ test("settled write rollback removes records and temps, releases the root lock, 
   const approved = await store.approve(approvalInput(83));
   assert.equal(approved.quality.evidenceVersion, 2);
   assert.equal((await store.list()).length, 1);
+});
+
+test("legacy image evidence survives repeated v2 mutations and process restarts without self-corruption", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-lifecycle-migration-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const legacyRequestId = "legacy-image-approved";
+  const legacyFingerprint = "e".repeat(64);
+  const legacy = legacyApprovedRecord(301, legacyRequestId, legacyFingerprint, "image");
+  await writeFile(join(root, "knowledge-index.json"), JSON.stringify({
+    version: 1,
+    records: [legacy],
+    requests: { [legacyRequestId]: { fingerprint: legacyFingerprint, knowledgeId: legacy.knowledgeId } },
+  }));
+
+  let store = new TemplateKnowledgeStore(root);
+  let records = await store.list();
+  assert.equal(records[0].quality.evidenceVersion, 1);
+  assert.equal(records[0].quality.imageEvidenceStatus, "not-recorded");
+  assert.equal("imageCount" in records[0].quality, false);
+
+  const handoff = await createTemplateFromReference({ referenceImageDataUrl: ONE_PIXEL_PNG, requestId: "new-image-analysis" }, { store });
+  assert.equal(handoff.status, "needs_analysis");
+  records = await store.list();
+  assert.equal(records[0].quality.evidenceVersion, 1);
+  assert.equal((await store.findRequest(legacyRequestId, legacyFingerprint))?.knowledgeId, legacy.knowledgeId);
+
+  store = new TemplateKnowledgeStore(root);
+  records = await store.list();
+  assert.equal(records[0].quality.imageEvidenceStatus, "not-recorded");
+  assert.equal("rasterAreaRatio" in records[0].quality, false);
+  assert.equal((await store.findRequest(legacyRequestId, legacyFingerprint))?.knowledgeId, legacy.knowledgeId);
+
+  const approved = await createTemplateFromReference({ blueprint: validTemplateBlueprint({ slugSeed: "post-migration-blueprint" }), requestId: "post-migration-blueprint" }, { store });
+  assert.equal(approved.status, "approved");
+  store = new TemplateKnowledgeStore(root);
+  assert.equal((await store.list()).length, 2);
+  assert.equal((await store.findRequest(legacyRequestId, legacyFingerprint))?.quality.evidenceVersion, 1);
+  const later = await store.approve({ ...approvalInput(302), requestId: "later-blueprint-request" });
+  assert.equal(later.quality.evidenceVersion, 2);
+  store = new TemplateKnowledgeStore(root);
+  assert.equal((await store.list()).length, 3);
+  assert.equal((await store.findRequest(legacyRequestId, legacyFingerprint))?.quality.imageEvidenceStatus, "not-recorded");
+});
+
+test("dangerous request ids preserve own-key semantics in current v2 JSON roundtrips", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-dangerous-v2-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new TemplateKnowledgeStore(root);
+  const approved = [];
+  for (const [index, requestId] of DANGEROUS_REQUEST_IDS.entries()) {
+    const input = { ...approvalInput(400 + index), requestId };
+    approved.push(await store.approve(input));
+    assert.equal((await store.approve(input)).knowledgeId, approved[index].knowledgeId);
+    await assert.rejects(store.approve({ ...input, requestFingerprint: "f".repeat(64) }), /fingerprint mismatch/i);
+  }
+  assert.equal((await store.list()).length, DANGEROUS_REQUEST_IDS.length);
+  const persisted = JSON.parse(await readFile(join(root, "knowledge-index.json"), "utf8")) as { requests: Record<string, unknown> };
+  assert.deepEqual(Object.keys(persisted.requests).sort(), [...DANGEROUS_REQUEST_IDS].sort());
+  const restarted = new TemplateKnowledgeStore(root);
+  for (const [index, requestId] of DANGEROUS_REQUEST_IDS.entries()) {
+    assert.equal((await restarted.findRequest(requestId, approvalInput(400 + index).requestFingerprint))?.knowledgeId, approved[index].knowledgeId);
+  }
+  assert.equal((await restarted.list()).length, DANGEROUS_REQUEST_IDS.length);
+});
+
+test("dangerous request ids remain own keys in v1 approved and separate analysis indexes", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "knowledge-dangerous-legacy-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const approvedRequests = Object.create(null) as Record<string, { fingerprint: string; knowledgeId: string }>;
+  const analysisRequests = Object.create(null) as Record<string, string>;
+  const records = DANGEROUS_REQUEST_IDS.map((requestId, index) => {
+    const fingerprint = (index + 1).toString(16).repeat(64).slice(0, 64);
+    const record = legacyApprovedRecord(500 + index, requestId, fingerprint);
+    approvedRequests[requestId] = { fingerprint, knowledgeId: record.knowledgeId };
+    return record;
+  });
+  await writeFile(join(root, "knowledge-index.json"), JSON.stringify({ version: 1, records, requests: approvedRequests }));
+  let store = new TemplateKnowledgeStore(root);
+  assert.equal((await store.list()).length, records.length);
+  for (const [index, requestId] of DANGEROUS_REQUEST_IDS.entries()) {
+    const fingerprint = approvedRequests[requestId].fingerprint;
+    assert.equal((await store.findRequest(requestId, fingerprint))?.knowledgeId, records[index].knowledgeId);
+    await assert.rejects(store.findRequest(requestId, "a".repeat(64)), /fingerprint mismatch/i);
+  }
+
+  await rm(join(root, "knowledge-index.json"));
+  for (const [index, requestId] of DANGEROUS_REQUEST_IDS.entries()) analysisRequests[requestId] = (index + 6).toString(16).repeat(64).slice(0, 64);
+  await writeFile(join(root, "analysis-request-index.json"), JSON.stringify(analysisRequests));
+  store = new TemplateKnowledgeStore(root);
+  for (const [index, requestId] of DANGEROUS_REQUEST_IDS.entries()) {
+    const fingerprint = analysisRequests[requestId];
+    await assert.rejects(store.reserveAnalysisRequest(requestId, "b".repeat(64)), /fingerprint mismatch/i);
+    assert.equal(await store.reserveAnalysisRequest(requestId, fingerprint), undefined);
+    const result = await store.approve({ ...approvalInput(600 + index), requestId, requestFingerprint: fingerprint });
+    assert.equal(result.quality.evidenceVersion, 2);
+  }
+  const restarted = new TemplateKnowledgeStore(root);
+  assert.equal((await restarted.list()).length, DANGEROUS_REQUEST_IDS.length);
+  for (const requestId of DANGEROUS_REQUEST_IDS) assert.ok(await restarted.findRequest(requestId, analysisRequests[requestId]));
 });

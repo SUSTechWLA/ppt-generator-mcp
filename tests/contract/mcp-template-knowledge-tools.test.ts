@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -11,8 +11,9 @@ import { loadAppConfig } from "../../src/config/env.js";
 import { createPptMcpServer } from "../../src/mcp/register-tools.js";
 import { ONE_PIXEL_PNG, validTemplateBlueprint } from "../helpers/template-knowledge-fixtures.js";
 
-async function productionClient(t: test.TestContext) {
+async function productionClient(t: test.TestContext, seed?: (knowledgeRoot: string) => Promise<void>) {
   const outputRoot = await mkdtemp(join(tmpdir(), "mcp-template-knowledge-"));
+  if (seed) await seed(join(outputRoot, "template-knowledge"));
   const dependencies = createProductionDependencies(loadAppConfig({ PPT_OUTPUT_ROOT: outputRoot }), { templatesDir: resolve("templates") });
   const server = createPptMcpServer(dependencies);
   const client = new Client({ name: "template-knowledge-contract", version: "1.0.0" });
@@ -87,4 +88,56 @@ test("MCP blueprint approval and list expose only immutable logical evidence", a
   assert.equal((listed.structuredContent as { records: unknown[] }).records.length, 1);
   const serialized = JSON.stringify({ approved, listed });
   assert.doesNotMatch(serialized, /\/Users\/|\/tmp\/|requestFingerprint|requestId|data:image|base64|stack|api[_-]?key/i);
+});
+
+test("MCP lists legacy image evidence before and after v2 mutations without inventing raster metrics", async (t) => {
+  const legacyId = "30000000-0000-4000-8000-000000000001";
+  const legacyRequest = "mcp-legacy-image";
+  const legacyFingerprint = "1".repeat(64);
+  const client = await productionClient(t, async (knowledgeRoot) => {
+    await mkdir(knowledgeRoot, { recursive: true });
+    await writeFile(join(knowledgeRoot, "knowledge-index.json"), JSON.stringify({
+      version: 1,
+      records: [{
+        recordVersion: 1,
+        knowledgeId: legacyId,
+        templateVersion: 1,
+        sourceType: "image",
+        sourceHash: "2".repeat(64),
+        slug: "mcp-legacy-image-layout",
+        capabilityTags: ["detail", "formal"],
+        quality: { chromiumRendered: true, hardGatePassed: true, safeToReturn: true, score: 95, issues: [] },
+        artifacts: ["blueprint.json", "template.html", "profile.json", "qa.json", "preview.png"],
+        createdAt: "2026-07-29T00:00:00.000Z",
+        requestId: legacyRequest,
+        requestFingerprint: legacyFingerprint,
+      }],
+      requests: { [legacyRequest]: { fingerprint: legacyFingerprint, knowledgeId: legacyId } },
+    }));
+  });
+  const before = await client.callTool({ name: "list_template_knowledge", arguments: {} });
+  assert.equal(before.isError, undefined, JSON.stringify(before.content));
+  const legacyBefore = (before.structuredContent as { records: Array<{ quality: Record<string, unknown> }> }).records[0].quality;
+  assert.equal(legacyBefore.evidenceVersion, 1);
+  assert.equal(legacyBefore.imageEvidenceStatus, "not-recorded");
+  assert.equal("rasterAreaRatio" in legacyBefore, false);
+
+  const handoff = await client.callTool({
+    name: "create_template_from_reference",
+    arguments: { referenceImageDataUrl: ONE_PIXEL_PNG, requestId: "mcp-new-analysis" },
+  });
+  assert.equal(handoff.isError, undefined, JSON.stringify(handoff.content));
+  const afterMutation = await client.callTool({ name: "list_template_knowledge", arguments: {} });
+  assert.equal(afterMutation.isError, undefined, JSON.stringify(afterMutation.content));
+  const legacyAfter = (afterMutation.structuredContent as { records: Array<{ quality: Record<string, unknown> }> }).records[0].quality;
+  assert.equal(legacyAfter.imageEvidenceStatus, "not-recorded");
+  assert.equal("imageCount" in legacyAfter, false);
+
+  const approved = await client.callTool({
+    name: "create_template_from_reference",
+    arguments: { blueprint: validTemplateBlueprint({ slugSeed: "mcp-post-migration" }), requestId: "mcp-post-migration" },
+  });
+  assert.equal(approved.isError, undefined, JSON.stringify(approved.content));
+  const finalList = await client.callTool({ name: "list_template_knowledge", arguments: {} });
+  assert.equal((finalList.structuredContent as { records: unknown[] }).records.length, 2);
 });

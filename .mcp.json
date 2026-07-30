@@ -4,7 +4,7 @@
       "command": "node",
       "args": ["dist/src/server.js"],
       "cwd": "${workspaceFolder}",
-      "description": "PPT Generator MCP — 质量门禁单页生成 workflow"
+      "description": "PPT Generator MCP — 固定分页 HTML Deck 与模板知识 workflow"
     }
   }
 }

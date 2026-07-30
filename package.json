@@ -1,23 +1,15 @@
 {
   "name": "ppt-generator-mcp",
   "version": "1.0.0",
-  "description": "MCP Server that transforms HTML templates into deliverable pages (PPT/bid/report) via LLM orchestration.",
+  "description": "MCP server for fixed-page HTML decks, template knowledge, rendering, and quality assurance.",
   "type": "module",
   "main": "dist/src/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/server.js",
     "dev": "tsx watch src/server.ts",
-    "demo": "npx tsx tests/demo.ts",
-    "test:templates": "npx tsx tests/test-all-templates.ts",
-    "demo:source": "node --import tsx scripts/generate-personnel-deliverable.ts",
-    "generate:personnel": "node --import tsx scripts/generate-personnel-deliverable.ts",
-    "test": "npm run test:unit && npm run test:contract && npm run test:render && npm run test:e2e && npm run test:templates",
-    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
-    "test:contract": "node --import tsx --test tests/contract/*.test.ts",
-    "test:render": "node --import tsx --test tests/render/*.test.ts",
-    "test:e2e": "node --import tsx --test tests/e2e/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
   },
   "keywords": [
     "mcp",

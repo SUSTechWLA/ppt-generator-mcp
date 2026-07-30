@@ -35,6 +35,9 @@ import {
   type GenerateDeckDependencies,
 } from "./workflow/generate-deck.js";
 import { generatePreparedSlideWorkflow } from "./workflow/generate-slide.js";
+import { inspectTemplateHtml } from "./services/template-inspector.js";
+import { createTemplateFromReference } from "./workflow/create-template-from-reference.js";
+import { TemplateKnowledgeStore } from "./workflow/template-knowledge-store.js";
 
 export interface ProductionDependencies extends PptMcpDependencies {
   deckStore: DeckStore;
@@ -42,6 +45,7 @@ export interface ProductionDependencies extends PptMcpDependencies {
   planDeck(rawInput: unknown): ReturnType<typeof planDeckWorkflow>;
   generateDeckDependencies: GenerateDeckDependencies;
   generateDeck(rawInput: unknown): ReturnType<typeof generateDeckWorkflow>;
+  templateKnowledgeStore: TemplateKnowledgeStore;
 }
 
 export function createProductionDependencies(
@@ -66,6 +70,7 @@ export function createProductionDependencies(
     maxInputChars: config.limits.maxInputChars,
   });
   const deckStore = new DeckStore(config.outputRoot);
+  const templateKnowledgeStore = new TemplateKnowledgeStore(join(config.outputRoot, "template-knowledge"));
   const planDeckDependencies = createPlanDeckDependencies({ deckStore, profiles });
 
   const baseDependencies: Omit<ProductionDependencies, "generateDeckDependencies" | "generateDeck"> = {
@@ -75,6 +80,9 @@ export function createProductionDependencies(
     deckStore,
     planDeckDependencies,
     planDeck: (rawInput) => planDeckWorkflow(rawInput, planDeckDependencies),
+    templateKnowledgeStore,
+    inspectTemplate: inspectTemplateHtml,
+    createTemplateFromReference: (rawInput) => createTemplateFromReference(rawInput, { store: templateKnowledgeStore }),
     normalizeSource,
     buildSlideSpec: async (source, audience, documentType) => {
       const policy = getDocumentTemplatePolicy(documentType ?? "presentation");

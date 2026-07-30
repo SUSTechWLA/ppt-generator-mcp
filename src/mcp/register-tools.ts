@@ -37,13 +37,58 @@ import {
   sanitizeQualityText,
 } from "./deck-tools.js";
 import type { DeckStoreApi } from "../workflow/deck-store.js";
+import { templateBlueprintSchema } from "../domain/template-blueprint.js";
+import { MAX_REFERENCE_HTML_CHARS } from "../services/template-inspector.js";
+import {
+  createTemplateFromReferenceInputSchema,
+  type CreateTemplateFromReferenceResult,
+} from "../workflow/create-template-from-reference.js";
+import {
+  templateKnowledgeRecordSchema,
+  type TemplateKnowledgeStore,
+} from "../workflow/template-knowledge-store.js";
+import type { TemplateInspection } from "../services/template-inspector.js";
 
 export interface PptMcpDependencies extends WorkflowDependencies {
   templatesDir?: string;
   deckStore?: Pick<DeckStoreApi, "getPlan" | "getRun" | "getArtifact">;
   planDeck?(rawInput: unknown): Promise<unknown>;
   generateDeck?(rawInput: unknown): Promise<unknown>;
+  templateKnowledgeStore?: Pick<TemplateKnowledgeStore, "list">;
+  inspectTemplate?(referenceHtml: string): TemplateInspection;
+  createTemplateFromReference?(rawInput: unknown): Promise<CreateTemplateFromReferenceResult>;
 }
+
+const templateFindingSchema = z.object({
+  code: z.enum(["executable-dom", "unsafe-css-resource", "resource-attribute", "branding-discarded", "tokens-normalized"]),
+  severity: z.enum(["error", "notice"]),
+}).strict();
+
+const templateInspectionOutputSchema = z.object({
+  version: z.literal(1),
+  sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
+  safe: z.boolean(),
+  blueprint: templateBlueprintSchema,
+  componentHierarchy: z.array(z.object({ component: z.string(), role: z.string(), children: z.array(z.string()) }).strict()),
+  findings: z.array(templateFindingSchema),
+  sanitization: z.object({ proseDiscarded: z.literal(true), brandingDiscarded: z.literal(true), resourceContentDiscarded: z.literal(true) }).strict(),
+}).strict();
+
+const knowledgeApprovedOutputSchema = templateKnowledgeRecordSchema.extend({
+  status: z.literal("approved"),
+  promotion: z.object({ liveCatalogSelection: z.literal(false), instruction: z.string().max(300) }).strict(),
+}).strict();
+const knowledgeNeedsAnalysisOutputSchema = z.object({
+  status: z.literal("needs_analysis"),
+  sourceType: z.literal("image"),
+  sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
+  analysisTaskId: z.string().regex(/^template-analysis-[0-9a-f]{24}$/),
+  analysisPrompt: z.string().min(80).max(1_500),
+  blueprintSchema: z.record(z.string(), z.unknown()),
+}).strict();
+const createTemplateKnowledgeResultSchema = z.discriminatedUnion("status", [knowledgeNeedsAnalysisOutputSchema, knowledgeApprovedOutputSchema]);
+const createTemplateKnowledgeOutputSchema = z.object({ result: createTemplateKnowledgeResultSchema }).strict();
+const listTemplateKnowledgeOutputSchema = z.object({ records: z.array(templateKnowledgeRecordSchema) }).strict();
 
 const planSlideOutputSchema = z.object({
   sourceHash: z.string(),
@@ -82,6 +127,55 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
       generateDeck: dependencies.generateDeck,
     };
   };
+
+  const requireTemplateKnowledge = (): Required<Pick<PptMcpDependencies, "templateKnowledgeStore" | "inspectTemplate" | "createTemplateFromReference">> => {
+    if (!dependencies.templateKnowledgeStore || !dependencies.inspectTemplate || !dependencies.createTemplateFromReference) {
+      throw new WorkflowError({
+        code: "CONFIG_MISSING",
+        stage: "mcp_tool",
+        retryable: false,
+        message: "Template knowledge dependencies are unavailable",
+        recovery: "Start the MCP server with createProductionDependencies before calling template knowledge tools.",
+      });
+    }
+    return {
+      templateKnowledgeStore: dependencies.templateKnowledgeStore,
+      inspectTemplate: dependencies.inspectTemplate,
+      createTemplateFromReference: dependencies.createTemplateFromReference,
+    };
+  };
+
+  server.registerTool("inspect_template", {
+    title: "Inspect reusable template structure",
+    description: "Read-only deterministic inspection of one bounded inline HTML reference. Returns normalized generic layout and design knowledge; source paths, remote URLs and API keys are not accepted, and visible prose or branding is discarded.",
+    inputSchema: z.object({ referenceHtml: z.string().trim().min(20).max(MAX_REFERENCE_HTML_CHARS) }).strict(),
+    outputSchema: templateInspectionOutputSchema,
+  }, async ({ referenceHtml }) => safeTool(() => {
+    const output = templateInspectionOutputSchema.parse(requireTemplateKnowledge().inspectTemplate(referenceHtml));
+    return toToolResult(output, `Inspected generic template structure ${output.sourceHash.slice(0, 12)}; safe=${output.safe}.`);
+  }));
+
+  server.registerTool("create_template_from_reference", {
+    title: "Create QA-proven template knowledge",
+    description: "Learn from exactly one inline HTML reference, bounded PNG/JPEG/WebP data URL, or validated generic blueprint. The server compiles owned self-contained components and persists only after catalog validation and real Chromium QA. No API key, path, remote URL, screenshot background, visible source copy, logo or watermark is accepted.",
+    inputSchema: createTemplateFromReferenceInputSchema,
+    outputSchema: createTemplateKnowledgeOutputSchema,
+  }, async (input) => safeTool(async () => {
+    const output = createTemplateKnowledgeOutputSchema.parse({ result: await requireTemplateKnowledge().createTemplateFromReference(input) });
+    return toToolResult(output, output.result.status === "needs_analysis"
+      ? `Reference ${output.result.analysisTaskId} requires a caller-supplied blueprint.`
+      : `Approved immutable template knowledge ${output.result.knowledgeId} version ${output.result.templateVersion}.`);
+  }));
+
+  server.registerTool("list_template_knowledge", {
+    title: "List approved template knowledge",
+    description: "List immutable approved template knowledge using logical IDs, closed artifact names, source hashes, capabilities and Chromium QA evidence. Physical paths, source pixels, data URLs and secrets are never returned.",
+    inputSchema: z.object({}).strict(),
+    outputSchema: listTemplateKnowledgeOutputSchema,
+  }, async () => safeTool(async () => {
+    const output = listTemplateKnowledgeOutputSchema.parse({ records: await requireTemplateKnowledge().templateKnowledgeStore.list() });
+    return toToolResult(output, `Listed ${output.records.length} approved template knowledge record(s).`);
+  }));
 
   server.registerTool("plan_deck", {
     title: "Plan an explicit multi-page deck",

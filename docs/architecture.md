@@ -2,6 +2,8 @@
 
 本文描述 2026-07-31 已实现并通过自动测试、生产 build 与真实 MCP stdio 双次复现的生产行为。`docs/superpowers/` 下的设计与计划记录该行为的决策依据和实施证据。
 
+> **阅读建议：** 第一次使用或不负责代码维护，请先阅读[项目 5 分钟上手](../README.md#5-分钟上手)和[非技术用户指南](user-guide.md)。本文面向 MCP 维护者与 workflow 设计者，重点说明数据流、模板选择、持久化、QA、安全和扩展边界。
+
 ## 1. 系统定位与边界
 
 PPT Generator MCP 把上游已经分页的中文标书、技术方案或汇报正文，转换为经过逐页 QA 的自包含 A4 横向 HTML 展示页。它负责以下工作：
@@ -263,7 +265,7 @@ Server 当前注册 20 个工具，分为四层。
 
 1. `inspect_template` 对内联 HTML 做只读安全检查并输出归一化 blueprint；
 2. `create_template_from_reference` 每次只接受一种输入：内联 HTML、受限图片 data URL 或已验证 blueprint；
-3. 截图缺少 Server 视觉分析器时返回 `needs_analysis`，由外部 Agent 填充通用 blueprint；
+3. 截图缺少 Server 视觉分析器时返回 `needs_analysis`，由外部 Agent 生成通用 blueprint；
 4. owned compiler 生成 Server 自有的模板结构，不把截图当背景，也不保留可见正文、Logo、水印或品牌；
 5. 模板目录校验和真实 Chromium QA 通过后，知识以版本化记录写入 store；
 6. 人工检查后把闭集产物晋升到 `templates/`，重启 Server 才参与生产选择。

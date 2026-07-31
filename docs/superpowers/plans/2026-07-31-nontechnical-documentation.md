@@ -29,7 +29,7 @@
 - Consumes: current `.mcp.json`, `package.json` scripts, public high-level tool contracts, and the approved documentation design
 - Produces: the canonical task-oriented operating guide linked by README and architecture documentation
 
-- [ ] **Step 1: Write the guide structure and first-use routes**
+- [x] **Step 1: Write the guide structure and first-use routes**
 
 Create `docs/user-guide.md` with this reader order:
 
@@ -52,7 +52,7 @@ Know the safe and advanced tool boundaries
 
 Use short numbered procedures and copyable command, JSON, source-text, and Agent-prompt blocks. Explain the five ordinary terms `正文`, `模板`, `素材`, `计划`, and `交付件` before the workflow.
 
-- [ ] **Step 2: Add a complete copyable operating example**
+- [x] **Step 2: Add a complete copyable operating example**
 
 The example must contain an exact numbered source shape and an Agent instruction that asks the Agent to:
 
@@ -67,7 +67,7 @@ The example must contain an exact numbered source shape and an Agent instruction
 
 Explain that page numbers such as 59–62 are examples of upstream numbering, not template-selection rules.
 
-- [ ] **Step 3: Verify guide completeness and forbidden claims**
+- [x] **Step 3: Verify guide completeness and forbidden claims**
 
 Run:
 
@@ -78,7 +78,7 @@ rg -n "自动推测分页|自动调用图片|保证每页不同|强化学习" do
 
 Expected: the first command finds every required topic; any second-command matches must explicitly negate the incorrect claim or explain that the selector is not reinforcement learning.
 
-- [ ] **Step 4: Commit the complete user guide**
+- [x] **Step 4: Commit the complete user guide**
 
 ```bash
 git add -- docs/user-guide.md
@@ -94,7 +94,7 @@ git commit -m "docs: add nontechnical user guide"
 - Consumes: `docs/user-guide.md` as the detailed operating reference and `docs/architecture.md` as the technical reference
 - Produces: a concise repository front door with two visible starting paths
 
-- [ ] **Step 1: Reorder README around user outcomes**
+- [x] **Step 1: Reorder README around user outcomes**
 
 Lead with the HTML deliverable and add the following sections before implementation detail:
 
@@ -109,7 +109,7 @@ Lead with the HTML deliverable and add the following sections before implementat
 
 Keep exact installation commands, `.mcp.json`, the numbered-page example, and the high-level tool table. Link to `docs/user-guide.md` for full operating details and `docs/architecture.md` for algorithms, contracts, security, and extension guidance.
 
-- [ ] **Step 2: Compress technical duplication without losing contract facts**
+- [x] **Step 2: Compress technical duplication without losing contract facts**
 
 Retain these truths in plain language:
 
@@ -124,7 +124,7 @@ Atomic and compatibility tools are trusted-local advanced functions.
 
 Move long optimizer thresholds and provider-boundary detail behind architecture links. Update the project tree to include `docs/user-guide.md`.
 
-- [ ] **Step 3: Verify the README entry path and links**
+- [x] **Step 3: Verify the README entry path and links**
 
 Run:
 
@@ -136,7 +136,7 @@ test -f docs/architecture.md
 
 Expected: all entry-point topics are present and both linked files exist.
 
-- [ ] **Step 4: Commit the README rewrite**
+- [x] **Step 4: Commit the README rewrite**
 
 ```bash
 git add -- README.md
@@ -153,7 +153,7 @@ git commit -m "docs: simplify the quick start"
 - Consumes: the final README and user guide
 - Produces: a clear nontechnical-to-technical navigation path and verified published documentation
 
-- [ ] **Step 1: Add a reader-route notice to architecture documentation**
+- [x] **Step 1: Add a reader-route notice to architecture documentation**
 
 Immediately below the architecture introduction, add a short note with this meaning:
 
@@ -165,7 +165,7 @@ selection, persistence, QA, security, and extension details.
 
 Do not rewrite or dilute the existing technical sections.
 
-- [ ] **Step 2: Validate every relative Markdown link**
+- [x] **Step 2: Validate every relative Markdown link**
 
 Run a small read-only Node.js check that extracts non-HTTP Markdown links from the three public documents, strips fragments, resolves them relative to each document, and fails when a target is missing:
 
@@ -195,7 +195,7 @@ NODE
 
 Expected: exit code `0` and no missing-link output.
 
-- [ ] **Step 3: Run documentation and repository verification**
+- [x] **Step 3: Run documentation and repository verification**
 
 Run:
 
@@ -209,7 +209,7 @@ git status --short
 
 Expected: no whitespace errors or placeholders; all automated tests, typecheck, and production build pass; only approved documentation changes plus untracked `test.md` appear.
 
-- [ ] **Step 4: Mark this plan completed and inspect the final diff**
+- [x] **Step 4: Mark this plan completed and inspect the final diff**
 
 Change every checkbox in this plan from `[ ]` to `[x]`, then run:
 
@@ -221,14 +221,14 @@ git diff -- README.md docs/user-guide.md docs/architecture.md docs/superpowers/p
 
 Expected: documentation-only changes matching the approved design, with no `test.md` diff.
 
-- [ ] **Step 5: Commit final navigation and verification evidence**
+- [x] **Step 5: Commit final navigation and verification evidence**
 
 ```bash
 git add -- docs/architecture.md docs/superpowers/plans/2026-07-31-nontechnical-documentation.md
 git commit -m "docs: complete nontechnical documentation"
 ```
 
-- [ ] **Step 6: Push and verify the remote branch**
+- [x] **Step 6: Push and verify the remote branch**
 
 ```bash
 git push origin main

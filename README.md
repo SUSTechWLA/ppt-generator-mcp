@@ -1,64 +1,49 @@
 # PPT Generator MCP
 
-面向中文标书、技术方案和项目汇报的 HTML 展示页生成 MCP。它接收上游已经分页的固定格式正文，根据严格模板能力档案规划页面、生成图片提示词、注入外部图片，并逐页执行 Chromium QA，最终输出可独立交付的 A4 横向 HTML。
+把已经分页的中文标书、技术方案或汇报正文，稳定转换成经过逐页 QA 的 A4 横向 HTML 展示页。
 
-项目不依赖特定 Agent：任何支持 MCP stdio 和工具调用的 workflow 都能接入。最终交付是内联 CSS、SVG 与图片的自包含 HTML，而不是 `.pptx`。
+它会理解每页内容、选择兼容模板、提出图片需求、接收 Agent 生成的图片，并在真实 Chromium 中检查溢出、字号、碰撞、对比度、图片和事实覆盖。最终交付是可独立打开的自包含 `final.html`，不要求生成 `.pptx`。
 
-> 当前生产说明（2026-07-31）：`plan_deck` 会为每页保留全部通过硬门禁的成功候选，再用确定性的有界 deck-scope 优化器选择整套模板序列。公共参数 `templateDiversity` 支持 `off`、`conservative`、`balanced` 和 `expressive`，新计划默认使用 `balanced`。详见[架构与实现原理](docs/architecture.md)和[整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)。
+- 第一次使用或不熟悉技术：[完整非技术用户指南](docs/user-guide.md)
+- 需要了解算法、数据结构、安全和扩展方式：[架构与实现原理](docs/architecture.md)
+- 需要维护现有模板：[green-infographic 模板说明](templates/green-infographic/README.md)
 
-## 核心能力
+## 5 分钟上手
 
-- 固定输入协议：只接受整行 `<page N>`、标签化标题和 `正文：`，不猜测页码，不自动重新分页。
-- 中文标点规范化：清理正文中的重复分号和冲突句末标点，并在事实、要点和修复文本组合时避免机械追加分号。
-- `plan_deck → generate_deck → get_deck`：不可变计划、外部图片注入、断点续跑、逐页独立 QA 和跨页一致性检查。
-- 通用模板选择：依据语义角色、组件容量、内容密度、图片槽位和文档兼容性选择模板，不按页码、正文或模板名写特例。
-- 整套模板多样性：只让接近本页最佳质量的完整成功候选参与 deck-scope 选择，以固定奖励和惩罚改善版式节奏；相同输入、模板 catalog 和模式得到相同结果。
-- 模板知识沉淀：从内联 HTML、展示页截图或通用蓝图提取布局知识，经 owned compiler 和真实浏览器 QA 后保存为不可变模板知识。
-- 质量门禁：检查单页尺寸、溢出、字号、对比度、图片加载、远程资源、脚本与敏感信息；最多进行 3 次定向修复。
-- Provider 可选：没有文本或图片 API 时仍可确定性规划，并由调用方通过 `externalAssets` 注入图片。
-- 分层安全边界：推荐的 deck/template-knowledge 高层工具从 Server 环境读取 provider 密钥，只接受受控文本、data URL 与逻辑 ID，并把产物限制在受控 store；兼容/原子工具属于 trusted-local surface，边界不同。
+### 路径 A：已有支持 MCP 的 Agent
 
-## 核心实现原则
-
-1. **先保证事实，再决定版式。** 正文先被解析为不可变 source sections、facts 和关键锚点，模板只能压缩表达，不能丢失数字、比例、日期、范围、否定词或责任关系。
-2. **模板 profile 是可执行契约。** 模板是否可用由语义角色、槽位容量、字符上限、图片基数、最小字号、文档兼容性和设计地标共同决定，不靠 Agent 对模板名称的猜测。
-3. **规划与生成解耦。** `plan_deck` 固化来源、内容计划、模板能力快照和图片意图；`generate_deck` 只能按照不可变计划注入资产并渲染，不能静默换内容或重选模板。
-4. **质量是门禁，不只是评分。** Chromium 实测尺寸、溢出、碰撞、字号、对比度、图片有效性和事实映射；任一硬门禁失败时，即使总分较高也不能交付。
-5. **默认可复现、Provider 可选。** 高层 deck 规划使用确定性 grounded planner；没有文本、图片或复核 API 时仍能运行，图片由外部 Agent 按稳定资产 ID 注入。
-6. **知识先隔离，再晋升。** 参考页面只用于抽取通用布局知识；经过 owned compiler、目录校验和真实浏览器 QA 后进入不可变知识库，再由人工晋升到生产模板目录。
-
-完整的数据结构、选择顺序、恢复机制、QA 门禁和安全边界见[架构与实现原理](docs/architecture.md)。
-
-## 项目结构
+如果 Agent 已经连接 `ppt-generator`，准备好编号正文，复制下面的提示词即可：
 
 ```text
-.
-├── src/                         # MCP 工具、工作流、模板编译、渲染和 QA
-├── templates/
-│   └── green-infographic/       # A4 横向模板、能力档案、样式与图标
-├── docs/
-│   ├── architecture.md           # 当前生产架构、数据流和扩展边界
-│   └── superpowers/              # 设计、实施计划与验证状态
-├── .mcp.json                    # MCP stdio 配置
-├── .env.example                 # 可选 provider 与运行限制
-├── package.json
-└── tsconfig.json
+请使用 ppt-generator MCP，把下面的编号正文生成正式标书风格的 HTML 展示页。
+
+1. 校验 <page N> 和 pageNumbers，不要自动分页。
+2. 调用 plan_deck，documentType=bid，templateDiversity=balanced。
+3. 保留原文事实、数字、日期、范围、否定和责任关系。
+4. 如果返回 assets，只按原资产 ID 和 prompt 生成图片；没有图片 API 时使用当前 Agent 的图片生成能力。
+5. 调用 generate_deck；needs_assets 时补齐素材并复用同一个 requestId。
+6. 逐页检查 QA 和整套 consistency。只有 deck 和每页均为 delivered 才交付。
+7. 使用 get_deck 取回每页 final.html、quality.json 和整套 consistency.json。
+
+正文：
+[在这里粘贴完整编号正文]
 ```
 
-`dist/`、`output/` 和 `node_modules/` 均为可再生成目录，不属于源码交付。
+详细的 Agent 提示词、验收表和常见问题见[非技术用户指南](docs/user-guide.md#路径-a已有支持-mcp-的-agent)。
 
-## 安装与启动
+### 路径 B：从零安装和启动
 
-要求 Node.js 22+。
+要求 Node.js 22 或更高版本。首次安装：
 
 ```bash
+git clone https://github.com/SUSTechWLA/ppt-generator-mcp.git
+cd ppt-generator-mcp
 npm install
 npx playwright install chromium
 npm run check
-npm start
 ```
 
-`.mcp.json` 已配置生产 stdio Server：
+把下面配置加入支持 stdio MCP 的 Agent 或客户端，并将 `cwd` 改为项目的真实绝对路径：
 
 ```json
 {
@@ -66,60 +51,71 @@ npm start
     "ppt-generator": {
       "command": "node",
       "args": ["dist/src/server.js"],
-      "cwd": "${workspaceFolder}"
+      "cwd": "/您的绝对路径/ppt-generator-mcp"
     }
   }
 }
 ```
 
-开发时运行 `npm run dev`，或让 Agent 使用 `npx tsx src/server.ts` 作为 stdio 命令。
+保存后重启客户端。Agent 能看到 `plan_deck`、`generate_deck` 和 `get_deck`，即表示连接成功。项目也提供了可直接调整的 [.mcp.json](.mcp.json)。完整安装排查见[从零安装说明](docs/user-guide.md#路径-b从零安装和启动)。
 
-## 固定正文协议
+## 正文必须长什么样
 
-上游必须先完成分页。每个 `<page N>` 必须独占一行，页码严格递增；`pageNumbers` 必须与标记完全一致。
+上游必须先完成分页。每个 `<page N>` 独占一行，页码严格递增；每页至少有一个标签化标题，随后是 `正文：` 和实际内容。
 
 ```text
 <page 59>
 一级标题：第一分节：优势与有利条件分析
 二级标题：2.1 项目需求深度理解
 三级标题：2.1.1 项目背景与采购需求解读
-四级标题：可选的更细标题
 正文：
-这里是本页正文，可包含多个自然段。
+项目服务覆盖三个业务区域，要求在合同生效后30日内完成首轮建档。
+项目团队须建立7×24小时响应机制，并按月提交质量分析报告。
 
 <page 60>
 一级标题：第一分节：优势与有利条件分析
 二级标题：2.2 服务方案
 三级标题：2.2.1 实施路径
 正文：
-这里是下一页正文。
+实施过程分为启动准备、全面执行、持续优化三个阶段。
 ```
 
-高层 deck 路径不会调用旧 Markdown 兼容解析器，也不会做语义自动分页。输入格式错误时直接返回可修复的契约错误。
+调用 `plan_deck` 时，`pageNumbers` 必须是 `[59, 60]`。59、60 只是上游编号示例，不参与模板特判；高层 workflow 不猜页码，也不自动重新分页。
 
-## 推荐生成 workflow
+正文中的 `；；`、`；。` 等重复或冲突标点会统一规范化，但数字、比例、日期、范围、否定和责任关系仍作为来源证据保留。格式规则和错误示例见[准备正文](docs/user-guide.md#3-正文必须怎样准备)。
 
-1. 调用 `plan_deck`，得到不可变 `deckPlanId`、逐页模板选择、内容计划以及 `assets[].id/prompt`。
-2. 调用方按提示词生成图片。没有图片 API 时，可由 Agent 自己的图像能力生成，再转换为 PNG、JPEG、WebP 或 SVG data URL。
-3. 保持原资产 ID，将图片组成 `externalAssets`，调用 `generate_deck`。
-4. 若返回 `needs_assets`，补齐缺失资产并复用相同 `requestId`；已交付页面不会重复生成。
-5. 逐页检查分数与硬门禁，再检查 deck consistency。仅 `status=delivered` 可作为正式交付。
-6. 使用 `get_deck` 读取脱敏 manifest、`final.html`、`quality.json` 或 `consistency.json`。
+## 推荐 workflow
 
-这个 workflow 的稳定性来自三类不可变证据：原始事实与关键锚点、被选模板的完整能力快照、以及页面内容到模板槽位的逐项 assignment。Server 在恢复旧请求或生成交付页之前都会重新验证这些证据。
+```mermaid
+flowchart LR
+    A["编号正文"] --> B["plan_deck：规划页面和模板"]
+    B --> C{"需要图片？"}
+    C -- "是" --> D["外部 Agent 按资产 ID 生成"]
+    C -- "否" --> E["generate_deck"]
+    D --> E
+    E --> F["逐页 QA 与定向修复"]
+    F --> G["整套一致性检查"]
+    G --> H["get_deck：取回 HTML 和报告"]
+```
+
+1. `plan_deck` 固化正文事实、页面内容、模板选择和图片提示词，返回 `deckPlanId`。
+2. 若返回 `assets`，调用方只按原 ID 和 prompt 生成图片，并转换为 PNG、JPEG、WebP 或 SVG data URL。
+3. `generate_deck` 按不可变计划注入素材、生成页面，并独立执行 Chromium QA。
+4. 返回 `needs_assets` 时补齐 `missingAssetIds`，复用同一个生成 `requestId` 继续。
+5. 只有整套 `status=delivered` 且每页均为 `delivered` 才能正式交付。
+6. `get_deck` 按返回的 UUID 读取每页 `final.html`、`quality.json` 和整套 `consistency.json`。
 
 规划示例：
 
 ```json
 {
-  "sourceText": "<page 59>\n一级标题：第一分节：优势与有利条件分析\n二级标题：2.1 项目需求深度理解\n三级标题：2.1.1 项目背景与采购需求解读\n正文：\n这里是第59页正文。",
+  "sourceText": "<page 59>\n一级标题：第一分节\n二级标题：2.1 服务理解\n三级标题：2.1.1 采购需求解读\n正文：\n这里是已经分页的事实正文。",
   "pageNumbers": [59],
   "documentType": "bid",
-  "preferredThemeId": "green-infographic-v1",
   "templateDiversity": "balanced",
   "audience": "招标评审专家与项目业主",
   "quality": { "minScore": 90, "maxAttempts": 3 },
-  "requestId": "proposal-deck-plan-001"
+  "requestId": "proposal-plan-20260731"
 }
 ```
 
@@ -129,115 +125,149 @@ npm start
 {
   "deckPlanId": "plan_deck 返回的 UUID",
   "externalAssets": [
-    { "id": "plan_deck 返回的资产 ID", "dataUrl": "data:image/png;base64,..." }
+    { "id": "p59-img-001", "dataUrl": "data:image/png;base64,真实图片内容" }
   ],
-  "requestId": "proposal-deck-run-001"
+  "requestId": "proposal-run-20260731"
 }
 ```
 
-不得自行增加资产 ID；没有图片需求时传空数组。
+没有图片需求时，`externalAssets` 传空数组。MCP 不会在规划阶段偷偷调用图片服务；没有图片 API 时，可由 Agent 使用自身图片能力生成后注入。完整操作过程见[一次完整生产流程](docs/user-guide.md#4-一次完整生产流程)。
 
-## 模板知识 workflow
+## 运行结果在哪里
 
-模板学习的目标是提取可复用的网格、层级、排版、色板、间距、组件和视觉比例，而不是复制参考页正文、品牌、Logo、水印或整页截图。
+整套状态：
 
-1. 对内联 HTML 先调用 `inspect_template`，只读检查结构、安全风险和归一化蓝图。
-2. 调用 `create_template_from_reference`，且每次只传一种输入：`referenceHtml`、受限图片 data URL，或符合 schema 的 `blueprint`。
-3. 截图在 Server 未配置视觉分析器时返回 `needs_analysis`，调用方依据返回的 `analysisPrompt` 和 `blueprintSchema` 生成通用蓝图后再次提交。
-4. `approved` 结果已经通过模板目录校验和真实 Chromium QA，并写入不可变知识存储。
-5. `list_template_knowledge` 可读取逻辑 ID、能力标签、闭集产物名和 QA 证据，不暴露物理路径或原始像素。
-6. 新知识不会自动进入运行中的模板目录。按返回的 `promotion.instruction` 人工晋升 `template.html` 与 `profile.json`，重启 Server 后才参与选择。
+| 状态 | 含义 | 是否可交付 |
+|---|---|---|
+| `needs_assets` | 仍缺计划要求的图片，可以恢复 | 否 |
+| `running` | 正在生成或恢复 | 否 |
+| `partial` | 有失败页或一致性问题 | 否 |
+| `delivered` | 所有页面和整套检查通过 | 是 |
+| `failed` | 没有形成可继续的安全结果 | 否 |
+
+每个页面都有独立 `runId`。通过 `get_deck` 读取该页的 `final.html`、`quality.json` 和 `manifest.json`；通过整套 `deckRunId` 读取 manifest 和 `consistency.json`。
+
+本机默认目录是 `output/runs`：
+
+```text
+output/runs/
+├── <page-runId>/
+│   ├── final.html
+│   ├── final.png
+│   ├── quality.json
+│   ├── manifest.json
+│   └── assets/
+├── decks/
+│   ├── plans/<deckPlanId>/plan.json
+│   └── runs/<deckRunId>/
+│       ├── manifest.json
+│       └── consistency.json
+└── template-knowledge/
+```
+
+高层 MCP 接口只按 UUID 和白名单产物名读取，不接受任意路径。状态解释和验收方式见[如何判断是否可以交付](docs/user-guide.md#6-如何判断是否可以交付)。
+
+## 它怎样选择模板
+
+先做硬门禁，再考虑多样性：
+
+1. 每个模板独立证明能够容纳本页事实、语义角色、文字容量、图片数量、最低字号和文档类型；
+2. 失败候选直接淘汰；
+3. 只有接近本页最佳质量的成功候选，才参与整套组合选择；
+4. 整套选择奖励不同版式、惩罚连续重复，同时保持确定性和可复现。
+
+`templateDiversity` 提供四种模式：
+
+| 模式 | 建议用途 |
+|---|---|
+| `off` | 每页只选自己的局部质量赢家 |
+| `conservative` | 极克制地打破近似平局 |
+| `balanced` | 默认推荐；在窄质量范围内兼顾质量和整套节奏 |
+| `expressive` | 更强调视觉变化，但仍不放松硬门禁 |
+
+如果某页只有一个完整成功候选，重复模板就是正确结果。这个选择器不是强化学习：没有训练、探索或在线奖励更新；相同正文、模板目录和参数会得到相同结果。更详细的选择顺序和质量带见[架构文档](docs/architecture.md#43-局部质量排序与整套序列选择)。
+
+## 核心能力
+
+- 严格分页协议，不猜页码，不自动切页；
+- 中文重复和冲突标点规范化；
+- 事实、数字、日期、范围、否定与责任关系覆盖；
+- 通用模板能力匹配，不针对页码、正文或模板名写特例；
+- 整套页面的确定性模板多样性选择；
+- 稳定图片 ID 和外部素材注入；
+- 每页独立 Chromium QA，最多三轮定向修复；
+- 整套一致性检查、幂等恢复和脱敏产物读取；
+- 从参考 HTML、截图或通用蓝图沉淀模板知识；
+- 文本、图片和复核 Provider 均为可选。
+
+基本原理的非技术解释见[为什么结果更稳定](docs/user-guide.md#7-基本原理为什么结果更稳定)，完整实现见[架构与实现原理](docs/architecture.md)。
 
 ## 主要 MCP 工具
 
+普通多页生产只需要下面六个高层工具：
+
 | 工具 | 用途 |
 |---|---|
-| `plan_deck` | 固定分页正文 → 不可变逐页计划、模板证据和图片提示词 |
-| `generate_deck` | 外部资产注入 → 逐页生成、QA、修复和跨页一致性检查 |
-| `get_deck` | 按 UUID 读取脱敏计划、manifest 或闭集文本产物 |
-| `inspect_template` | 只读分析内联 HTML 的通用布局与设计知识 |
-| `create_template_from_reference` | 从 HTML、截图或蓝图编译并 QA 模板知识 |
-| `list_template_knowledge` | 列出已批准模板知识及 QA 证据 |
+| `plan_deck` | 编号正文 → 不可变页面计划、模板证据和图片提示词 |
+| `generate_deck` | 外部素材 → 页面生成、逐页 QA 和整套一致性检查 |
+| `get_deck` | 按 UUID 读取计划、manifest 和白名单产物 |
+| `inspect_template` | 只读分析参考 HTML 的通用布局知识 |
+| `create_template_from_reference` | 从 HTML、截图或 blueprint 编译并 QA 模板知识 |
+| `list_template_knowledge` | 查看已批准的模板知识和 QA 证据 |
 
-`plan_slide`、`generate_slide`、`get_run`、`get_artifact`、`evaluate_slide` 及原子模板工具继续保留，用于兼容、调试或自定义编排。稳定的多页交付优先使用 deck workflow。
+`plan_slide`、`generate_slide`、`get_run`、`generate_image` 和原子模板工具用于兼容、诊断或受控开发。部分高级工具可接收物理路径、远程地址、输出目录或调用方 provider 配置，属于 trusted-local surface，不应直接开放给不可信 Agent。完整边界见[安全设计](docs/architecture.md#11-安全设计)。
 
-Server 当前注册 20 个工具。完整分组、调用边界及适用场景见[架构文档的 MCP 工具面](docs/architecture.md#mcp-工具面)。
+## 模板知识 workflow
 
-这 20 个工具不是同一种信任面：
+模板学习提取的是网格、层级、色板、间距、组件和视觉比例，不复制参考页正文、Logo、水印、品牌或整页截图。
 
-- 推荐的 high-level surface 是 `plan_deck`、`generate_deck`、`get_deck`、`inspect_template`、`create_template_from_reference` 和 `list_template_knowledge`。这些 strict contract 不接收调用方 key、base URL、物理路径或远程 URL；provider secret 来自 Server 环境，持久化和读取受 store root、闭集 artifact 与大小限制约束。
-- `plan_slide` 等单页兼容工具和原子模板工具是 trusted-local surface。部分 schema 会接收物理路径、`apiKey`、`baseUrl`、`outputPath` 或 `outputDir`；`generate_image` 可按调用参数发起网络请求并写入调用方指定目录。这些工具继承宿主进程的网络和文件权限，其下载与输出不享受上述 high-level host allowlist 或 store-root containment 保证，不得直接暴露给不可信 Agent。部署时应在 MCP client/gateway 侧只放行所需的高层工具，或把 trusted-local surface 隔离到受控主机与受控调用方。
+1. 对内联 HTML 先调用 `inspect_template`。
+2. 调用 `create_template_from_reference`，每次只传 HTML、受限图片 data URL 或合规 blueprint 中的一种。
+3. 截图在没有视觉分析器时会返回 `needs_analysis`；Agent 按提示生成通用 blueprint 后再次提交。
+4. 只有通过模板目录校验和真实 Chromium QA 的结果才成为 `approved` 知识。
+5. 使用 `list_template_knowledge` 查看记录；经人工晋升并重启 Server 后，才参与生产模板选择。
 
-## 状态与产物
-
-- `needs_assets`：仍缺少计划中指定的一个或多个图片，可继续同一请求。
-- `running`：正在逐页生成。
-- `partial`：存在失败页或跨页一致性问题，不可正式交付。
-- `delivered`：所有页面达到阈值、硬门禁和跨页一致性要求。
-- `failed`：没有形成可继续的安全结果。
-
-默认运行目录为 `output/runs`：
-
-```text
-<runId>/
-├── final.html
-├── final.png
-├── quality.json
-├── manifest.json
-├── assets/
-├── attempts/
-└── stages/
-decks/
-├── plans/<deckPlanId>/plan.json
-└── runs/<deckRunId>/
-    ├── manifest.json
-    └── consistency.json
-template-knowledge/
-└── ...
-```
+完整步骤见[从优秀页面沉淀模板知识](docs/user-guide.md#8-从优秀页面沉淀模板知识)。
 
 ## 配置
 
-复制 `.env.example` 并按需设置。所有 provider 都是可选的：
+复制 `.env.example` 并按需设置。高层 deck workflow 在没有任何 Provider 时也能完成确定性规划、HTML 生成和 Chromium QA。
 
-- `PPT_LLM_BASE_URL / API_KEY / MODEL`：OpenAI-compatible 文本规划。
-- `PPT_IMAGE_BASE_URL / API_KEY / MODEL`：兼容低层图片工具；远程 URL 还需 `PPT_IMAGE_ALLOWED_HOSTS`。
-- `PPT_REVIEW_BASE_URL / API_KEY / MODEL`：可选多模态复核。
-- `PPT_OUTPUT_ROOT`：运行目录，默认 `output/runs`。
-- `PPT_MAX_CONCURRENCY`、`PPT_REQUEST_TIMEOUT_MS`、`PPT_MAX_IMAGE_BYTES` 等：资源限制。
+- `PPT_LLM_BASE_URL / API_KEY / MODEL`：可选 OpenAI-compatible 文本模型，主要服务低层规划路径；
+- `PPT_IMAGE_BASE_URL / API_KEY / MODEL`：可选低层图片工具；
+- `PPT_REVIEW_BASE_URL / API_KEY / MODEL`：可选多模态复核；
+- `PPT_OUTPUT_ROOT`：运行目录，默认 `output/runs`；
+- `PPT_MAX_CONCURRENCY`、`PPT_REQUEST_TIMEOUT_MS`、`PPT_MAX_IMAGE_BYTES`：资源限制。
 
-没有 reviewer 时，Chromium 硬门禁与确定性评分仍然生效。推荐 high-level surface 的 provider 密钥只从环境变量读取，不进入工具参数、HTML 或 manifest；这项承诺不扩展到可显式接收 `imageConfig.apiKey/baseUrl` 的 trusted-local 兼容/原子调用。
+推荐高层工具不接受调用方 API Key，Provider 密钥只从 Server 环境读取。若选中的模板需要图片而 Agent 又无法生成，流程会停在 `needs_assets`，不会伪造图片或静默换模板。
 
-其中 `PPT_LLM_*` 主要服务旧的单页/低层规划路径，`PPT_IMAGE_*` 服务低层图片工具和修复能力，`PPT_REVIEW_*` 提供可选视觉复核。推荐的 `plan_deck → generate_deck` 高层路径不接收调用方 API Key，也不会在规划阶段隐式生成图片；trusted-local 工具若选择调用方自带 provider 配置，则由受信调用方承担该配置与宿主权限边界。
+## 项目结构
 
-## 模板维护
+```text
+.
+├── src/                          # MCP 工具、workflow、模板编译、渲染和 QA
+├── templates/
+│   └── green-infographic/        # A4 横向模板、能力档案、样式与图标
+├── docs/
+│   ├── user-guide.md             # 非技术用户完整操作指南
+│   ├── architecture.md           # 生产架构、数据流和扩展边界
+│   └── superpowers/              # 设计、实施计划与验证记录
+├── .mcp.json                     # MCP stdio 配置
+├── .env.example                  # 可选 Provider 与运行限制
+├── package.json
+└── tsconfig.json
+```
 
-内置模板位于 `templates/green-infographic/`，使用同目录 `template-profiles.json` 描述能力。新增或晋升模板必须：
+`dist/`、`output/` 和 `node_modules/` 都是可再生成目录，不属于源码交付。
 
-1. 提供唯一 slug 和自包含 A4 横向 HTML。
-2. 只使用 Server 支持的占位标签与本地安全资源。
-3. 为容量、语义角色、图片槽位、密度和文档类型提供严格 profile。
-4. 通过 `npm run check`，并在真实 Chromium 中完成渲染和质量门禁。
+## 开发与验证
 
-模板族的具体清单和维护约束见 `templates/green-infographic/README.md`。
+```bash
+npm test
+npm run check
+```
 
-## 整套模板多样性选择
-
-`plan_deck.templateDiversity` 控制整套页面的模板序列：
-
-- `off`：保持每页局部质量赢家，不做 deck-scope 多样性调整；
-- `conservative`：只打破非常接近的平局，不接受事实保留字符损失；
-- `balanced`：新计划的默认值，在批准的窄质量带内兼顾局部质量和版式节奏；
-- `expressive`：允许更宽但仍有上限的近最佳质量带，适合更强调视觉变化的场景。
-
-事实覆盖、critical anchors、槽位容量、最小字号、页面元数据、图片基数和文档策略始终是先决硬门禁；多样性模式不能让失败候选参与选择。显式传入 `templateSlug` 时，调用方覆盖选择策略，整套计划的有效多样性模式固定为 `off`。
-
-选择器是确定性的有界组合优化，不是强化学习：它没有训练、探索、环境反馈或在线更新。相同正文、页序、模板 catalog 和输入参数会产生相同模板序列；复用同一 `requestId` 恢复不可变计划时，deck ID 与 fingerprint 保持一致。若某页只有一个完整成功候选，结果可以合法重复同一版式。
-
-被选中的模板可能带图片槽。此时 `plan_deck` 会只返回所选 slides 的额外 `assets`，调用方必须按稳定资产 ID 生成并在 `generate_deck.externalAssets` 中提供；未被选候选的资产不会泄漏到结果中。设计和实施边界见：
-
-- [整套模板多样性设计](docs/superpowers/specs/2026-07-30-deck-template-diversity-design.md)
-- [整套模板多样性实施计划](docs/superpowers/plans/2026-07-30-deck-template-diversity.md)
+开发时可运行 `npm run dev`。新增或晋升模板必须提供唯一 slug、自包含 A4 横向 HTML 和严格能力 profile，并通过目录校验、自动测试、生产构建和真实 Chromium QA。
 
 ## License
 

@@ -12,7 +12,7 @@
 
 ### 路径 A：已有支持 MCP 的 Agent
 
-如果 Agent 已经连接 `ppt-generator`，准备好编号正文，复制下面的提示词即可：
+如果 Agent 已经连接 `ppt-generator`，准备好编号正文，复制下面的提示词即可。更省心的方式是直接让 Agent 调用 `generate-bid-deck` 技能（在支持技能的项目内运行 `/generate-bid-deck`，或要求 Agent 遵循[技能说明](.claude/skills/generate-bid-deck/SKILL.md)）；完全没有图片 API 时，可用[一键脚本](scripts/run-bid-deck.mjs)自动生成带主题占位图的完整交付件：
 
 ```text
 请使用 ppt-generator MCP，把下面的编号正文生成正式标书风格的 HTML 展示页。

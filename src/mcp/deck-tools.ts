@@ -205,6 +205,19 @@ const getHtmlOutputSchema = z.object({
   data: z.string(),
 }).strict();
 
+// Large self-contained HTML (embedded base64 images) exceeds the public text
+// interface limit by design. Local agents read it directly from the run directory;
+// this variant returns the run-relative path without exposing the filesystem layout.
+const getHtmlUnavailableOutputSchema = z.object({
+  kind: z.literal("html_unavailable"),
+  id: z.string().uuid(),
+  view: z.literal("artifact"),
+  artifact: z.literal("final.html"),
+  size: z.number().int().nonnegative(),
+  reason: z.literal("too_large"),
+  availableAt: z.string().regex(/^[0-9a-f-]{36}\/final\.html$/),
+}).strict();
+
 const getQualityOutputSchema = z.object({
   kind: z.literal("quality"),
   id: z.string().uuid(),
@@ -228,6 +241,7 @@ export const getDeckVariantSchema = z.discriminatedUnion("kind", [
   getManifestOutputSchema,
   getPageManifestOutputSchema,
   getHtmlOutputSchema,
+  getHtmlUnavailableOutputSchema,
   getQualityOutputSchema,
   getConsistencyOutputSchema,
 ]);

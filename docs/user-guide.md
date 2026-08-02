@@ -201,7 +201,7 @@ Agent 调用 `plan_deck`。典型参数如下：
 1. 只生成返回结果中的资产 ID，不自行增加或改名；
 2. 图片内容必须符合对应 prompt 的业务语义，不能用无关装饰图代替。
 
-没有文生图 API 也可以工作：让 Agent 使用当前可用的图片生成能力，生成 PNG、JPEG、WebP 或 SVG，再转换为 base64 image data URL。MCP 本身不会在规划阶段自动调用图片服务，也不会接收调用方 API Key。
+没有文生图 API 也可以工作：让 Agent 使用当前可用的图片生成能力，生成 PNG、JPEG 或 WebP，再转换为 base64 image data URL（不接受 SVG，其内部脚本对校验层不透明）。MCP 本身不会在规划阶段自动调用图片服务，也不会接收调用方 API Key。
 
 如果当前 Agent 完全没有图片能力，应停在这里并报告缺少哪些资产，不要伪造 data URL 或换用不匹配的模板。
 
@@ -357,7 +357,7 @@ Agent 使用计划 ID 和素材调用 `generate_deck`：
 
 - 按 `missingAssetIds` 逐一核对；
 - 资产 ID 必须与计划完全相同；
-- `dataUrl` 必须是真实 base64 图片，支持 PNG、JPEG、WebP 或 SVG；
+- `dataUrl` 必须是真实 base64 图片，支持 PNG、JPEG 或 WebP；
 - 复用原来的生成 `requestId`，不要另建计划。
 
 ### 有 HTML，但状态是 `partial` 或页面是 `best_effort`

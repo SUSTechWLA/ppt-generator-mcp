@@ -152,11 +152,112 @@ export async function renderPage(input: {
         const dark = Math.min(luminance(foreground), luminance(background));
         return (light + 0.05) / (dark + 0.05);
       };
+      const splitTopLevel = (value: string): string[] => {
+        const parts: string[] = [];
+        let depth = 0;
+        let current = "";
+        for (const char of value) {
+          if (char === "(") depth += 1;
+          if (char === ")") depth = Math.max(0, depth - 1);
+          if (char === "," && depth === 0) {
+            parts.push(current);
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        parts.push(current);
+        return parts.map((part) => part.trim()).filter(Boolean);
+      };
+      const parseGradientColor = (token: string): number[] | null => {
+        const match = token.match(/rgba?\(\s*([\d.]+)[,\s/]+([\d.]+)[,\s/]+([\d.]+)(?:[,\s/]+([\d.]+))?\s*\)/i);
+        if (!match) return null;
+        return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] === undefined ? 1 : Number(match[4])];
+      };
+      const lerpColor = (left: number[], right: number[], t: number): number[] => [
+        Math.round(left[0] + (right[0] - left[0]) * t),
+        Math.round(left[1] + (right[1] - left[1]) * t),
+        Math.round(left[2] + (right[2] - left[2]) * t),
+      ];
+      // Sample the actual color under a text element for linear-gradient
+      // backgrounds so the WCAG contrast check runs instead of being skipped.
+      // The sample point is the text's visual rect (not the element's box center),
+      // so left/right-aligned labels sample the region they actually sit on.
+      const sampleLinearGradient = (gradientEl: Element, targetRect: { x: number; y: number; width: number; height: number }, backgroundImage: string): number[] | null => {
+        const outer = backgroundImage.match(/^linear-gradient\(\s*([^,]+)\s*,(.*)\)\s*$/i);
+        if (!outer) return null;
+        const angleToken = outer[1].trim();
+        let angleDeg: number | null = null;
+        const deg = angleToken.match(/^([-\d.]+)deg$/i);
+        if (deg) {
+          angleDeg = (Number.parseFloat(deg[1]) % 360 + 360) % 360;
+        } else {
+          const directions: Record<string, number> = {
+            "to right": 90, "to left": 270, "to bottom": 180, "to top": 0,
+            "to bottom right": 135, "to bottom left": 225, "to top right": 45, "to top left": 315,
+          };
+          angleDeg = directions[angleToken] ?? null;
+        }
+        if (angleDeg === null) return null;
+        const stopTokens = splitTopLevel(outer[2]);
+        const stops: Array<{ color: number[]; position: number }> = [];
+        for (const token of stopTokens) {
+          const positionMatch = token.match(/\s*(-?[\d.]+)%\s*$/);
+          const colorPart = positionMatch ? token.slice(0, positionMatch.index ?? 0).trim() : token;
+          const color = parseGradientColor(colorPart);
+          if (!color) return null;
+          stops.push({ color, position: positionMatch ? Number.parseFloat(positionMatch[1]) / 100 : -1 });
+        }
+        if (stops.length < 2) return null;
+        const defined: number[] = [];
+        for (let index = 0; index < stops.length; index += 1) if (stops[index].position >= 0) defined.push(index);
+        if (defined.length > 0) {
+          for (let index = 0; index < defined[0]; index += 1) stops[index].position = 0;
+          for (let index = defined[defined.length - 1] + 1; index < stops.length; index += 1) stops[index].position = 1;
+          for (let slot = 0; slot < defined.length - 1; slot += 1) {
+            const leftIndex = defined[slot];
+            const rightIndex = defined[slot + 1];
+            const leftPosition = stops[leftIndex].position;
+            const rightPosition = stops[rightIndex].position;
+            for (let index = leftIndex + 1; index < rightIndex; index += 1) {
+              stops[index].position = leftPosition + (rightPosition - leftPosition) * ((index - leftIndex) / (rightIndex - leftIndex));
+            }
+          }
+        } else {
+          stops.forEach((stop, index) => { stop.position = stops.length === 1 ? 0 : index / (stops.length - 1); });
+        }
+        const rect = gradientEl.getBoundingClientRect();
+        const cx = targetRect.x + targetRect.width / 2;
+        const cy = targetRect.y + targetRect.height / 2;
+        const boxCx = rect.left + rect.width / 2;
+        const boxCy = rect.top + rect.height / 2;
+        const rad = angleDeg * Math.PI / 180;
+        const ux = Math.sin(rad);
+        const uy = -Math.cos(rad);
+        const halfLength = (Math.abs(rect.width * ux) + Math.abs(rect.height * uy)) / 2;
+        if (halfLength <= 0) return null;
+        const projected = ((cx - boxCx) * ux + (cy - boxCy) * uy) / halfLength;
+        const position = Math.max(0, Math.min(1, (projected + 1) / 2));
+        let segment = 0;
+        for (let index = 0; index < stops.length - 1; index += 1) {
+          if (position >= stops[index].position && position <= stops[index + 1].position) {
+            segment = index;
+            break;
+          }
+        }
+        const span = stops[segment + 1].position - stops[segment].position || 1;
+        const ratio = Math.max(0, Math.min(1, (position - stops[segment].position) / span));
+        return lerpColor(stops[segment].color, stops[segment + 1].color, ratio);
+      };
       const effectiveBackground = (element: Element): { color: number[]; measurable: boolean } => {
         let current: Element | null = element;
         while (current) {
           const style = getComputedStyle(current);
-          if (style.backgroundImage !== "none") return { color: [255, 255, 255], measurable: false };
+          if (style.backgroundImage !== "none") {
+            const sampled = sampleLinearGradient(current, visualRect(element as HTMLElement), style.backgroundImage);
+            if (sampled) return { color: sampled, measurable: true };
+            return { color: [255, 255, 255], measurable: false };
+          }
           const color = parseColor(style.backgroundColor);
           if (color && color[3] > 0.95) return { color, measurable: true };
           current = current.parentElement;

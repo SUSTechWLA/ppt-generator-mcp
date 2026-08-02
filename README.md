@@ -99,11 +99,11 @@ flowchart LR
 ```
 
 1. `plan_deck` 固化正文事实、页面内容、模板选择和图片提示词，返回 `deckPlanId`。
-2. 若返回 `assets`，调用方只按原 ID 和 prompt 生成图片，并转换为 PNG、JPEG、WebP 或 SVG data URL。
+2. 若返回 `assets`，调用方只按原 ID 和 prompt 生成图片，并转换为 PNG、JPEG 或 WebP data URL（不接受 SVG：其内部脚本对校验层不透明）。
 3. `generate_deck` 按不可变计划注入素材、生成页面，并独立执行 Chromium QA。
 4. 返回 `needs_assets` 时补齐 `missingAssetIds`，复用同一个生成 `requestId` 继续。
 5. 只有整套 `status=delivered` 且每页均为 `delivered` 才能正式交付。
-6. `get_deck` 按返回的 UUID 读取每页 `final.html`、`quality.json` 和整套 `consistency.json`。
+6. `get_deck` 按返回的 UUID 读取每页 `final.html`、`quality.json` 和整套 `consistency.json`。含内嵌图片的 `final.html` 通常超过公共文本上限，`get_deck` 会返回 `html_unavailable` 并给出相对运行根目录的路径（如 `<runId>/final.html`），本地 Agent 直接按该路径读取即可。
 
 规划示例：
 

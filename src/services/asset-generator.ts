@@ -49,13 +49,13 @@ function validateMagic(bytes: Buffer, mimeType: GeneratedAsset["mimeType"]): voi
       ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9
       : mimeType === "image/webp"
         ? bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP"
-        : bytes.subarray(0, 256).toString("utf8").includes("<svg");
+        : false;
   if (!valid) throw new Error(`Image bytes do not match ${mimeType}`);
 }
 
 export function parseExternalAssetDataUrl(dataUrl: string): { bytes: Buffer; mimeType: GeneratedAsset["mimeType"] } {
-  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp|svg\+xml));base64,([A-Za-z0-9+/=\s]+)$/);
-  if (!match) throw new Error("External asset must be a supported Base64 image data URL");
+  const match = dataUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!match) throw new Error("External asset must be a supported raster Base64 image data URL (PNG, JPEG, or WebP)");
   const mimeType = match[1] as GeneratedAsset["mimeType"];
   const bytes = Buffer.from(match[2].replace(/\s/g, ""), "base64");
   validateMagic(bytes, mimeType);

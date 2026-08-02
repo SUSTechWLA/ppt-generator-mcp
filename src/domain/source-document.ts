@@ -16,7 +16,10 @@ export const qualitySettingsSchema = z.object({
 
 export const externalAssetInputSchema = z.object({
   id: z.string().regex(/^(?:p\d+-)?(?:img|icon)-\d{3}$/),
-  dataUrl: z.string().min(32).max(20_000_000).regex(/^data:image\/(?:png|jpeg|webp|svg\+xml);base64,/),
+  // Only raster formats are accepted on the high-level surface. SVG data URLs are
+  // excluded because their internal markup (scripts, foreignObject, event handlers)
+  // is opaque to every validation layer and can re-execute in downstream processors.
+  dataUrl: z.string().min(32).max(20_000_000).regex(/^data:image\/(?:png|jpeg|webp);base64,/),
 }).strict();
 
 export const generateSlideInputSchema = z.object({

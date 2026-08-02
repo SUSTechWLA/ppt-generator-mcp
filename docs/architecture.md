@@ -162,7 +162,7 @@ HTML 只描述“怎么画”，profile 描述“能否诚实地画”。`templa
 调用方可以使用任意图像能力生成图片，但必须：
 
 1. 保留 Server 返回的资产 ID；
-2. 转换为允许的 PNG、JPEG、WebP 或 SVG data URL；
+2. 转换为允许的 PNG、JPEG 或 WebP data URL（SVG 不接受，内部脚本对校验层不透明）；
 3. 通过 `externalAssets` 交给 `generate_deck`；
 4. 不添加计划之外的资产，也不把远程 URL 当成交付图片。
 
@@ -282,7 +282,7 @@ Server 当前注册 20 个工具，分为四层。
 - provider 密钥只从 Server 环境变量读取，并以不可枚举属性保存在 Server 内部；
 - 输入只包含有界正文、受限 data URL、蓝图和逻辑 ID；
 - deck 与 template-knowledge store 对路径做根目录包含、realpath 和符号链接检查；
-- 可读取产物使用固定 artifact 白名单和大小上限，大型 HTML 不通过公共文本接口回传；
+- 可读取产物使用固定 artifact 白名单和大小上限，大型 HTML 不通过公共文本接口回传；超过上限的 `final.html` 由 `get_deck` 返回 `html_unavailable`，附带相对运行根目录的路径供本地 Agent 直接读取；
 - 图片大小、数量、输入字符数、并发数和请求时长有显式上限；
 - 高层错误与诊断经过结构化和脱敏，未知异常不把原始依赖消息、堆栈或物理路径返回调用方。
 

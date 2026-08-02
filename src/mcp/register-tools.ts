@@ -221,7 +221,19 @@ export function createPptMcpServer(dependencies: PptMcpDependencies): McpServer 
     const artifact = artifactName === "consistency.json"
       ? await deckStore.getArtifact(input.id, artifactName)
       : await dependencies.runStore.getArtifact(input.id, artifactName);
-    if (artifact.text === undefined) throw new Error(`Text artifact unavailable: ${artifactName}`);
+    if (artifact.text === undefined) {
+      if (artifactName === "final.html") {
+        const availableAt = `${input.id}/final.html`;
+        const output = getDeckOutputSchema.parse({
+          result: { kind: "html_unavailable", id: input.id, view: input.view, artifact: artifactName, size: artifact.size, reason: "too_large", availableAt },
+        });
+        return toToolResult(
+          output,
+          `final.html is ${artifact.size} bytes and exceeds the public text limit; a local agent should read it from '${availableAt}' relative to the configured output root.`,
+        );
+      }
+      throw new Error(`Text artifact unavailable: ${artifactName}`);
+    }
     const result = artifactName === "final.html"
       ? { kind: "html", id: input.id, view: input.view, artifact: artifactName, size: artifact.size, data: sanitizeHtmlText(artifact.text) }
       : artifactName === "manifest.json"

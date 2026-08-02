@@ -29,7 +29,7 @@
         "priority": 10,
         "required": true,
         "itemCapacity": 5,
-        "maxCharsPerItem": 150,
+        "maxCharsPerItem": 160,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
@@ -74,7 +74,7 @@
     "supportedBlocks": ["text", "image", "table", "process", "metric"],
     "imageSlots": { "placeholderTag": "figures", "placeholderCount": 1, "minAssets": 0, "maxAssets": 1, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["medium", "high"],
-    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 60, "summary-text": 120, "image-caption": 30, "figure-ref": 30, "component-title": 30, "paragraph": 150, "step-label": 8, "stage-label": 8, "stage-number": 4, "item-label": 8, "node-label": 8 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 60, "summary-text": 120, "image-caption": 30, "figure-ref": 30, "component-title": 30, "paragraph": 160, "step-label": 8, "stage-label": 8, "stage-number": 4, "item-label": 8, "node-label": 8 },
     "maxRasterAreaRatio": 0.18,
     "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
@@ -112,7 +112,7 @@
         "priority": 10,
         "required": true,
         "itemCapacity": 4,
-        "maxCharsPerItem": 145,
+        "maxCharsPerItem": 160,
         "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "evidence", "visual"],
         "bindings": { "title": "component-title", "body": "paragraph" },
         "factBearingBinding": "body",
@@ -135,9 +135,9 @@
     "assetPromptBindings": { "figureRef": "figure-ref" },
     "blockCapacity": 4,
     "supportedBlocks": ["text", "image", "process", "metric"],
-    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 4, "minAssets": 4, "maxAssets": 4, "unusedPolicy": "remove-container", "containerSelector": "figure" },
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 4, "minAssets": 1, "maxAssets": 4, "unusedPolicy": "remove-container", "containerSelector": "figure" },
     "densityRange": ["low", "high"],
-    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 60, "summary-text": 110, "image-caption": 30, "figure-ref": 30, "component-title": 30, "paragraph": 145 },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 60, "summary-text": 110, "image-caption": 30, "figure-ref": 30, "component-title": 30, "paragraph": 160 },
     "maxRasterAreaRatio": 0.45,
     "minimumBodyFontPt": 8.5,
     "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
@@ -443,5 +443,57 @@
     "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
     "format": "a4-landscape",
     "status": "approved"
+  },
+  {
+    "slug": "green-infographic-bid-a4-landscape-dense",
+    "version": "1.0.0",
+    "themeId": "green-infographic-v1",
+    "pageIntents": ["detail", "process", "comparison", "evidence"],
+    "supportedBlocks": ["text", "image", "table", "process", "metric"],
+    "supportedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+    "blockCapacity": 6,
+    "densityRange": ["high", "high"],
+    "semanticSlots": [
+      {
+        "id": "main-content",
+        "priority": 10,
+        "required": true,
+        "itemCapacity": 6,
+        "maxCharsPerItem": 165,
+        "acceptedRoles": ["headline", "conclusion", "fact", "metric", "process", "comparison", "evidence", "visual"],
+        "bindings": { "title": "component-title", "body": "paragraph" },
+        "factBearingBinding": "body",
+        "factBearingValueIndex": 0,
+        "bindingExpansion": { "title": 1, "body": 1 }
+      }
+    ],
+    "pageBindings": { "pageTitle": "page-title", "pageNumber": "page-number", "sectionTitle": "section-title", "partNumber": "part-number", "partLabel": "part-label", "chapterLabel": "chapter-label", "topicTitle": "topic-title", "subsectionTitle": "subsection-title", "summaryText": "summary-text" },
+    "imageSlots": { "placeholderTag": "figures", "placeholderCount": 0, "minAssets": 0, "maxAssets": 0, "unusedPolicy": "remove-placeholder" },
+    "maxCharsBySlot": { "page-title": 40, "page-number": 4, "section-title": 60, "part-number": 20, "part-label": 30, "chapter-label": 80, "topic-title": 40, "subsection-title": 60, "summary-text": 110, "component-title": 30, "paragraph": 165 },
+    "overlapExemptions": [],
+    "maxRasterAreaRatio": 0,
+    "minimumBodyFontPt": 8.5,
+    "requiredLandmarks": ["page-header", "chapter-band", "subsection-title", "summary-band", "page-footer"],
+    "documentCompatibility": { "bid": true, "proposal": true, "presentation": true },
+    "format": "a4-landscape",
+    "status": "approved",
+    "designContract": {
+      "version": 1,
+      "tokens": {
+        "fontFamilies": ["\"Source Han Sans SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\", \"PingFang SC\", Arial, sans-serif"],
+        "textColors": ["rgb(23, 26, 24)", "rgb(16, 23, 19)"],
+        "backgroundColors": ["rgb(255, 255, 255)"],
+        "fontScaleRange": [0.86, 1],
+        "spacingScaleRange": [0.88, 1],
+        "contrastModes": ["normal", "high"]
+      },
+      "landmarkRanges": {
+        "page-header": { "xRatio": [0, 0.02], "yRatio": [0, 0.02], "widthRatio": [0.95, 1], "heightRatio": [0.05, 0.09] },
+        "chapter-band": { "xRatio": [0, 0.03], "yRatio": [0.05, 0.1], "widthRatio": [0.94, 1], "heightRatio": [0.04, 0.08] },
+        "subsection-title": { "xRatio": [0, 0.02], "yRatio": [0.1, 0.17], "widthRatio": [0.95, 1], "heightRatio": [0.025, 0.07] },
+        "summary-band": { "xRatio": [0, 0.05], "yRatio": [0.55, 0.96], "widthRatio": [0.9, 1], "heightRatio": [0.04, 0.45] },
+        "page-footer": { "xRatio": [0, 0.02], "yRatio": [0.94, 0.99], "widthRatio": [0.95, 1], "heightRatio": [0.025, 0.06] }
+      }
+    }
   }
 ]

@@ -9,6 +9,7 @@
 ```text
 green-infographic/
 ├── green-infographic-bid-a4-landscape.html
+├── green-infographic-bid-a4-landscape-dense.html
 ├── green-infographic-bid-a4-landscape-text-image.html
 ├── green-infographic-bid-a4-landscape-visual.html
 ├── green-infographic-bid-a4-landscape-table-text.html
@@ -32,7 +33,8 @@ green-infographic/
 | slug | 主要用途 | 图片需求 | 兼容文档 |
 |---|---|---:|---|
 | `green-infographic-bid-a4-landscape` | 通用详情、流程、对比、证据 | 0–1 | 标书、方案、展示 |
-| `green-infographic-bid-a4-landscape-text-image` | 四组图文并列展示 | 4 | 展示 |
+| `green-infographic-bid-a4-landscape-dense` | 高密度双栏文字（6 卡，约 900+ 字/页） | 0 | 标书、方案、展示 |
+| `green-infographic-bid-a4-landscape-text-image` | 四组图文并列展示 | 1–4 | 展示 |
 | `green-infographic-bid-a4-landscape-visual` | 单一主视觉与精简要点 | 1 | 展示 |
 | `green-infographic-bid-a4-landscape-table-text` | 表格与文字解释 | 0 | 标书、方案、展示 |
 | `green-infographic-bid-a4-landscape-table-image` | 表格、图片与说明 | 1 | 标书、方案、展示 |

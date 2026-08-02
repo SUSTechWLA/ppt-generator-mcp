@@ -178,8 +178,13 @@ export function projectGroundedVisualIntents(input: {
   maxAssets: number;
 }): PageVisualIntent[] {
   if (input.maxAssets < 1) return [];
-  const explanatory = input.groups.find((group) => group.role === "process" && group.sourceFactIds.length >= 3)
-    ?? input.groups.find((group) => group.role === "comparison" && group.sourceFactIds.length >= 3);
+  // A supporting image is justified for any substantial group (process/comparison
+  // with two facts, a metric-heavy group, or any dense page with four facts), so
+  // text-heavy bid pages still get 配图 and image-capable templates stay usable.
+  const explanatory = input.groups.find((group) =>
+    (group.role === "process" || group.role === "comparison") && group.sourceFactIds.length >= 2)
+    ?? input.groups.find((group) => group.role === "metric" && group.sourceFactIds.length >= 2)
+    ?? (input.sourceFacts.length >= 4 ? input.groups[0] : undefined);
   if (!explanatory) return [];
   const factsById = new Map(input.sourceFacts.map((fact) => [fact.id, fact]));
   const promptSource = explanatory.sourceFactIds

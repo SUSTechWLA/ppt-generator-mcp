@@ -1,0 +1,106 @@
+<!--
+  =============================================================================
+  @name        绿色信息图型标书页·密集文字版（A4横向）
+  @slug        green-infographic-bid-a4-landscape-dense
+  @description
+               适用于标书技术方案、项目建议书等需要高信息密度的文字页。
+               A4 横向单页，绿色商务配色，12 列网格系统。
+               核心布局：双栏 6 张正文卡片（span-6 × 6）铺满主体区域，
+               无侧边可视化组件，最大化每页文字承载量（约 900-1000 字/页），
+               适合大段论述、条款说明、特征分析等密集正文，与带配图的
+               green-infographic-bid-a4-landscape 版式形成节奏对比。
+  @usecase     标书技术方案 | 项目建议书 | 方案汇报 | 服务方案展示 | 商务提案
+  @format      A4横向 297×210mm 单页
+  @layout      12列网格 grid-template-columns: repeat(12, 1fr)
+               正文卡片 span-6 × 6（每行 2 张，共 3 行）+ summary-band span-12
+  @components  text-card 正文卡片 | summary-band 总结条
+  @style       绿色商务主题（--green-900 #0B5A2A）| 圆角卡片 border-radius 2.5mm
+               渐变章节条 | 白色背景 #fff
+  @lang        zh-CN
+  @since       2026-08-02
+  =============================================================================
+-->
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="template-name" content="绿色信息图型标书页·密集文字版（A4横向）">
+  <meta name="template-slug" content="green-infographic-bid-a4-landscape-dense">
+  <meta name="template-description" content="适用于标书技术方案、项目建议书等需要高信息密度的文字页。A4横向单页，绿色商务主题，12列网格，双栏6张正文卡片密集排版。">
+  <meta name="template-usecase" content="标书技术方案, 项目建议书, 方案汇报, 服务方案展示, 商务提案">
+  <meta name="template-format" content="A4横向 297×210mm">
+  <title><page-title>第N页｜页面主题标题</page-title></title>
+  <link rel="stylesheet" href="./green-infographic-theme.css">
+</head>
+<body>
+  <article class="bid-page" data-page-number="N" data-template="green-infographic-dense">
+    <header class="page-header">
+      <h1 class="section-title"><section-title>第一分节：分节名称</section-title></h1>
+      <div class="part-block">
+        <div class="part-number"><part-number>PART.N</part-number></div>
+        <div class="part-label"><part-label>部分标签</part-label></div>
+        <div class="part-swatches" aria-hidden="true">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+      </div>
+    </header>
+
+    <div class="chapter-band">
+      <div class="chapter-label"><chapter-label>X.X 章节名称</chapter-label></div>
+      <h2 class="topic-title"><topic-title>页面主题标题</topic-title></h2>
+    </div>
+
+    <h3 class="subsection-title"><subsection-title>X.X.X 子章节标题</subsection-title></h3>
+
+    <main class="body-grid layout-rows-4">
+      <!-- Row 1: text-card(span-6) + text-card(span-6) -->
+      <section class="component text-card span-6" data-component="text-card" data-semantic-slot="main-content">
+        <h4 class="component-title"><component-title>卡片标题一</component-title></h4>
+        <p data-source-paragraph="1"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component text-card span-6" data-component="text-card" data-semantic-slot="main-content">
+        <h4 class="component-title"><component-title>卡片标题二</component-title></h4>
+        <p data-source-paragraph="2"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <!-- Row 2: text-card(span-6) + text-card(span-6) -->
+      <section class="component text-card span-6" data-component="text-card" data-semantic-slot="main-content">
+        <h4 class="component-title"><component-title>卡片标题三</component-title></h4>
+        <p data-source-paragraph="3"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component text-card span-6" data-component="text-card" data-semantic-slot="main-content">
+        <h4 class="component-title"><component-title>卡片标题四</component-title></h4>
+        <p data-source-paragraph="4"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <!-- Row 3: text-card(span-6) + text-card(span-6) -->
+      <section class="component text-card span-6" data-component="text-card" data-semantic-slot="main-content">
+        <h4 class="component-title"><component-title>卡片标题五</component-title></h4>
+        <p data-source-paragraph="5"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <section class="component text-card span-6" data-component="text-card" data-semantic-slot="main-content">
+        <h4 class="component-title"><component-title>卡片标题六</component-title></h4>
+        <p data-source-paragraph="6"><paragraph>正文段落内容。段落长度应根据信息密度调整，通常 150-250 字为宜，保持语句通顺、逻辑清晰。</paragraph></p>
+      </section>
+
+      <!-- Row 4: summary-band(span-12) -->
+      <section class="component summary-band span-12" data-component="summary-band">
+        <p data-source-paragraph="7"><summary-text>总结段落。用 1-2 句话概括本页要点，确保信息精炼、结论明确。</summary-text></p>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span class="page-number"><page-number>N</page-number></span>
+    </footer>
+  </article>
+</body>
+</html>

@@ -23,6 +23,64 @@ export function groundedTitleForRole(role: SemanticRole): string {
   return GROUNDED_ROLE_TITLES[role];
 }
 
+// Strong topic suffixes used to derive a short, meaningful title/label from a
+// source fact. Longer compounds come first so "绿化面积" wins over bare "面积".
+const TOPIC_SUFFIXES = [
+  "总建筑面积", "建筑面积", "占地面积", "绿化面积", "服务范围", "作业清单", "养护标准", "操作规程",
+  "面积", "规模", "总量", "总额", "金额", "范围", "需求", "目标", "要求", "标准", "责任", "分工", "流程",
+  "计划", "清单", "方案", "机制", "体系", "制度", "组织", "安排", "任务", "项目", "阶段", "措施",
+  "人员", "设备", "物资", "记录", "资料", "质量", "安全", "响应", "保障", "单位", "区域", "内容", "事项",
+  "步骤", "程序", "条件", "情况", "状况", "效果", "结果", "指标", "配置", "类型", "环节", "节点",
+  "台账", "档案", "建档", "归档", "编号", "核查", "巡查", "复核", "交接", "调度", "统筹", "分类", "规程",
+  "作业", "检查", "方式", "能力", "状态", "特点", "差异", "重点", "关键", "依据", "要点", "成效",
+];
+
+const LEADING_FILLERS = /^(?:本次|本项目?|该项目?|本|该|此|各|其中|另外|同时|此外|对于|关于|结合|根据|依据|按照|按|以|为|为满足|在|对|围绕|针对|以下|如下|双方)+/u;
+
+/**
+ * Derive a short, source-grounded topic phrase from a fact's opening clause so
+ * that cards and auxiliary components show real content instead of generic
+ * role labels. Prefers the shortest phrase ending in a strong topic noun.
+ */
+export function deriveGroundedTitle(text: string): string | undefined {
+  const clause = (text.split(/[，,；;。！？!?]/u)[0] ?? text).trim();
+  const candidates: Array<{ length: number; index: number; text: string }> = [];
+  for (const suffix of TOPIC_SUFFIXES) {
+    let searchFrom = 0;
+    while (true) {
+      const matchIndex = clause.indexOf(suffix, searchFrom);
+      if (matchIndex < 0) break;
+      searchFrom = matchIndex + suffix.length;
+      let start = matchIndex;
+      while (start > 0 && /[\p{Script=Han}0-9]/u.test(clause[start - 1])) start -= 1;
+      let candidate = clause.slice(start, matchIndex + suffix.length)
+        .replace(LEADING_FILLERS, "")
+        .replace(/^[和与及、的之]+/u, "")
+        .replace(/[的之等类]$/u, "")
+        .trim();
+      // When a quantified count (e.g. "1家" / "8个") interrupts the topic phrase,
+      // cut everything up to it and keep the meaningful suffix (e.g. "入库服务单位").
+      const quantified = candidate.match(/[\d零一二三四五六七八九十百千万两]+[家个名项次台套处](?:年度|每日|每周|每月)?/u);
+      if (quantified && quantified.index !== undefined && Array.from(candidate).length - quantified.index >= 3) {
+        candidate = candidate.slice(quantified.index + quantified[0].length).replace(/^[和与及、的之]+/u, "").trim();
+      }
+      const length = Array.from(candidate).length;
+      if (length < 2) continue;
+      candidates.push({ length, index: start, text: candidate });
+    }
+  }
+  if (candidates.length === 0) return undefined;
+  const ordered = candidates.slice().sort((left, right) =>
+    left.length - right.length || left.index - right.index);
+  const preferred = ordered.find((candidate) => candidate.length >= 4) ?? ordered[0];
+  return preferred.text.slice(0, 12);
+}
+
+export function groundedTitleForGroup(facts: Array<Pick<SourceFact, "kind" | "text">>): string {
+  const derived = facts.length > 0 ? deriveGroundedTitle(facts[0].text) : undefined;
+  return derived ?? groundedTitleForRole(groundedRoleForFacts(facts));
+}
+
 function groundedRoleForFact(fact: Pick<SourceFact, "text" | "kind">): SemanticRole {
   if (COMPARISON_CUE.test(fact.text)) return "comparison";
   if (PROCESS_CUE.test(fact.text)) return "process";
@@ -70,6 +128,26 @@ export interface ProjectableDisplayGroup {
   title: string;
   body: string;
   sourceFactIds: string[];
+}
+
+const SUMMARY_FALLBACK = "本页内容按原文事实顺序组织呈现。";
+
+/**
+ * Derive a real, source-grounded summary statement for the page summary band
+ * instead of a boilerplate fallback. Uses the opening clause of the first
+ * display group, truncated at a comma boundary near 50 characters.
+ */
+export function derivePageConclusion(groups: ProjectableDisplayGroup[]): string {
+  const body = groups[0]?.body ?? "";
+  const sentence = (body.split(/[。！？]/u)[0] ?? body).trim();
+  let trimmed = sentence.replace(/[，,；;、]$/u, "").trim();
+  const length = Array.from(trimmed).length;
+  if (length > 50) {
+    const prefix = Array.from(trimmed).slice(0, 50).join("");
+    const cut = prefix.lastIndexOf("，");
+    trimmed = (cut >= 10 ? prefix.slice(0, cut) : prefix).trim();
+  }
+  return Array.from(trimmed).length >= 4 ? trimmed : SUMMARY_FALLBACK;
 }
 
 export function projectGroundedDensity(sourceFacts: Array<Pick<SourceFact, "text">>): BlueprintDensity {
@@ -143,7 +221,7 @@ export function projectSlideSpec(input: {
   }));
   return slideSpecSchema.parse({
     title: projectedSlideTitle(input.title),
-    conclusion: "本页内容按原文事实顺序组织呈现。",
+    conclusion: derivePageConclusion(input.groups),
     blocks,
     assets,
     sourceFactIds: input.sourceFactIds,

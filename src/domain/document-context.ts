@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 export const documentTypeSchema = z.enum(["bid", "proposal", "presentation"]);
 export const pageMetadataSchema = z.object({
   number: z.number().int().min(1).max(9999),
+  title: z.string().trim().min(1).max(40).optional(),
   sectionTitle: z.string().trim().min(1).max(60),
   partNumber: z.string().trim().min(1).max(20),
   partLabel: z.string().trim().min(1).max(30),

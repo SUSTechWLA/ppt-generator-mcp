@@ -43,6 +43,18 @@ function shortTitle(block: SlideBlock): string {
   return normalizeChinesePunctuation(block.title.trim());
 }
 
+// Auxiliary components (process steps, timeline stages, capability items, org
+// nodes) show the block's source-derived title instead of a generic role label.
+// The decorative slots are narrow (roughly 4-5 CJK characters before ellipsis),
+// so labels are capped conservatively.
+const AUXILIARY_LABEL_MAX_CHARS = 5;
+
+function auxiliaryLabel(block: SlideBlock): string {
+  const candidate = block.title?.trim() ?? "";
+  if (candidate.length >= 2) return Array.from(candidate).slice(0, AUXILIARY_LABEL_MAX_CHARS).join("");
+  return ROLE_LABELS[block.semanticRole ?? "fact"];
+}
+
 function metricText(block: SlideBlock): string {
   return joinChineseClauses(block.metrics.map((metric) => `${metric.label}：${metric.value}`));
 }
@@ -51,7 +63,7 @@ export function semanticBindingValues(field: BindingField, block: SlideBlock, ro
   if (field === "title" || field === "figureRef") return [normalizeChinesePunctuation(block.title)];
   if (field === "body" || field === "narrativeBody") return [joinChineseClauses([block.body, ...block.bullets])];
   if (field === "shortTitle") return [shortTitle(block)];
-  if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return [ROLE_LABELS[role]];
+  if (["label", "stepLabel", "stageLabel", "itemLabel", "nodeLabel"].includes(field)) return [auxiliaryLabel(block)];
   if (["sequence", "stepNumber", "stageNumber"].includes(field)) return [String(index + 1).padStart(2, "0")];
   if (field === "bullet") return [block.bullets[0] ?? block.title];
   if (field === "metric") return [metricText(block) || block.title];

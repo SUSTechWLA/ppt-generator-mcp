@@ -90,15 +90,25 @@ function boundedHeading(value: string | undefined, fallback: string, maximum: nu
   return selected;
 }
 
+function stripHeadingNumber(value: string): string {
+  const stripped = value
+    .replace(/^[\d一二三四五六七八九十百千]+(?:[.．、·]?\s*[\d一二三四五六七八九十百千]+)*[.．、]?\s*/u, "")
+    .trim();
+  return stripped || value;
+}
+
 function buildPageMetadata(partition: ExplicitPagePartition, pageIndex: number): PageMetadata {
   const headings = partition.headingMetadata;
+  const level2 = headings.level2 ?? headings.level1 ?? "方案响应";
+  const level3 = headings.level3 ?? level2;
   return {
     number: partition.pageNumber,
-    sectionTitle: boundedHeading(headings.level1, "展示方案", 60, "一级标题"),
+    title: partition.title.slice(0, 40),
+    sectionTitle: boundedHeading(headings.level1 ?? "展示方案", "展示方案", 60, "一级标题"),
     partNumber: `PART.${String(pageIndex + 1).padStart(2, "0")}`,
-    partLabel: boundedHeading(headings.level2, "方案响应", 30, "二级标题"),
-    chapterLabel: boundedHeading(headings.level3 ?? headings.level2, "实施方案", 80, "三级标题"),
-    subsectionTitle: boundedHeading(headings.level4 ?? partition.title, "关键要求", 100, "四级标题"),
+    partLabel: boundedHeading(level2, "方案响应", 30, "二级标题"),
+    chapterLabel: boundedHeading(stripHeadingNumber(level2), "实施方案", 80, "二级标题"),
+    subsectionTitle: boundedHeading(headings.level4 ?? stripHeadingNumber(level3), "关键要求", 100, "四级标题"),
   };
 }
 

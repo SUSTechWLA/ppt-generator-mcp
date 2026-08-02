@@ -22,7 +22,7 @@ export async function executeRepairs(input: {
   actions: RepairAction[];
   source: SourceDocument;
   rewriteBlock?: (block: SlideBlock, action: Extract<RepairAction, { type: "rewrite_block" }>) => Promise<SlideBlock>;
-  regenerateAsset?: (assetId: string, state: RepairState) => Promise<GeneratedAsset>;
+  regenerateAsset?: (assetId: string, state: RepairState) => Promise<GeneratedAsset | undefined>;
   switchTemplate?: (state: RepairState) => Promise<string>;
 }): Promise<RepairState> {
   let state: RepairState = structuredClone(input.state);
@@ -49,6 +49,7 @@ export async function executeRepairs(input: {
       }
     } else if (action.type === "regenerate_asset" && input.regenerateAsset) {
       const asset = await input.regenerateAsset(action.targetId, state);
+      if (!asset) continue;
       const index = state.assets.findIndex((candidate) => candidate.id === asset.id);
       if (index >= 0) state.assets[index] = asset;
     } else if (action.type === "switch_template" && !state.templateSwitched && input.switchTemplate) {

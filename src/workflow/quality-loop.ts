@@ -14,6 +14,7 @@ export interface AttemptResult extends ComposedAttempt {
   quality: QualityReport;
   actions: RepairAction[];
   state: RepairState;
+  repairError?: string;
 }
 
 export interface QualityLoopInput {
@@ -45,7 +46,16 @@ export async function runQualityLoop(input: QualityLoopInput): Promise<QualityLo
       ? routeRepairs(quality, { attempt, templateSwitched: state.templateSwitched })
       : [];
     attempts.push({ ...composed, attempt, quality, actions, state });
-    if (attempt < input.maxAttempts) state = await input.repair({ state, actions, attempt });
+    if (attempt < input.maxAttempts) {
+      try {
+        state = await input.repair({ state, actions, attempt });
+      } catch (error) {
+        // A failed repair must not abort the whole run. Record the reason and
+        // keep the current attempt as the last one so best_effort can select it.
+        attempts[attempts.length - 1].repairError = error instanceof Error ? error.message : String(error);
+        break;
+      }
+    }
   }
 
   const selected = attempts

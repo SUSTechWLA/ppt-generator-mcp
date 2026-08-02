@@ -56,7 +56,9 @@ const processSource = `<page 1>
 项目启动后依次完成现场交接、任务分派、过程巡查和结果复核。每项任务记录责任人、完成时限和验收结果，异常事项进入整改闭环。`;
 
 const PRE_DIVERSITY_PLAN_ID = "11111111-1111-4111-8111-111111111111";
-const PRE_DIVERSITY_PLAN_FINGERPRINT = "265b2a56ec1fb9c90bac00e56187e3b28586e7180a3307b5bf14224d86111bb5";
+// Golden value for the current deterministic projection (source-grounded titles,
+// derived conclusion, page title metadata). Recompute when the plan projection changes.
+const PRE_DIVERSITY_PLAN_FINGERPRINT = "1c40b3770666ea7a3e1c17417f0bd895ebd764637fc466dea649ff3dcda3c66d";
 
 const templateRoot = fileURLToPath(new URL("../templates", import.meta.url));
 

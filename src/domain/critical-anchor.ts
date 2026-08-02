@@ -25,10 +25,10 @@ const PATTERNS: Array<{ kind: CriticalAnchorKind; expression: RegExp }> = [
   { kind: "time", expression: /(?:\d[\d,.]*|[零一二三四五六七八九十百千万两]+)(?:个工作日|工作日|分钟|小时|天|日|周|个月|月|年)(?:内|前|后)?/gu },
   { kind: "time", expression: /每日|每周|每月|年度|月度|周期|定期|临时/gu },
   { kind: "number", expression: /(?:\d[\d,.]*(?:%|万元|元|㎡|家|个|名|项|次|台|套)?|[零一二三四五六七八九十百千万两]+(?:家|个|名|项|次|台|套))/gu },
-  { kind: "negation", expression: /不得|不应|不能|不可|不少于|不超过|未经|未(?:完成|达到|通过|取得|收到|发现|发生|履行|执行|提交|批准|确认|验收|处理|整改|关闭|解决|中断|遗漏)|无需|无(?:中断|遗漏|停顿|异常|差错|缺失|风险|影响|变更|故障|损坏|泄漏|空缺)|严禁|禁止/gu },
+  { kind: "negation", expression: /不得|不应|不能|不可|不少于|不超过|未经|未(?:完成|达到|通过|取得|收到|发现|发生|履行|执行|提交|批准|确认|验收|处理|整改|关闭|解决|中断|遗漏|纳入|列入|涉及)|无需|无(?:中断|遗漏|停顿|异常|差错|缺失|风险|影响|变更|故障|损坏|泄漏|空缺)|不承担|不包含|不包括|不负责|不含|排除|除外|严禁|禁止/gu },
   { kind: "approval", expression: /书面申请|书面批准|采购人审核|采购人批准|审核|审批|批准|同意|许可|签字/gu },
   { kind: "condition", expression: /仅限|只有|除非|如果|若|如遇|当[一-鿿]{0,12}时|在[一-鿿]{1,16}情况下|前提/gu },
-  { kind: "obligation", expression: /必须|应当|应在|应于|须|需在|急需|必需|不得|不应|不能|不可|未经|严禁|禁止|要求|确保|保证|至少|不少于|不超过/gu },
+  { kind: "obligation", expression: /必须|应当|应在|应于|须|需在|急需|必需|不得|不应|不能|不可|未经|严禁|禁止|要求|确保|保证|至少|不少于|不超过|承担|负责|履行|保障|责任|义务|甲方|乙方|丙方|委托方|受托方/gu },
   { kind: "name", expression: /《[^》]+》|“[^”]+”|「[^」]+」|\b[A-Z][A-Za-z0-9._-]{1,30}\b|[一-鿿]{2,12}(?:壹号|一号|二号|三号|四号|五号|六号|七号|八号|九号|十号)|[一-鿿A-Za-z0-9]{2,24}(?:项目|中心|大学|学校|学院|总部|华府|雅苑|佳苑|楼|阁|园|公园|广场|道路|路|街道|公司|集团|委员会|政府|银行|医院|局|馆|站|所|市|县|区|镇|村)/gu },
 ];
 
@@ -79,7 +79,7 @@ export function extractCanonicalAnchors(text: string): CanonicalCriticalAnchor[]
   // Enumeration/location structures can carry names outside the leading
   // subject. Preserve each complete short clause rather than guessing NER.
   const structuralClause = /(?:包括|包含|列举|分别为|位于|坐落于|覆盖范围|服务范围)/u;
-  const strongObligationClause = /(?:必须|应当|应在|应于|须|需在|急需|必需|不得|不应|不能|不可|未经|严禁|禁止|要求|确保|保证|至少|不少于|不超过)/u;
+  const strongObligationClause = /(?:必须|应当|应在|应于|须|需在|急需|必需|不得|不应|不能|不可|未经|严禁|禁止|要求|确保|保证|至少|不少于|不超过|承担|责任|义务|甲方|乙方|丙方|委托方|受托方)/u;
   const excludedBareCompounds = new Set([
     "响应", "适应", "反应", "对应", "供应", "效应", "相应",
     "应急", "应用", "应聘", "应届", "应收", "应付", "应力", "应变", "应试", "应景", "应酬",

@@ -2,7 +2,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import type { AppConfig } from "./config/env.js";
-import type { GeneratedAsset } from "./domain/slide-spec.js";
 import type { PptMcpDependencies } from "./mcp/register-tools.js";
 import {
   createOpenAICompatibleImageProvider,
@@ -202,7 +201,8 @@ export function createProductionDependencies(
           },
           regenerateAsset: async (assetId, current) => {
             const spec = current.spec.assets.find((candidate) => candidate.id === assetId);
-            if (!spec || !imageProvider) return current.assets.find((candidate) => candidate.id === assetId) as GeneratedAsset;
+            const existing = current.assets.find((candidate) => candidate.id === assetId);
+            if (!spec || !imageProvider) return existing;
             const [asset] = await generateAssets({
               specs: [spec],
               provider: imageProvider,

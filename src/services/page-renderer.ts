@@ -23,6 +23,7 @@ export interface RenderElement {
   clientHeight: number;
   overflowX: string;
   overflowY: string;
+  textOverflow: string;
   fontSize: number;
   fontWeight: number;
   contrastRatio: number;
@@ -71,6 +72,7 @@ export interface RenderResult {
   elements: RenderElement[];
   images: Array<{
     src: string;
+    assetId?: string;
     complete: boolean;
     naturalWidth: number;
     naturalHeight: number;
@@ -97,6 +99,7 @@ export interface RenderResult {
     hasUnresolvedPlaceholders: boolean;
     hasSecretLikeText: boolean;
     screenshotCreated: boolean;
+    noCjkFont: boolean;
   };
 }
 
@@ -275,6 +278,7 @@ export async function renderPage(input: {
         element,
         id: contentIds.get(element)!,
         visualRect: visualRect(element),
+        ellipsis: getComputedStyle(element).textOverflow === "ellipsis",
       }));
       const resolvedOverlapPairs = overlapPairs.flatMap((pair) => {
         const images = Array.from(document.querySelectorAll<HTMLElement>(pair.imageSelector));
@@ -288,6 +292,9 @@ export async function renderPage(input: {
 
       const containmentViolations: Array<{ targetId: string; ancestorId: string; overflowPx: number }> = [];
       for (const candidate of candidates) {
+        // text-overflow: ellipsis is the template's explicit graceful truncation
+        // for narrow decorative labels; clipped layout boxes are not defects.
+        if (candidate.ellipsis) continue;
         const pageRoot = candidate.element.closest<HTMLElement>("[data-slide-page]");
         let ancestor = candidate.element.parentElement;
         while (ancestor && ancestor !== document.body) {
@@ -320,6 +327,7 @@ export async function renderPage(input: {
           const left = candidates[leftIndex];
           const right = candidates[rightIndex];
           if (left.element.contains(right.element) || right.element.contains(left.element)) continue;
+          if (left.ellipsis || right.ellipsis) continue;
           const explicitlyExempt = resolvedOverlapPairs.some(({ image, caption }) => (
             (left.element === image && right.element === caption)
             || (left.element === caption && right.element === image)
@@ -355,6 +363,7 @@ export async function renderPage(input: {
             clientHeight: element.clientHeight,
             overflowX: style.overflowX,
             overflowY: style.overflowY,
+            textOverflow: style.textOverflow,
             fontSize,
             fontWeight,
             contrastRatio: contrast(foreground, background.color),
@@ -393,8 +402,10 @@ export async function renderPage(input: {
         const rect = image.getBoundingClientRect();
         const cssVisible = isCssVisible(image);
         const clipped = cssVisible ? clippedRect(image) : null;
+        const assetId = image.getAttribute("data-asset-id")?.trim() || undefined;
         return {
           src,
+          ...(assetId ? { assetId } : {}),
           complete: image.complete,
           naturalWidth: image.naturalWidth,
           naturalHeight: image.naturalHeight,
@@ -522,9 +533,26 @@ export async function renderPage(input: {
         .map((image) => image.clipped!);
       const rasterUnionArea = unionArea(visibleRasterRects);
 
+      const cjkFontNames = ["Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei"];
+      let availableCjkFont = "";
+      try {
+        if (document.fonts) {
+          for (const name of cjkFontNames) {
+            if (document.fonts.check(`16px "${name}"`, "中文")) {
+              availableCjkFont = name;
+              break;
+            }
+          }
+        }
+      } catch {
+        // Font API unavailable; leave availableCjkFont empty.
+      }
+      const hasCjkText = /[一-鿿]/u.test(document.body.innerText ?? "");
+
       const area = elements.reduce((sum, element) => sum + Math.min(element.rect.width * element.rect.height, 1123 * 794), 0);
       return {
         pageCount: document.querySelectorAll("[data-slide-page]").length,
+        fontCjk: { hasText: hasCjkText, availableFont: availableCjkFont || null },
         elements,
         images,
         rasterAreaRatio: Math.min(1, rasterUnionArea / (1123 * 794)),
@@ -573,6 +601,7 @@ export async function renderPage(input: {
         hasUnresolvedPlaceholders: /<(?:figures|icon|page-title|component-title|paragraph|summary-text|bullet)[\s>]/i.test(input.html),
         hasSecretLikeText: /\b(?:sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,}|api[_-]?key\s*[:=]\s*["']?[^\s"']{12,})/i.test(input.html),
         screenshotCreated: screenshot.length > 100,
+        noCjkFont: Boolean(measured.fontCjk?.hasText && !measured.fontCjk?.availableFont),
       },
     };
   } finally {

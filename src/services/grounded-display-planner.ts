@@ -17,7 +17,7 @@ import type { TemplateProfile } from "../domain/template-profile.js";
 import { WorkflowError } from "../domain/workflow-error.js";
 import { extractCanonicalAnchors } from "../domain/critical-anchor.js";
 import { chineseClauseSeparator, joinChineseClauses } from "../domain/chinese-punctuation.js";
-import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, projectGroundedVisualIntents } from "../domain/slide-projection.js";
+import { groundedRoleForFacts, groundedTitleForGroup, projectGroundedDensity, projectGroundedVisualIntents } from "../domain/slide-projection.js";
 import { effectiveProfilePositions, type EffectiveProfilePosition } from "../domain/profile-capability.js";
 
 export interface GroundedDisplayContext {
@@ -384,7 +384,7 @@ export function planGroundedDisplay(source: SourceDocument, context: GroundedDis
       id,
       order: index,
       role: item.role,
-      title: groundedTitleForRole(item.role),
+      title: groundedTitleForGroup(facts),
       body: joinChineseClauses(
         item.choices.map((choice) => choice.candidate.displayText),
         ALLOWED_FACT_SEPARATOR,

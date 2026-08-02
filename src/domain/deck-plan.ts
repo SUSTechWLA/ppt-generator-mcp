@@ -6,7 +6,7 @@ import { externalAssetInputSchema, hashCanonical, qualitySettingsSchema, sourceF
 import { assetSpecSchema, slideSpecSchema } from "./slide-spec.js";
 import { assetPromptBindingsSchema, templateProfileSchema } from "./template-profile.js";
 import { effectiveProfilePositions, orderedProfileSlots } from "./profile-capability.js";
-import { groundedRoleForFacts, groundedTitleForRole, projectGroundedDensity, projectGroundedVisualIntents, projectSlideSpec } from "./slide-projection.js";
+import { groundedRoleForFacts, groundedTitleForGroup, projectGroundedDensity, projectGroundedVisualIntents, projectSlideSpec } from "./slide-projection.js";
 import { extractFacts } from "../services/fact-extractor.js";
 import { pageBlueprintSchema } from "./page-blueprint.js";
 import { solveTemplateSlots } from "../services/template-slot-solver.js";
@@ -261,7 +261,7 @@ export const deckSlidePlanSchema = z.object({
     const itemFacts = item.sourceFactIds.map((factId) => factsById.get(factId)).filter((fact): fact is NonNullable<typeof fact> => Boolean(fact));
     const expectedRole = itemFacts.length > 0 ? groundedRoleForFacts(itemFacts) : undefined;
     if (!block || block.id !== `block-${index + 1}` || item.id !== `group-${index + 1}`
-      || item.role !== expectedRole || item.title !== groundedTitleForRole(item.role)
+      || item.role !== expectedRole || item.title !== groundedTitleForGroup(itemFacts)
       || block.semanticRole !== item.role || block.title !== item.title || block.body !== item.body
       || !orderedEqual(block.sourceFactIds, item.sourceFactIds)) {
       context.addIssue({ code: "custom", message: "Display items and planned blocks must be exact deterministic projections", path: ["plannedSpec", "blocks", index] });
@@ -371,7 +371,7 @@ export const deckSlidePlanSchema = z.object({
   }
   const expectedVisualIntents = projectGroundedVisualIntents({
     pageNumber: slide.page.number,
-    title: slide.page.subsectionTitle,
+    title: slide.page.title ?? slide.page.subsectionTitle,
     groups: slide.displayPlan.items,
     sourceFacts: slide.originalSourceFacts,
     maxAssets: profile.imageSlots.maxAssets,
@@ -381,7 +381,7 @@ export const deckSlidePlanSchema = z.object({
     context.addIssue({ code: "custom", message: "Deterministic grounded assets do not satisfy the profile image cardinality", path: ["plannedSpec", "assets"] });
   }
   const expectedSpec = projectSlideSpec({
-    title: slide.page.subsectionTitle,
+    title: slide.page.title ?? slide.page.subsectionTitle,
     density: projectGroundedDensity(slide.originalSourceFacts),
     groups: slide.displayPlan.items,
     assets: expectedVisualIntents,
@@ -441,7 +441,7 @@ export const plannedDeckSchema = z.object({
       || !canonicalEqual(slide.originalSourceFacts, expectedFacts)
       || !orderedEqual(slide.originalSourceFactIds, expectedFacts.map((fact) => fact.id))
       || canonicalSections.length !== 1
-      || slide.page.subsectionTitle !== canonicalSections[0]?.heading) {
+      || slide.page.title !== canonicalSections[0]?.heading) {
       context.addIssue({
         code: "custom",
         message: "Original facts must be deterministically re-extracted from immutable source sections and global source order",

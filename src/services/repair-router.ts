@@ -27,7 +27,7 @@ export function routeRepairs(
       if (/contrast|对比度/i.test(issue.evidence)) actions.push({ type: "adjust_token", token: "contrast-mode", value: "high", reasonIssueId: issue.id });
       else if (issue.targetId?.startsWith("block-")) actions.push({ type: "rewrite_block", targetId: issue.targetId, reasonIssueId: issue.id });
     } else if (issue.category === "asset" && issue.targetId) {
-      actions.push({ type: "regenerate_asset", targetId: issue.targetId.replace(/^image-/, "img-"), reasonIssueId: issue.id });
+      actions.push({ type: "regenerate_asset", targetId: issue.targetId, reasonIssueId: issue.id });
     } else if (issue.category === "fidelity") {
       const factId = issue.evidence.match(/fact-\d+/)?.[0];
       if (factId && issue.targetId) actions.push({ type: "restore_fact", factId, targetId: issue.targetId, reasonIssueId: issue.id });
